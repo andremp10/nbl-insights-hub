@@ -142,8 +142,8 @@ export function ChatInput({
             disabled={isLoading}
             rows={1}
             className={cn(
-              'w-full resize-none bg-transparent px-4 py-3.5 pr-24 text-sm',
-              'placeholder:text-muted-foreground/50',
+              'w-full resize-none bg-transparent px-4 py-3.5 pr-24 text-sm font-medium',
+              'text-white placeholder:text-white/40',
               'focus:outline-none',
               'disabled:cursor-not-allowed disabled:opacity-50'
             )}
