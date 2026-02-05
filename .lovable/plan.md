@@ -1,237 +1,436 @@
 
-# Plano: Dashboard + Chatbot NLQ — Gráfica NBL
+# Plano: Refatoração UI Apple-like + Edge Function Proxy + Chat NLQ
 
-## Resumo Executivo
-Criar um dashboard financeiro e de pedidos completo no Lovable com tema dark mode premium, mobile-first, integrado a um chatbot de linguagem natural via webhook n8n. O sistema será protegido por senha simples e consumirá dados exclusivamente das Views SQL existentes.
+## Diagnóstico dos Problemas Atuais
 
----
+### 1. Chat NLQ
+- **Problema**: O front chama o webhook n8n diretamente, causando erros 500 intermitentes
+- **Causa**: O n8n retorna formatos de resposta variados (às vezes `{output: "..."}`, às vezes texto puro, às vezes o JSON esperado)
+- **Solução**: Criar Edge Function proxy que normaliza a resposta
 
-## 🗄️ Mapeamento de Dados (Documentação das Views)
+### 2. Supabase Views
+- **Status**: As views `vw_dashboard_financeiro` e `vw_dashboard_pedidos` estão funcionando corretamente
+- **Problema**: O front consulta com filtro `data >= '2026-02-01'` mas os dados estão em 2020-2023
+- **Solução**: Ajustar o filtro de período para mostrar dados existentes ou expandir range
 
-### View: `vw_dashboard_financeiro`
-| Coluna | Tipo | Descrição |
-|--------|------|-----------|
-| `id` | uuid | ID único do lançamento |
-| `descricao` | varchar | Descrição do lançamento |
-| `valor` | numeric | Valor absoluto (sempre positivo) |
-| `data` | date | Data de competência (pagto ou emissão) |
-| `tipo` | text | `'Entrada'` ou `'Saída'` |
-| `categoria` | varchar | Nome da categoria (ou "Sem Categoria") |
-| `categoria_id` | uuid | ID da categoria |
-| `status` | text | `0`=Cancelado, `1`=Pendente, `2`=Pago |
-
-**Filtros já aplicados na view:**
-- ✅ Transferências internas excluídas (`categoria_id != 'c38d3ba0-...'`)
-
-### View: `vw_dashboard_pedidos`
-| Coluna | Tipo | Descrição |
-|--------|------|-----------|
-| `pedido_id` | uuid | ID do pedido |
-| `cliente_id` | uuid | ID do cliente |
-| `cliente_nome` | text | Nome normalizado (PF ou PJ) |
-| `data_criacao` | timestamp | Data de criação do pedido |
-| `status_pedido` | text | `Em Análise`, `Em Produção`, `Enviado`, `Problema no Arquivo`, `Finalizado` |
-| `qtde_itens` | integer | Quantidade de itens |
-| `valor_total` | numeric | Valor total do pedido |
-| `frete_valor` | numeric | Valor do frete |
-| `is_finalizado` | boolean | Se o pedido foi concluído |
-| `is_atrasado` | boolean | Se está em atraso |
-| `dias_em_atraso` | integer | Dias de atraso |
+### 3. UI/UX
+- **Problema**: Layout funcional mas não premium, falta refinamento Apple-like
+- **Solução**: Refatorar design system completo com glassmorphism, tipografia Inter, espaçamentos maiores
 
 ---
 
-## 🏗️ Arquitetura da Solução
+## Arquitetura da Solução
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    USUÁRIO (Mobile/Desktop)              │
-│                          ↓                               │
-│    ┌─────────────────────────────────────────────────┐  │
-│    │           LOVABLE (React + Tailwind)             │  │
-│    │  ┌──────────┬──────────┬──────────┬──────────┐  │  │
-│    │  │  Auth    │ Financ.  │ Pedidos  │  Chat    │  │  │
-│    │  │ (senha)  │Dashboard │Dashboard │   NLQ    │  │  │
-│    │  └────┬─────┴────┬─────┴────┬─────┴────┬─────┘  │  │
-│    │       │          │          │          │        │  │
-│    └───────┼──────────┼──────────┼──────────┼────────┘  │
-│            │          │          │          │            │
-│    ┌───────▼──────────▼──────────▼──────────┘           │
-│    │              SUPABASE                               │
-│    │    vw_dashboard_financeiro                         │
-│    │    vw_dashboard_pedidos                            │
-│    └────────────────────────────────────────────────────┘
-│                                    │
-│                          ┌─────────▼─────────┐
-│                          │   n8n WEBHOOK     │
-│                          │ (Agente NLQ)      │
-│                          └───────────────────┘
-└─────────────────────────────────────────────────────────┘
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                         USUÁRIO                                  │
+│                            ↓                                     │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │              LOVABLE (React + Tailwind)                      ││
+│  │  ┌──────────┬──────────┬──────────┬────────────────────┐    ││
+│  │  │   Auth   │ Financ.  │ Pedidos  │   Chat (ChatGPT)   │    ││
+│  │  │  (senha) │Dashboard │Dashboard │    Apple-like      │    ││
+│  │  └────┬─────┴────┬─────┴────┬─────┴─────────┬──────────┘    ││
+│  │       │          │          │               │               ││
+│  └───────┼──────────┼──────────┼───────────────┼───────────────┘│
+│          │          │          │               │                 │
+│  ┌───────▼──────────▼──────────▼───────────────┘                │
+│  │              SUPABASE                                         │
+│  │    ┌────────────────────────────────────┐                    │
+│  │    │  vw_dashboard_financeiro           │                    │
+│  │    │  vw_dashboard_pedidos              │                    │
+│  │    └────────────────────────────────────┘                    │
+│  │                                                               │
+│  │    ┌────────────────────────────────────┐                    │
+│  │    │  Edge Function: nlq-proxy          │                    │
+│  │    │  - Recebe mensagem do front        │                    │
+│  │    │  - Faz POST para n8n               │                    │
+│  │    │  - Normaliza resposta              │                    │
+│  │    │  - Retorna JSON padronizado        │                    │
+│  │    └───────────────┬────────────────────┘                    │
+│  │                    │                                          │
+│  └────────────────────┼──────────────────────────────────────────┘
+│                       │                                           
+│           ┌───────────▼───────────┐                              
+│           │   n8n WEBHOOK         │                              
+│           │   (Agente NLQ)        │                              
+│           └───────────────────────┘                              
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📱 Estrutura de Páginas e Navegação
+## Fase 1: Edge Function `nlq-proxy`
 
-### Página 1: `/auth` — Acesso com Senha Simples
-- Tela única com campo de senha
-- Senha armazenada no LocalStorage após validação
-- Redirecionamento para `/financeiro`
+### 1.1 Criar a Edge Function
+Criar `supabase/functions/nlq-proxy/index.ts`:
 
-### Página 2: `/financeiro` — Dashboard Financeiro
-**Sidebar retrátil** com links para:
-- Financeiro (ativo)
-- Pedidos
-- Chat
-
-**Conteúdo:**
-1. **Filtro de período global** (afeta tudo)
-   - Atalhos: "Mês Atual", "Últimos 30 dias"
-   - Seletor de período personalizado (datepicker)
-
-2. **KPIs (3 cards)**
-   - 💰 **Receita Total** = SUM(valor) onde tipo='Entrada' e status='2' (pagos)
-   - 💸 **Despesas Totais** = SUM(valor) onde tipo='Saída' e status='2'
-   - 📊 **Resultado Líquido** = Receita - Despesa (verde se positivo, vermelho se negativo)
-
-3. **Gráfico Donut — Composição de Custos**
-   - Fonte: Saídas agrupadas por categoria
-   - Fatias < 2% consolidadas em "Outros"
-   - Legenda abaixo, cores harmônicas
-
-4. **Gráfico Barras Horizontais — Top 10 Categorias de Despesas**
-   - Ordenado do maior para menor
-   - Tooltip com valor e percentual
-
-5. **Lista de Transações**
-   - Colunas: Data | Descrição | Categoria | Valor (colorido por tipo)
-   - Badge de status: 🟢 Pago | 🟡 Pendente | 🔴 Cancelado
-   - Paginação (20 por página)
-
-### Página 3: `/pedidos` — Dashboard de Pedidos
-**Conteúdo:**
-1. **Mesmo filtro de período global**
-
-2. **KPIs (4 cards)**
-   - 📦 **Total de Pedidos** = COUNT(*)
-   - 💵 **Faturamento** = SUM(valor_total)
-   - 🚀 **Em Produção** = COUNT onde status_pedido='Em Produção'
-   - ⚠️ **Atrasados** = COUNT onde is_atrasado=true
-
-3. **Gráfico Pizza — Status dos Pedidos**
-   - Distribuição por status_pedido
-
-4. **Gráfico Barras Horizontais — Top 10 Clientes**
-   - Agrupado por cliente_nome, soma de valor_total
-   - Ordenado do maior para menor
-
-5. **Lista de Pedidos Recentes**
-   - Colunas: Data | Cliente | Status | Valor | Itens
-   - Badge de status colorido
-   - Link para expandir detalhes
-
-### Página 4: `/chat` — Chatbot NLQ
-**Conteúdo:**
-- Interface de chat estilo mensageria
-- Balões de conversa (usuário à direita, bot à esquerda)
-- Campo de input na parte inferior
-- Integração com webhook n8n
-
-**Comportamento:**
-- Envio via POST ao endpoint do n8n
-- Resposta parseada e exibida com:
-  - Texto principal
-  - Highlights (números em destaque)
-  - Suggested actions (botões para navegar/filtrar)
-  - Chart payloads (gráficos inline quando aplicável)
-
----
-
-## 🎨 Design System (Dark Mode Premium)
-
-| Elemento | Cor |
-|----------|-----|
-| Background | `#0e1117` |
-| Card/Surface | `#1a1f2e` |
-| Border | `#2d3548` |
-| Text Primary | `#f1f5f9` |
-| Text Secondary | `#94a3b8` |
-| Accent (Entrada/Positivo) | `#22c55e` (green-500) |
-| Accent (Saída/Negativo) | `#ef4444` (red-500) |
-| Primary (botões) | `#3b82f6` (blue-500) |
-| Chart Colors | Paleta harmônica (8-10 cores) |
-
-**Tipografia:** Inter/System fonts, legível em mobile
-
----
-
-## 🔗 Integração Webhook n8n
-
-**Endpoint:** `POST https://chez-n8n-webhook.jsf0kc.easypanel.host/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6`
-
-**Payload de Request:**
-```json
-{
-  "app": "grafica_nbl_lovable",
-  "session_id": "uuid-gerado-no-front",
-  "timezone": "America/Fortaleza",
-  "message": "Quanto foi o faturamento em janeiro?",
-  "context": {
-    "date_range": { "from": "2026-01-01", "to": "2026-01-31" },
-    "active_module": "financeiro"
+- Receber POST com: `session_id`, `timezone`, `message`, `context`
+- Fazer fetch para webhook n8n com timeout de 15s
+- Normalizar qualquer formato de resposta do n8n para o contrato:
+  ```typescript
+  {
+    ok: boolean;
+    reply?: {
+      text: string;
+      highlights?: { label: string; value: number }[];
+      suggested_actions?: { type: string; from?: string; to?: string; module?: string }[];
+    };
+    error?: { code: string; message: string };
   }
+  ```
+- Tratar: resposta JSON estruturada, resposta `{output: "..."}`, resposta texto puro, timeout, erro 500
+
+### 1.2 CORS Headers
+```typescript
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+```
+
+### 1.3 Atualizar `supabase/config.toml`
+```toml
+project_id = "bcypejzqbcwibvtbbfor"
+
+[functions.nlq-proxy]
+verify_jwt = false
+```
+
+---
+
+## Fase 2: Design System Apple-like Premium
+
+### 2.1 Paleta de Cores (index.css)
+
+```css
+.dark {
+  /* Background Base - mais profundo */
+  --background: 220 15% 5%;
+
+  /* Card/Surface - glassmorphism */
+  --card: 220 15% 8%;
+  --card-foreground: 0 0% 98%;
+
+  /* Borders - sutis */
+  --border: 220 15% 15%;
+  --input: 220 15% 12%;
+  
+  /* Primary - azul vibrante */
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
+  
+  /* Text */
+  --foreground: 0 0% 98%;
+  --muted-foreground: 220 10% 55%;
 }
 ```
 
-**Tratamento de Resposta:**
-- `ok: true` → Renderiza resposta estruturada
-- `ok: false` → Exibe mensagem de erro amigável
-- Timeout (10s) → "O assistente está demorando para responder..."
+### 2.2 Tipografia
+- Font: Inter (já importada)
+- Títulos: font-medium, tracking-tight
+- Body: font-normal, leading-relaxed
+
+### 2.3 Componentes Base
+- Cards com: `backdrop-blur-xl bg-white/[0.02] border-white/[0.05]`
+- Shadows: `shadow-2xl shadow-black/20`
+- Radius: `rounded-2xl` para cards principais
 
 ---
 
-## 📋 Entregáveis (Ordem de Implementação)
+## Fase 3: Refatorar Layout Global
 
-### Fase 1: Estrutura Base
-1. Configurar tema dark mode no Tailwind
-2. Criar layout com Sidebar retrátil (mobile-first)
-3. Implementar página de autenticação por senha simples
-4. Criar componente de filtro de período global
+### 3.1 DashboardLayout
+- Container central com `max-w-7xl mx-auto`
+- Sidebar mais estreita e elegante
+- Header com blur e bordas sutis
+- Padding generoso: `p-6 md:p-8`
 
-### Fase 2: Dashboard Financeiro
-5. Criar cards de KPI reutilizáveis
-6. Implementar gráfico Donut (Recharts)
-7. Implementar gráfico Barras Horizontais
-8. Criar tabela de transações com paginação
-9. Conectar tudo à view `vw_dashboard_financeiro`
+### 3.2 AppSidebar
+- Fundo: `bg-black/40 backdrop-blur-xl`
+- Logo: redesenhar com gradiente sutil
+- Menu items: hover com glow suave
+- Indicador ativo: barra lateral animada
 
-### Fase 3: Dashboard Pedidos
-10. Criar KPIs específicos de pedidos
-11. Implementar gráfico Pizza de status
-12. Implementar ranking de clientes
-13. Criar tabela de pedidos
-14. Conectar à view `vw_dashboard_pedidos`
-
-### Fase 4: Chatbot NLQ
-15. Criar interface de chat
-16. Implementar integração com webhook
-17. Criar componentes de resposta estruturada
-18. Implementar suggested actions
-19. Adicionar loading states e tratamento de erros
-
-### Fase 5: Polimento
-20. Otimizar para mobile (testes responsivos)
-21. Adicionar loading skeletons
-22. Melhorar animações e transições
-23. Testes de consistência numérica (chat vs dashboard)
+### 3.3 DateFilterBar
+- Botões com estilo Apple segmented control
+- Popover de calendário com glassmorphism
 
 ---
 
-## ✅ Critérios de Sucesso
+## Fase 4: Chat Interface (ChatGPT-like)
 
-- [ ] Dashboard carrega em < 2 segundos
-- [ ] Filtro de período afeta todos os componentes
-- [ ] Números do chat batem com dashboard no mesmo período
-- [ ] Interface legível e funcional em mobile
-- [ ] Gráficos responsivos e com tooltips
-- [ ] Tratamento de erros em todas as requisições
-- [ ] Senha protege acesso à aplicação
+### 4.1 Instalar Dependência
+```bash
+framer-motion
+```
+
+### 4.2 Estrutura do Chat
+
+```text
+┌────────────────────────────────────────┐
+│  Header: "NBL Assistant" + Limpar      │
+├────────────────────────────────────────┤
+│                                        │
+│  ┌──────────────────────────────────┐  │
+│  │ 🤖 Olá! Como posso ajudar?       │  │
+│  └──────────────────────────────────┘  │
+│                                        │
+│        ┌──────────────────────────┐    │
+│        │ Quanto foi o faturamento │    │
+│        │ de janeiro?              │ 👤 │
+│        └──────────────────────────┘    │
+│                                        │
+│  ┌──────────────────────────────────┐  │
+│  │ Em janeiro, a receita total...  │  │
+│  │                                  │  │
+│  │ ┌────────────┐ ┌────────────┐   │  │
+│  │ │ Receita    │ │ Despesas   │   │  │
+│  │ │ R$ 123.456 │ │ R$ 98.765  │   │  │
+│  │ └────────────┘ └────────────┘   │  │
+│  │                                  │  │
+│  │ [Ver período] [Ir p/ Financeiro]│  │
+│  └──────────────────────────────────┘  │
+│                                        │
+│  ● ● ● (typing indicator)              │
+│                                        │
+├────────────────────────────────────────┤
+│ ┌────────────────────────────────┐ [→] │
+│ │ Digite sua pergunta...         │     │
+│ └────────────────────────────────┘     │
+└────────────────────────────────────────┘
+```
+
+### 4.3 Componentes do Chat
+
+1. **ChatContainer**: Layout principal com scroll
+2. **MessageBubble**: Balões com animação de entrada
+3. **HighlightCards**: Cards inline para valores
+4. **SuggestedActions**: Botões de ação
+5. **TypingIndicator**: Três pontos pulsando
+6. **ChatInput**: Input fixo com textarea expansível
+
+### 4.4 Animações (Framer Motion)
+- Mensagens: slide in + fade
+- Typing: dots pulsing
+- Send button: scale on tap
+
+---
+
+## Fase 5: Refatorar Dashboards
+
+### 5.1 KPICard Premium
+- Glassmorphism background
+- Ícone com glow sutil
+- Valor com gradiente ou cor semântica
+- Hover com elevação suave
+
+### 5.2 Charts
+- Remover bordas duras
+- Cores harmônicas
+- Tooltips com blur
+- Legends mais discretas
+
+### 5.3 Tables
+- Header fixo com blur
+- Rows com hover sutil
+- Bordas quase invisíveis
+- Paginação minimalista
+
+---
+
+## Fase 6: Hook useChatbot Atualizado
+
+### 6.1 Mudanças
+- Chamar `supabase.functions.invoke('nlq-proxy', ...)` em vez de fetch direto
+- Timeout de 30s no cliente
+- Tratamento de erros padronizado
+- Suporte a resposta normalizada
+
+### 6.2 Interface
+
+```typescript
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  highlights?: { label: string; value: number }[];
+  suggestedActions?: { type: string; ... }[];
+  isError?: boolean;
+}
+```
+
+---
+
+## Entregáveis por Ordem
+
+### Commit 1: Edge Function
+- [ ] `supabase/functions/nlq-proxy/index.ts`
+- [ ] Atualizar `supabase/config.toml`
+
+### Commit 2: Design System
+- [ ] Atualizar `src/index.css` com nova paleta
+- [ ] Atualizar `tailwind.config.ts` com novos tokens
+- [ ] Adicionar animações e utilities
+
+### Commit 3: Layout Global
+- [ ] Refatorar `DashboardLayout.tsx`
+- [ ] Refatorar `AppSidebar.tsx`
+- [ ] Refatorar `DateFilterBar.tsx`
+
+### Commit 4: Chat NLQ
+- [ ] Instalar `framer-motion`
+- [ ] Criar componentes de chat
+- [ ] Refatorar `Chat.tsx`
+- [ ] Atualizar `useChatbot.ts`
+
+### Commit 5: Dashboards
+- [ ] Refatorar `KPICard.tsx`
+- [ ] Refatorar `DonutChart.tsx`
+- [ ] Refatorar `HorizontalBarChart.tsx`
+- [ ] Refatorar `TransactionsTable.tsx`
+- [ ] Refatorar `OrdersTable.tsx`
+
+### Commit 6: Polimento
+- [ ] Testar responsividade
+- [ ] Ajustar cores e espaçamentos
+- [ ] Validar fluxo de chat end-to-end
+
+---
+
+## Detalhes Técnicos
+
+### Edge Function `nlq-proxy`
+
+```typescript
+// supabase/functions/nlq-proxy/index.ts
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const N8N_WEBHOOK_URL = "https://chez-n8n-webhook.jsf0kc.easypanel.host/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  try {
+    const body = await req.json();
+    
+    // Forward to n8n with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const n8nResponse = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app: 'grafica_nbl_lovable',
+        session_id: body.session_id,
+        timezone: body.timezone || 'America/Fortaleza',
+        message: body.message,
+        context: body.context,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    const rawData = await n8nResponse.text();
+    
+    // Normalize response
+    let reply = { text: '', highlights: [], suggested_actions: [] };
+    
+    try {
+      const parsed = JSON.parse(rawData);
+      
+      if (parsed.reply?.text) {
+        // Already structured
+        reply = parsed.reply;
+      } else if (parsed.output) {
+        // n8n format {output: "..."}
+        reply.text = parsed.output;
+      } else if (typeof parsed === 'string') {
+        reply.text = parsed;
+      } else {
+        reply.text = JSON.stringify(parsed);
+      }
+    } catch {
+      // Plain text response
+      reply.text = rawData;
+    }
+
+    return new Response(JSON.stringify({ ok: true, reply }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    const isTimeout = error.name === 'AbortError';
+    
+    return new Response(JSON.stringify({
+      ok: false,
+      error: {
+        code: isTimeout ? 'TIMEOUT' : 'INTERNAL_ERROR',
+        message: isTimeout 
+          ? 'O assistente está demorando para responder. Tente novamente.'
+          : 'Erro ao processar sua pergunta. Tente novamente.',
+      },
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: isTimeout ? 504 : 500,
+    });
+  }
+});
+```
+
+### CSS Global Atualizado
+
+```css
+.dark {
+  --background: 220 15% 5%;
+  --foreground: 0 0% 98%;
+  --card: 220 15% 8%;
+  --card-foreground: 0 0% 98%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
+  --border: 0 0% 100% / 8%;
+  --muted-foreground: 220 10% 55%;
+}
+
+/* Glassmorphism utilities */
+.glass {
+  @apply backdrop-blur-xl bg-white/[0.02] border border-white/[0.05];
+}
+
+.glass-hover {
+  @apply hover:bg-white/[0.04] transition-colors;
+}
+
+/* Chat animations */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+```
+
+---
+
+## Critérios de Sucesso
+
+- [ ] Edge Function deployed e respondendo em menos de 15s
+- [ ] Chat renderiza respostas corretamente (texto + highlights + actions)
+- [ ] UI consistente com vibe Apple/ChatGPT
+- [ ] Dashboards carregando dados das views
+- [ ] Filtro de período funcional em todas as páginas
+- [ ] Responsivo e bonito em mobile
+- [ ] Zero erros de console críticos
