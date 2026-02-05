@@ -1,5 +1,6 @@
- import { DollarSign, ShoppingCart, MessageSquare, LogOut } from 'lucide-react';
+ import { DollarSign, ShoppingCart, MessageSquare, LogOut, Sparkles } from 'lucide-react';
  import { NavLink, useLocation } from 'react-router-dom';
+ import { motion } from 'framer-motion';
  import { useAuth } from '@/contexts/AuthContext';
  import {
    Sidebar,
@@ -28,7 +29,7 @@
      icon: ShoppingCart,
    },
    {
-     title: 'Chat',
+     title: 'Assistente',
      url: '/chat',
      icon: MessageSquare,
    },
@@ -41,27 +42,32 @@
    const collapsed = state === 'collapsed';
  
    return (
-     <Sidebar className="border-r border-border bg-sidebar">
-       <SidebarHeader className="border-b border-border p-4">
-         <div className="flex items-center gap-2">
-           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
-             N
+     <Sidebar className="border-r border-sidebar-border bg-sidebar-background/80 backdrop-blur-xl">
+       <SidebarHeader className="border-b border-sidebar-border/50 p-5">
+         <div className="flex items-center gap-3">
+           <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-semibold shadow-lg shadow-primary/20">
+             <Sparkles className="h-4 w-4" />
            </div>
            {!collapsed && (
-             <span className="text-lg font-semibold text-sidebar-foreground">
-               NBL Dashboard
-             </span>
+             <div className="flex flex-col">
+               <span className="text-sm font-semibold text-sidebar-foreground tracking-tight">
+                 NBL Insights
+               </span>
+               <span className="text-[10px] text-muted-foreground font-medium">
+                 Hub
+               </span>
+             </div>
            )}
          </div>
        </SidebarHeader>
  
        <SidebarContent>
-         <SidebarGroup>
-           <SidebarGroupLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+         <SidebarGroup className="px-3 py-4">
+           <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-medium px-3 mb-2">
              Menu Principal
            </SidebarGroupLabel>
            <SidebarGroupContent>
-             <SidebarMenu>
+             <SidebarMenu className="space-y-1">
                {menuItems.map((item) => {
                  const isActive = location.pathname === item.url;
                  return (
@@ -70,13 +76,20 @@
                        <NavLink
                          to={item.url}
                          className={cn(
-                           'flex items-center gap-3 rounded-lg px-3 py-2 transition-colors',
+                           'relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200',
                            isActive
-                             ? 'bg-primary/10 text-primary'
-                             : 'text-sidebar-foreground hover:bg-sidebar-accent'
+                             ? 'bg-primary/15 text-primary'
+                             : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground'
                          )}
                        >
-                         <item.icon className="h-5 w-5" />
+                         {isActive && (
+                           <motion.div
+                             layoutId="activeIndicator"
+                             className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-full"
+                             transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                           />
+                         )}
+                         <item.icon className={cn("h-[18px] w-[18px]", isActive && "text-primary")} />
                          {!collapsed && <span>{item.title}</span>}
                        </NavLink>
                      </SidebarMenuButton>
@@ -88,14 +101,14 @@
          </SidebarGroup>
        </SidebarContent>
  
-       <SidebarFooter className="border-t border-border p-2">
+       <SidebarFooter className="border-t border-sidebar-border/50 p-3">
          <SidebarMenu>
            <SidebarMenuItem>
              <SidebarMenuButton
                onClick={logout}
-               className="flex items-center gap-3 rounded-lg px-3 py-2 text-destructive hover:bg-destructive/10 transition-colors"
+               className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-200"
              >
-               <LogOut className="h-5 w-5" />
+               <LogOut className="h-[18px] w-[18px]" />
                {!collapsed && <span>Sair</span>}
              </SidebarMenuButton>
            </SidebarMenuItem>

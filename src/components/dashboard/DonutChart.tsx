@@ -1,4 +1,5 @@
  import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+ import { motion } from 'framer-motion';
  import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
  import { Skeleton } from '@/components/ui/skeleton';
  
@@ -32,9 +33,14 @@
    const total = data.reduce((sum, item) => sum + item.value, 0);
  
    return (
-     <Card className="border-border bg-card">
-       <CardHeader>
-         <CardTitle className="text-base">{title}</CardTitle>
+     <motion.div
+       initial={{ opacity: 0, y: 10 }}
+       animate={{ opacity: 1, y: 0 }}
+       transition={{ duration: 0.3, delay: 0.1 }}
+     >
+       <Card className="border-border/50 bg-card/80 backdrop-blur-sm">
+         <CardHeader className="pb-2">
+           <CardTitle className="text-sm font-medium text-foreground">{title}</CardTitle>
        </CardHeader>
        <CardContent>
          {isLoading ? (
@@ -43,7 +49,7 @@
            </div>
          ) : data.length === 0 ? (
            <div className="h-64 flex items-center justify-center">
-             <p className="text-muted-foreground text-sm">Sem dados no período</p>
+             <p className="text-muted-foreground/60 text-sm">Sem dados no período</p>
            </div>
          ) : (
            <div className="h-64">
@@ -52,12 +58,13 @@
                  <Pie
                    data={data}
                    cx="50%"
-                   cy="45%"
-                   innerRadius={50}
-                   outerRadius={80}
+                   cy="42%"
+                   innerRadius={55}
+                   outerRadius={85}
                    paddingAngle={2}
                    dataKey="value"
                    nameKey="name"
+                   stroke="none"
                  >
                    {data.map((_, index) => (
                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -69,9 +76,9 @@
                        const item = payload[0];
                        const pct = total > 0 ? ((item.value as number) / total) * 100 : 0;
                        return (
-                         <div className="bg-popover border border-border rounded-lg p-3 shadow-lg">
+                         <div className="bg-popover/95 backdrop-blur-sm border border-border/50 rounded-xl p-3 shadow-xl">
                            <p className="text-sm font-medium text-foreground">{item.name}</p>
-                           <p className="text-sm text-muted-foreground">
+                           <p className="text-xs text-muted-foreground mt-1">
                              {formatCurrency(item.value as number)} ({pct.toFixed(1)}%)
                            </p>
                          </div>
@@ -84,9 +91,9 @@
                    layout="horizontal"
                    verticalAlign="bottom"
                    align="center"
-                   wrapperStyle={{ fontSize: '12px' }}
+                   wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
                    formatter={(value) => (
-                     <span className="text-muted-foreground text-xs">{value}</span>
+                     <span className="text-muted-foreground/80 text-[11px]">{value}</span>
                    )}
                  />
                </PieChart>
@@ -95,5 +102,6 @@
          )}
        </CardContent>
      </Card>
+     </motion.div>
    );
  }

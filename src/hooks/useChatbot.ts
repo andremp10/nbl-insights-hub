@@ -2,8 +2,7 @@
  import { useDateFilter } from '@/contexts/DateFilterContext';
  import { format } from 'date-fns';
  import { v4 as uuidv4 } from 'uuid';
- 
- const WEBHOOK_URL = 'https://chez-n8n-webhook.jsf0kc.easypanel.host/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
+ import { supabase } from '@/integrations/supabase/client';
  
  export interface ChatHighlight {
    label: string;
@@ -45,6 +44,7 @@
    highlights?: ChatHighlight[];
    suggestedActions?: SuggestedAction[];
    chartPayloads?: ChartPayload[];
+   isError?: boolean;
  }
  
  // Session ID persists across page reloads
@@ -60,7 +60,7 @@
      {
        id: '1',
        role: 'assistant',
-       content: 'Olá! 👋 Sou o assistente da Gráfica NBL. Você pode me perguntar sobre financeiro, vendas, pedidos e muito mais. Por exemplo:\n\n• "Qual foi o faturamento do mês?"\n• "Quais são os principais gastos?"\n• "Quantos pedidos estão em produção?"',
+       content: 'Olá! 👋 Sou o assistente da Gráfica NBL.\n\nVocê pode me perguntar sobre:\n• Financeiro (receitas, despesas, resultado)\n• Pedidos (status, clientes, faturamento)\n• Relatórios e análises',
        timestamp: new Date(),
      },
    ]);
@@ -81,7 +81,6 @@
  
      try {
        const payload = {
-         app: 'grafica_nbl_lovable',
          session_id: SESSION_ID,
          timezone: 'America/Fortaleza',
          message: content.trim(),
@@ -94,60 +93,51 @@
          },
        };
  
-       const controller = new AbortController();
-       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
- 
-       const response = await fetch(WEBHOOK_URL, {
-         method: 'POST',
-         headers: {
-           'Content-Type': 'application/json',
-         },
-         body: JSON.stringify(payload),
-         signal: controller.signal,
+       // Call edge function proxy
+       const { data, error } = await supabase.functions.invoke('nlq-proxy', {
+         body: payload,
        });
  
-       clearTimeout(timeoutId);
- 
-       if (!response.ok) {
-         throw new Error(`HTTP error: ${response.status}`);
+       if (error) {
+         console.error('[useChatbot] Edge function error:', error);
+         throw new Error(error.message || 'Erro ao conectar com o assistente.');
        }
  
-       const data: ChatResponse = await response.json();
+       const response = data as ChatResponse;
  
-       if (data.ok && data.reply) {
+       if (response.ok && response.reply) {
          const assistantMessage: Message = {
            id: (Date.now() + 1).toString(),
            role: 'assistant',
-           content: data.reply.text,
+           content: response.reply.text,
            timestamp: new Date(),
-           highlights: data.reply.highlights,
-           suggestedActions: data.reply.suggested_actions,
-           chartPayloads: data.reply.chart_payloads,
+           highlights: response.reply.highlights,
+           suggestedActions: response.reply.suggested_actions,
+           chartPayloads: response.reply.chart_payloads,
          };
          setMessages(prev => [...prev, assistantMessage]);
        } else {
          const errorMessage: Message = {
            id: (Date.now() + 1).toString(),
            role: 'assistant',
-           content: data.error?.message || 'Desculpe, não consegui processar sua pergunta. Tente novamente.',
+           content: response.error?.message || 'Desculpe, não consegui processar sua pergunta. Tente novamente.',
            timestamp: new Date(),
+           isError: true,
          };
          setMessages(prev => [...prev, errorMessage]);
        }
      } catch (error) {
-       let errorText = 'Desculpe, houve um erro ao processar sua pergunta. Tente novamente.';
-       
-       if (error instanceof Error) {
-         if (error.name === 'AbortError') {
-           errorText = 'O assistente está demorando para responder. Por favor, tente novamente.';
-         }
-       }
+       console.error('[useChatbot] Error:', error);
+       const errorText = error instanceof Error 
+         ? error.message 
+         : 'Desculpe, houve um erro ao processar sua pergunta. Tente novamente.';
  
        const errorMessage: Message = {
          id: (Date.now() + 1).toString(),
          role: 'assistant',
          content: errorText,
          timestamp: new Date(),
+         isError: true,
        };
        setMessages(prev => [...prev, errorMessage]);
      } finally {

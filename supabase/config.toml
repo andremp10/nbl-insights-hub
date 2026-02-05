@@ -1,1 +1,4 @@
-project_id = "bcypejzqbcwibvtbbfor"
+ project_id = "bcypejzqbcwibvtbbfor"
+ 
+ [functions.nlq-proxy]
+ verify_jwt = false
