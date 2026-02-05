@@ -54,13 +54,13 @@ export function DonutChart({ title, data, isLoading }: DonutChartProps) {
           ) : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 0, right: 0, bottom: 20, left: 0 }}>
                   <Pie
                     data={data}
                     cx="50%"
-                    cy="42%"
-                    innerRadius={55}
-                    outerRadius={85}
+                    cy="35%"
+                    innerRadius={50}
+                    outerRadius={75}
                     paddingAngle={2}
                     dataKey="value"
                     nameKey="name"
@@ -99,10 +99,14 @@ export function DonutChart({ title, data, isLoading }: DonutChartProps) {
                     layout="horizontal"
                     verticalAlign="bottom"
                     align="center"
-                    wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
-                    formatter={(value) => (
-                      <span className="text-muted-foreground/80 text-[11px]">{value}</span>
-                    )}
+                    iconType="circle"
+                    iconSize={8}
+                    wrapperStyle={{
+                      fontSize: '10px',
+                      width: '100%',
+                      bottom: 0,
+                      paddingTop: '20px'
+                    }}
                   />
                 </PieChart>
               </ResponsiveContainer>

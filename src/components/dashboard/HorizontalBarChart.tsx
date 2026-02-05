@@ -79,12 +79,12 @@ export function HorizontalBarChart({
                   <YAxis
                     type="category"
                     dataKey="name"
-                    width={90}
+                    width={150}
                     tick={{ fontSize: 10, fill: 'hsl(220, 9%, 55%)' }}
                     axisLine={false}
                     tickLine={false}
                     tickFormatter={(value) =>
-                      value.length > 12 ? `${value.substring(0, 12)}...` : value
+                      value.length > 25 ? `${value.substring(0, 25)}...` : value
                     }
                   />
                   <Tooltip
