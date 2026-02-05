@@ -55,7 +55,7 @@ export function useFinanceiroKPIs() {
   const fromDate = format(dateRange.from, 'yyyy-MM-dd');
   const toDate = format(dateRange.to, 'yyyy-MM-dd');
 
-  return useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['financeiro-kpis', fromDate, toDate],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_financeiro_kpis', {
@@ -74,6 +74,12 @@ export function useFinanceiroKPIs() {
       } as FinanceiroKPIs;
     },
   });
+
+  return {
+    kpis: data || { receita: 0, despesas: 0, resultado: 0 },
+    isLoading,
+    error
+  };
 }
 
 export function useCategoriasDespesas() {
@@ -81,7 +87,7 @@ export function useCategoriasDespesas() {
   const fromDate = format(dateRange.from, 'yyyy-MM-dd');
   const toDate = format(dateRange.to, 'yyyy-MM-dd');
 
-  return useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['financeiro-graficos', fromDate, toDate],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_financeiro_graficos', {
@@ -117,8 +123,9 @@ export function useCategoriasDespesas() {
 
       return mainCats as CategoriaAgrupada[];
     },
-    select: (data) => ({ categorias: data, isLoading: false, error: null }), // Adapt to old return signature if needed, or better yet, query returns { data, isLoading, error } natively
   });
+
+  return { categorias: data || [], isLoading, error };
 }
 
 export function useTransacoesPaginadas(
