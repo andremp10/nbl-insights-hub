@@ -1,5 +1,9 @@
  const N8N_WEBHOOK_URL = "https://chez-n8n-webhook.jsf0kc.easypanel.host/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6";
  
+ // Timeout de 150 segundos (limite máximo do Supabase Edge Functions)
+ // O n8n usa "Respond to Webhook" que pode demorar para processar
+ const TIMEOUT_MS = 150000;
+ 
  const corsHeaders = {
    'Access-Control-Allow-Origin': '*',
    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
@@ -27,6 +31,15 @@
    reply?: ChatReply;
    error?: { code: string; message: string };
  }
+ 
+ // Mensagens de erro padronizadas por código
+ const ERROR_MESSAGES: Record<string, string> = {
+   TIMEOUT: 'O assistente demorou para responder. Por favor, tente uma pergunta mais simples.',
+   UPSTREAM_ERROR: 'O assistente não conseguiu processar sua pergunta. Tente novamente.',
+   BAD_RESPONSE: 'Resposta inesperada do assistente. Tente novamente.',
+   BAD_REQUEST: 'Mensagem inválida. Por favor, digite sua pergunta.',
+   NETWORK_ERROR: 'Erro de conexão com o assistente. Tente novamente em alguns instantes.',
+ };
  
  function normalizeN8NResponse(rawData: string): ChatReply {
    const reply: ChatReply = { text: '', highlights: [], suggested_actions: [] };
@@ -88,7 +101,7 @@
    if (req.method !== 'POST') {
      return new Response(JSON.stringify({ 
        ok: false, 
-       error: { code: 'METHOD_NOT_ALLOWED', message: 'Only POST is allowed' } 
+       error: { code: 'METHOD_NOT_ALLOWED', message: 'Método não permitido.' } 
      }), {
        status: 405,
        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -97,6 +110,7 @@
  
    try {
      const body: ChatRequest = await req.json();
+     const startTime = Date.now();
      
      console.log('[nlq-proxy] Received request:', { 
        session_id: body.session_id, 
@@ -108,7 +122,7 @@
      if (!body.message?.trim()) {
        return new Response(JSON.stringify({
          ok: false,
-         error: { code: 'INVALID_REQUEST', message: 'Mensagem é obrigatória.' },
+         error: { code: 'BAD_REQUEST', message: ERROR_MESSAGES.BAD_REQUEST },
        } as ChatResponse), {
          status: 400,
          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -117,7 +131,7 @@
  
      // Forward to n8n with timeout
      const controller = new AbortController();
-     const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
+     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
  
      try {
        const n8nPayload = {
@@ -128,7 +142,7 @@
          context: body.context || {},
        };
  
-       console.log('[nlq-proxy] Forwarding to n8n:', N8N_WEBHOOK_URL);
+       console.log('[nlq-proxy] Forwarding to n8n (timeout: %dms):', TIMEOUT_MS, N8N_WEBHOOK_URL);
  
        const n8nResponse = await fetch(N8N_WEBHOOK_URL, {
          method: 'POST',
@@ -139,17 +153,18 @@
  
        clearTimeout(timeoutId);
  
-       console.log('[nlq-proxy] n8n response status:', n8nResponse.status);
+       const duration = Date.now() - startTime;
+       console.log('[nlq-proxy] n8n response status: %d (duration: %dms)', n8nResponse.status, duration);
  
        if (!n8nResponse.ok) {
          const errorText = await n8nResponse.text();
-         console.error('[nlq-proxy] n8n error:', errorText);
+         console.error('[nlq-proxy] n8n error (status: %d):', n8nResponse.status, errorText);
          
          return new Response(JSON.stringify({
            ok: false,
            error: { 
-             code: 'N8N_ERROR', 
-             message: 'O assistente não conseguiu processar sua pergunta. Tente novamente.' 
+             code: 'UPSTREAM_ERROR', 
+             message: ERROR_MESSAGES.UPSTREAM_ERROR 
            },
          } as ChatResponse), {
            status: 502,
@@ -158,12 +173,14 @@
        }
  
        const rawData = await n8nResponse.text();
-       console.log('[nlq-proxy] n8n raw response:', rawData.substring(0, 500));
+       console.log('[nlq-proxy] n8n raw response (length: %d):', rawData.length, rawData.substring(0, 300));
  
        // Normalize response to standard format
        const reply = normalizeN8NResponse(rawData);
  
        const response: ChatResponse = { ok: true, reply };
+ 
+       console.log('[nlq-proxy] Success - total duration: %dms', Date.now() - startTime);
  
        return new Response(JSON.stringify(response), {
          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -173,15 +190,14 @@
        clearTimeout(timeoutId);
        
        const isTimeout = fetchError instanceof Error && fetchError.name === 'AbortError';
-       console.error('[nlq-proxy] Fetch error:', isTimeout ? 'TIMEOUT' : fetchError);
+       const duration = Date.now() - startTime;
+       console.error('[nlq-proxy] Fetch error (duration: %dms):', duration, isTimeout ? 'TIMEOUT' : fetchError);
  
        return new Response(JSON.stringify({
          ok: false,
          error: {
            code: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR',
-           message: isTimeout
-             ? 'O assistente está demorando para responder. Por favor, tente novamente.'
-             : 'Erro de conexão com o assistente. Tente novamente em alguns instantes.',
+           message: isTimeout ? ERROR_MESSAGES.TIMEOUT : ERROR_MESSAGES.NETWORK_ERROR,
          },
        } as ChatResponse), {
          status: isTimeout ? 504 : 502,
@@ -195,8 +211,8 @@
      return new Response(JSON.stringify({
        ok: false,
        error: {
-         code: 'INTERNAL_ERROR',
-         message: 'Erro interno ao processar sua pergunta. Tente novamente.',
+         code: 'BAD_RESPONSE',
+         message: ERROR_MESSAGES.BAD_RESPONSE,
        },
      } as ChatResponse), {
        status: 500,

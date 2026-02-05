@@ -4,6 +4,15 @@
  import { v4 as uuidv4 } from 'uuid';
  import { supabase } from '@/integrations/supabase/client';
  
+ // Mensagens de erro amigáveis por código
+ const ERROR_MESSAGES: Record<string, string> = {
+   TIMEOUT: 'O assistente demorou mais de 2 minutos para responder. Tente uma pergunta mais simples ou aguarde e tente novamente.',
+   UPSTREAM_ERROR: 'O assistente está com dificuldades no momento. Por favor, tente novamente em alguns instantes.',
+   BAD_RESPONSE: 'Houve um problema na resposta do assistente. Tente reformular sua pergunta.',
+   BAD_REQUEST: 'Por favor, digite uma mensagem válida.',
+   NETWORK_ERROR: 'Não foi possível conectar ao assistente. Verifique sua conexão e tente novamente.',
+ };
+ 
  export interface ChatHighlight {
    label: string;
    value: number;
@@ -117,10 +126,16 @@
          };
          setMessages(prev => [...prev, assistantMessage]);
        } else {
+           // Mapear código de erro para mensagem amigável
+           const errorCode = response.error?.code || 'UNKNOWN';
+           const friendlyMessage = ERROR_MESSAGES[errorCode] || response.error?.message || 'Desculpe, não consegui processar sua pergunta.';
+           
+           console.warn('[useChatbot] API returned error:', errorCode, response.error?.message);
+ 
          const errorMessage: Message = {
            id: (Date.now() + 1).toString(),
            role: 'assistant',
-           content: response.error?.message || 'Desculpe, não consegui processar sua pergunta. Tente novamente.',
+             content: friendlyMessage,
            timestamp: new Date(),
            isError: true,
          };
@@ -128,9 +143,19 @@
        }
      } catch (error) {
        console.error('[useChatbot] Error:', error);
-       const errorText = error instanceof Error 
-         ? error.message 
-         : 'Desculpe, houve um erro ao processar sua pergunta. Tente novamente.';
+ 
+         // Tentar extrair código de erro se for um erro estruturado
+         let errorText = 'Desculpe, houve um erro ao processar sua pergunta. Tente novamente.';
+         if (error instanceof Error) {
+           // Verificar se é um erro de rede/timeout
+           if (error.message.includes('timeout') || error.message.includes('Timeout')) {
+             errorText = ERROR_MESSAGES.TIMEOUT;
+           } else if (error.message.includes('network') || error.message.includes('Network')) {
+             errorText = ERROR_MESSAGES.NETWORK_ERROR;
+           } else {
+             errorText = error.message;
+           }
+         }
  
        const errorMessage: Message = {
          id: (Date.now() + 1).toString(),
