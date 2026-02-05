@@ -42,7 +42,7 @@ const App = () => (
                       path="/"
                       element={
                         <ProtectedRoute>
-                          <Financeiro />
+                          <Chat />
                         </ProtectedRoute>
                       }
                     />
