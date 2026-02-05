@@ -41,10 +41,14 @@ export function TransactionsTable() {
   const [tipoFilter, setTipoFilter] = useState<'all' | 'Entrada' | 'Saída'>('all');
   const [categoriaFilter, setCategoriaFilter] = useState<string>('all');
 
-  const { transacoes, totalPages, totalItems, isLoading } = useTransacoesPaginadas(page, 20, {
+  const { data: queryData, isLoading } = useTransacoesPaginadas(page, 20, {
     tipo: tipoFilter,
     categoria: categoriaFilter
   });
+
+  const transacoes = queryData?.transacoes || [];
+  const totalPages = queryData?.totalPages || 1;
+  const totalItems = queryData?.totalItems || 0;
 
   const { categorias } = useCategoriasDespesas();
 
