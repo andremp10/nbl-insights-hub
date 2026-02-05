@@ -82,13 +82,16 @@ const DotMapCanvas = () => {
     let animationFrameId: number;
     let startTime = Date.now();
 
+    // Primary purple color #6C47FF = rgb(108, 71, 255)
+    const primaryColor = { r: 108, g: 71, b: 255 };
+
     function drawDots() {
       ctx!.clearRect(0, 0, dimensions.width, dimensions.height);
       
       dots.forEach(dot => {
         ctx!.beginPath();
         ctx!.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
-        ctx!.fillStyle = `rgba(59, 130, 246, ${dot.opacity})`;
+        ctx!.fillStyle = `rgba(${primaryColor.r}, ${primaryColor.g}, ${primaryColor.b}, ${dot.opacity})`;
         ctx!.fill();
       });
     }
@@ -110,32 +113,32 @@ const DotMapCanvas = () => {
         ctx!.beginPath();
         ctx!.moveTo(route.start.x, route.start.y);
         ctx!.lineTo(x, y);
-        ctx!.strokeStyle = '#3b82f6';
+        ctx!.strokeStyle = '#6C47FF';
         ctx!.lineWidth = 1.5;
         ctx!.stroke();
         
         // Start point
         ctx!.beginPath();
         ctx!.arc(route.start.x, route.start.y, 3, 0, Math.PI * 2);
-        ctx!.fillStyle = '#3b82f6';
+        ctx!.fillStyle = '#6C47FF';
         ctx!.fill();
         
         // Moving point with glow
         ctx!.beginPath();
         ctx!.arc(x, y, 6, 0, Math.PI * 2);
-        ctx!.fillStyle = 'rgba(59, 130, 246, 0.4)';
+        ctx!.fillStyle = 'rgba(108, 71, 255, 0.4)';
         ctx!.fill();
         
         ctx!.beginPath();
         ctx!.arc(x, y, 3, 0, Math.PI * 2);
-        ctx!.fillStyle = '#60a5fa';
+        ctx!.fillStyle = '#9B7DFF';
         ctx!.fill();
         
         // End point when complete
         if (progress === 1) {
           ctx!.beginPath();
           ctx!.arc(route.end.x, route.end.y, 3, 0, Math.PI * 2);
-          ctx!.fillStyle = '#3b82f6';
+          ctx!.fillStyle = '#6C47FF';
           ctx!.fill();
         }
       });
@@ -165,7 +168,7 @@ const DotMapCanvas = () => {
         className="absolute inset-0 w-full h-full"
       />
       {/* Gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-950/80 via-slate-900/60 to-indigo-950/80" />
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-950/80 via-background/60 to-indigo-950/80" />
     </div>
   );
 };
@@ -198,7 +201,7 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex bg-slate-950">
+    <div className="min-h-screen flex bg-background">
       {/* Left Side - Animated Map */}
       <div className="hidden lg:flex lg:w-1/2 relative">
         <DotMapCanvas />
@@ -213,16 +216,16 @@ export default function Auth() {
           >
             {/* Logo */}
             <div className="mb-6 inline-flex items-center justify-center">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-2xl shadow-blue-500/30">
-                <span className="text-white font-bold text-2xl">N</span>
+              <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-2xl shadow-primary/30">
+                <span className="text-primary-foreground font-bold text-2xl">N</span>
               </div>
             </div>
             
-            <h1 className="text-3xl font-bold text-white mb-3">
+            <h1 className="text-3xl font-bold text-foreground mb-3">
               NBL Insights Hub
             </h1>
             
-            <p className="text-blue-200/70 text-sm max-w-xs leading-relaxed">
+            <p className="text-muted-foreground text-sm max-w-xs leading-relaxed">
               Conectando dados para decisões inteligentes na sua gráfica
             </p>
           </motion.div>
@@ -230,7 +233,7 @@ export default function Auth() {
       </div>
 
       {/* Right Side - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8 bg-slate-900">
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8 bg-card">
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
@@ -240,19 +243,19 @@ export default function Auth() {
           {/* Mobile Logo */}
           <div className="lg:hidden text-center mb-8">
             <div className="mb-4 inline-flex items-center justify-center">
-              <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <span className="text-white font-bold text-xl">N</span>
+              <div className="w-14 h-14 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
+                <span className="text-primary-foreground font-bold text-xl">N</span>
               </div>
             </div>
-            <h1 className="text-2xl font-bold text-white">NBL Insights Hub</h1>
+            <h1 className="text-2xl font-bold text-foreground">NBL Insights Hub</h1>
           </div>
 
           <div className="space-y-6">
             <div className="text-center lg:text-left">
-              <h2 className="text-2xl font-semibold text-white mb-2">
+              <h2 className="text-2xl font-semibold text-foreground mb-2">
                 Bem-vindo de volta
               </h2>
-              <p className="text-slate-400 text-sm">
+              <p className="text-muted-foreground text-sm">
                 Digite sua senha para acessar o painel
               </p>
             </div>
@@ -260,7 +263,7 @@ export default function Auth() {
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Password Field */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                <label className="text-sm font-medium text-foreground flex items-center gap-2">
                   <Lock className="w-4 h-4" />
                   Senha
                 </label>
@@ -271,12 +274,12 @@ export default function Auth() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Digite sua senha"
                     autoFocus
-                    className="w-full h-12 px-4 pr-12 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all"
+                    className="w-full h-12 px-4 pr-12 rounded-lg bg-secondary border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-primary transition-all"
                   />
                   <button
                     type="button"
                     onClick={() => setIsPasswordVisible(!isPasswordVisible)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   >
                     {isPasswordVisible ? (
                       <EyeOff className="w-5 h-5" />
@@ -296,14 +299,14 @@ export default function Auth() {
                 <button
                   type="submit"
                   disabled={!password.trim() || isLoading}
-                  className="relative w-full h-12 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium overflow-hidden transition-all hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                  className="relative w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium overflow-hidden transition-all hover:opacity-90 hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
                 >
                   <span className="relative z-10 flex items-center justify-center gap-2">
                     {isLoading ? (
                       <motion.div
                         animate={{ rotate: 360 }}
                         transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                        className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
+                        className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full"
                       />
                     ) : (
                       <>
@@ -317,24 +320,12 @@ export default function Auth() {
                       </>
                     )}
                   </span>
-                  
-                  {/* Hover gradient effect */}
-                  <AnimatePresence>
-                    {isHovered && !isLoading && (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-700"
-                      />
-                    )}
-                  </AnimatePresence>
                 </button>
               </motion.div>
             </form>
 
             {/* Footer */}
-            <p className="text-center text-slate-500 text-xs pt-4">
+            <p className="text-center text-muted-foreground text-xs pt-4">
               Gráfica NBL © {new Date().getFullYear()}
             </p>
           </div>
