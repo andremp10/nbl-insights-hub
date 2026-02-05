@@ -1,7 +1,7 @@
- import React, { createContext, useContext, useState, ReactNode } from 'react';
- import { startOfMonth, endOfMonth, subDays, format, startOfDay, endOfDay } from 'date-fns';
+ import React, { createContext, useContext, useState, ReactNode, useMemo } from 'react';
+ import { startOfMonth, endOfMonth, subDays, format, startOfDay, endOfDay, startOfYear, endOfYear } from 'date-fns';
  
- export type DatePreset = 'current_month' | 'last_30_days' | 'custom';
+ export type DatePreset = 'current_month' | 'last_30_days' | 'year_2023' | 'all_time' | 'custom';
  
  interface DateRange {
    from: Date;
@@ -14,9 +14,14 @@
    setDateRange: (range: DateRange) => void;
    setPreset: (preset: DatePreset) => void;
    formattedRange: string;
+   hasNoDataInPeriod: boolean;
  }
  
  const DateFilterContext = createContext<DateFilterContextType | undefined>(undefined);
+ 
+ // Anos com dados conhecidos no banco
+ const DATA_YEAR_START = 2019;
+ const DATA_YEAR_END = 2023;
  
  function getPresetDates(preset: DatePreset): DateRange {
    const now = new Date();
@@ -31,6 +36,16 @@
          from: startOfDay(subDays(now, 30)),
          to: endOfDay(now),
        };
+     case 'year_2023':
+       return {
+         from: new Date(2023, 0, 1), // 1 Jan 2023
+         to: new Date(2023, 11, 31, 23, 59, 59), // 31 Dec 2023
+       };
+     case 'all_time':
+       return {
+         from: new Date(DATA_YEAR_START, 0, 1),
+         to: endOfDay(now),
+       };
      default:
        return {
          from: startOfMonth(now),
@@ -40,8 +55,9 @@
  }
  
  export function DateFilterProvider({ children }: { children: ReactNode }) {
-   const [preset, setPresetState] = useState<DatePreset>('current_month');
-   const [dateRange, setDateRangeState] = useState<DateRange>(getPresetDates('current_month'));
+   // Padrão: Ano 2023 (onde há dados reais)
+   const [preset, setPresetState] = useState<DatePreset>('year_2023');
+   const [dateRange, setDateRangeState] = useState<DateRange>(getPresetDates('year_2023'));
  
    const setPreset = (newPreset: DatePreset) => {
      setPresetState(newPreset);
@@ -57,8 +73,16 @@
  
    const formattedRange = `${format(dateRange.from, 'dd/MM/yyyy')} - ${format(dateRange.to, 'dd/MM/yyyy')}`;
  
+   // Verifica se o período selecionado está fora do range de dados conhecidos
+   const hasNoDataInPeriod = useMemo(() => {
+     const fromYear = dateRange.from.getFullYear();
+     const toYear = dateRange.to.getFullYear();
+     // Se o período está completamente fora do range de dados
+     return fromYear > DATA_YEAR_END || toYear < DATA_YEAR_START;
+   }, [dateRange]);
+ 
    return (
-     <DateFilterContext.Provider value={{ dateRange, preset, setDateRange, setPreset, formattedRange }}>
+     <DateFilterContext.Provider value={{ dateRange, preset, setDateRange, setPreset, formattedRange, hasNoDataInPeriod }}>
        {children}
      </DateFilterContext.Provider>
    );

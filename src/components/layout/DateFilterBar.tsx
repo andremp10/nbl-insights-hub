@@ -21,6 +21,8 @@
  const presetLabels: Record<DatePreset, string> = {
    current_month: 'Mês Atual',
    last_30_days: 'Últimos 30 dias',
+   year_2023: 'Ano 2023',
+   all_time: 'Todo Período',
    custom: 'Personalizado',
  };
  
@@ -52,20 +54,26 @@
          </DropdownMenuTrigger>
          <DropdownMenuContent align="end" className="glass-card min-w-[160px]">
            <DropdownMenuItem 
+             onClick={() => handlePresetSelect('year_2023')}
+             className={cn("text-sm cursor-pointer", preset === 'year_2023' && "text-primary font-medium")}
+           >
+             Ano 2023
+           </DropdownMenuItem>
+           <DropdownMenuItem 
+             onClick={() => handlePresetSelect('all_time')}
+             className={cn("text-sm cursor-pointer", preset === 'all_time' && "text-primary font-medium")}
+           >
+             Todo Período
+           </DropdownMenuItem>
+           <DropdownMenuItem 
              onClick={() => handlePresetSelect('current_month')}
-             className={cn("text-sm cursor-pointer", preset === 'current_month' && "text-primary")}
+             className={cn("text-sm cursor-pointer", preset === 'current_month' && "text-primary font-medium")}
            >
              Mês Atual
            </DropdownMenuItem>
            <DropdownMenuItem 
-             onClick={() => handlePresetSelect('last_30_days')}
-             className={cn("text-sm cursor-pointer", preset === 'last_30_days' && "text-primary")}
-           >
-             Últimos 30 dias
-           </DropdownMenuItem>
-           <DropdownMenuItem 
              onClick={() => handlePresetSelect('custom')}
-             className={cn("text-sm cursor-pointer", preset === 'custom' && "text-primary")}
+             className={cn("text-sm cursor-pointer", preset === 'custom' && "text-primary font-medium")}
            >
              Personalizado...
            </DropdownMenuItem>
