@@ -289,3 +289,25 @@
  .chat-bubble-assistant {
    @apply bg-card text-card-foreground rounded-2xl rounded-bl-md border border-border/50;
 }
+
+/* Chat grid background */
+.chat-grid-bg {
+  background-image: 
+    linear-gradient(to right, hsl(var(--border) / 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--border) / 0.15) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Lab background overflow fix */
+.lab-bg::before {
+  overflow: hidden;
+  max-width: 100vw;
+  max-height: 100vh;
+  box-sizing: border-box;
+}
+
+/* Ripple animation */
+@keyframes ripple {
+  0% { transform: scale(0.5); opacity: 0.6; }
+  100% { transform: scale(2); opacity: 0; }
+}
