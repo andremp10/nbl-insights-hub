@@ -92,8 +92,22 @@ export function ChatMessage({ message, onActionClick }: ChatMessageProps) {
             : 'chat-bubble-assistant'
         )}
       >
-        <div className={cn("text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none break-words", isUser ? "prose-p:text-primary-foreground prose-a:text-primary-foreground/90" : "")}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <div className={cn("text-sm leading-relaxed max-w-none break-words", isUser ? "text-primary-foreground" : "")}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              table: ({ node, ...props }) => <div className="my-4 w-full overflow-hidden rounded-lg border border-border/50"><table className="w-full text-sm" {...props} /></div>,
+              thead: ({ node, ...props }) => <thead className="bg-muted/50 border-b border-border/50" {...props} />,
+              tbody: ({ node, ...props }) => <tbody className="[&_tr:last-child]:border-0" {...props} />,
+              tr: ({ node, ...props }) => <tr className="border-b border-border/50 transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted" {...props} />,
+              th: ({ node, ...props }) => <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0" {...props} />,
+              td: ({ node, ...props }) => <td className="p-4 align-middle [&:has([role=checkbox])]:pr-0" {...props} />,
+              p: ({ node, ...props }) => <p className="mb-4 last:mb-0" {...props} />,
+              ul: ({ node, ...props }) => <ul className="my-4 ml-6 list-disc [&>li]:mt-2" {...props} />,
+              ol: ({ node, ...props }) => <ol className="my-4 ml-6 list-decimal [&>li]:mt-2" {...props} />,
+              li: ({ node, ...props }) => <li className="text-foreground/90" {...props} />,
+            }}
+          >
             {message.content}
           </ReactMarkdown>
         </div>
