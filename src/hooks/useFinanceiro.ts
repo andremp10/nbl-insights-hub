@@ -36,10 +36,12 @@ export function useFinanceiroData() {
     queryKey: ['financeiro', fromDate, toDate],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('vw_dashboard_financeiro')
+        .from('vw_financeiro_analitico') // Updated view
         .select('*')
         .gte('data', fromDate)
         .lte('data', toDate)
+        // Exclude specific category as per legacy logic (Internal Transfer/Adjustment)
+        .neq('categoria_id', 'c38d3ba0-9976-5510-8d71-d85405ed9b64')
         .order('data', { ascending: false });
 
       if (error) throw error;

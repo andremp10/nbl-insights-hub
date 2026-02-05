@@ -35,90 +35,62 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
-      {/* Left Side - Animated Map */}
-      <div className="hidden lg:flex lg:w-1/2 relative">
+    <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
+      {/* Background Effect */}
+      <div className="absolute inset-0 z-0">
         <DotMapCanvas />
-
-        {/* Logo and text overlay */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 p-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="text-center"
-          >
-            {/* Logo */}
-            <div className="mb-6 inline-flex items-center justify-center">
-              <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-2xl shadow-primary/30">
-                <span className="text-primary-foreground font-bold text-2xl">N</span>
-              </div>
-            </div>
-
-            <h1 className="text-3xl font-bold text-foreground mb-3">
-              NBL Insights Hub
-            </h1>
-
-            <p className="text-muted-foreground text-sm max-w-xs leading-relaxed">
-              Conectando dados para decisões inteligentes na sua gráfica
-            </p>
-          </motion.div>
-        </div>
+        <div className="absolute inset-0 bg-background/80 backdrop-blur-[2px]" />
       </div>
 
-      {/* Right Side - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8 bg-card">
+      {/* Login Form Container */}
+      <div className="w-full max-w-[420px] relative z-10">
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="w-full max-w-md"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="bg-card/50 backdrop-blur-xl border border-border/50 shadow-2xl rounded-2xl p-8"
         >
-          {/* Mobile Logo */}
-          <div className="lg:hidden text-center mb-8">
-            <div className="mb-4 inline-flex items-center justify-center">
+          <div className="text-center mb-8">
+            <div className="mb-6 inline-flex items-center justify-center">
               <div className="w-14 h-14 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
                 <span className="text-primary-foreground font-bold text-xl">N</span>
               </div>
             </div>
-            <h1 className="text-2xl font-bold text-foreground">NBL Insights Hub</h1>
+            <h1 className="text-2xl font-bold text-foreground mb-2">NBL Insights Hub</h1>
+            <p className="text-muted-foreground text-sm">
+              Conectando dados para decisões inteligentes
+            </p>
           </div>
 
           <div className="space-y-6">
-            <div className="text-center lg:text-left">
-              <h2 className="text-2xl font-semibold text-foreground mb-2">
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground/80">
                 Bem-vindo de volta
-              </h2>
-              <p className="text-muted-foreground text-sm">
-                Digite sua senha para acessar o painel
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Password Field */}
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                  <Lock className="w-4 h-4" />
-                  Senha
-                </label>
                 <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
                     type={isPasswordVisible ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Digite sua senha"
+                    placeholder="Digite sua chave de acesso"
                     autoFocus
-                    className="w-full h-12 px-4 pr-12 rounded-lg bg-secondary border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/50 focus:border-primary transition-all"
+                    className="w-full h-11 pl-10 pr-10 rounded-lg bg-secondary/50 border border-border/50 text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-sm"
                   />
                   <button
                     type="button"
                     onClick={() => setIsPasswordVisible(!isPasswordVisible)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                   >
                     {isPasswordVisible ? (
-                      <EyeOff className="w-5 h-5" />
+                      <EyeOff className="w-4 h-4" />
                     ) : (
-                      <Eye className="w-5 h-5" />
+                      <Eye className="w-4 h-4" />
                     )}
                   </button>
                 </div>
@@ -128,28 +100,27 @@ export default function Auth() {
               <motion.div
                 onHoverStart={() => setIsHovered(true)}
                 onHoverEnd={() => setIsHovered(false)}
-                className="pt-2"
               >
                 <button
                   type="submit"
                   disabled={!password.trim() || isLoading}
-                  className="relative w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium overflow-hidden transition-all hover:opacity-90 hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
+                  className="relative w-full h-11 rounded-lg bg-primary text-primary-foreground font-medium text-sm overflow-hidden transition-all hover:opacity-90 hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
                 >
                   <span className="relative z-10 flex items-center justify-center gap-2">
                     {isLoading ? (
                       <motion.div
                         animate={{ rotate: 360 }}
                         transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                        className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full"
+                        className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full"
                       />
                     ) : (
                       <>
-                        Entrar
+                        Acessar Painel
                         <motion.span
-                          animate={{ x: isHovered ? 5 : 0 }}
+                          animate={{ x: isHovered ? 3 : 0 }}
                           transition={{ duration: 0.2 }}
                         >
-                          <ArrowRight className="w-5 h-5" />
+                          <ArrowRight className="w-4 h-4" />
                         </motion.span>
                       </>
                     )}
@@ -159,7 +130,7 @@ export default function Auth() {
             </form>
 
             {/* Footer */}
-            <p className="text-center text-muted-foreground text-xs pt-4">
+            <p className="text-center text-muted-foreground/60 text-[10px] pt-2">
               Gráfica NBL © {new Date().getFullYear()}
             </p>
           </div>
