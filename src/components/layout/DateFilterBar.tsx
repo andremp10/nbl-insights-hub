@@ -37,23 +37,36 @@
    };
  
    return (
-     <div className="flex items-center gap-2">
+     <div className="flex items-center gap-1.5">
        <DropdownMenu>
          <DropdownMenuTrigger asChild>
-           <Button variant="outline" size="sm" className="gap-2">
-             <Calendar className="h-4 w-4" />
+           <Button 
+             variant="ghost" 
+             size="sm" 
+             className="gap-2 h-8 px-3 text-xs font-medium text-muted-foreground hover:text-foreground bg-secondary/50 hover:bg-secondary border-0 rounded-lg"
+           >
+             <Calendar className="h-3.5 w-3.5" />
              <span className="hidden sm:inline">{presetLabels[preset]}</span>
-             <ChevronDown className="h-3 w-3" />
+             <ChevronDown className="h-3 w-3 opacity-60" />
            </Button>
          </DropdownMenuTrigger>
-         <DropdownMenuContent align="end">
-           <DropdownMenuItem onClick={() => handlePresetSelect('current_month')}>
+         <DropdownMenuContent align="end" className="glass-card min-w-[160px]">
+           <DropdownMenuItem 
+             onClick={() => handlePresetSelect('current_month')}
+             className={cn("text-sm cursor-pointer", preset === 'current_month' && "text-primary")}
+           >
              Mês Atual
            </DropdownMenuItem>
-           <DropdownMenuItem onClick={() => handlePresetSelect('last_30_days')}>
+           <DropdownMenuItem 
+             onClick={() => handlePresetSelect('last_30_days')}
+             className={cn("text-sm cursor-pointer", preset === 'last_30_days' && "text-primary")}
+           >
              Últimos 30 dias
            </DropdownMenuItem>
-           <DropdownMenuItem onClick={() => handlePresetSelect('custom')}>
+           <DropdownMenuItem 
+             onClick={() => handlePresetSelect('custom')}
+             className={cn("text-sm cursor-pointer", preset === 'custom' && "text-primary")}
+           >
              Personalizado...
            </DropdownMenuItem>
          </DropdownMenuContent>
@@ -65,15 +78,17 @@
              variant="ghost"
              size="sm"
              className={cn(
-               'text-xs text-muted-foreground',
-               preset === 'custom' && 'text-foreground'
+               'h-8 px-2.5 text-xs font-medium rounded-lg transition-colors',
+               preset === 'custom' 
+                 ? 'text-primary bg-primary/10' 
+                 : 'text-muted-foreground hover:text-foreground'
              )}
            >
              {format(dateRange.from, 'dd/MM/yy', { locale: ptBR })} -{' '}
              {format(dateRange.to, 'dd/MM/yy', { locale: ptBR })}
            </Button>
          </PopoverTrigger>
-         <PopoverContent className="w-auto p-0" align="end">
+         <PopoverContent className="w-auto p-0 glass-card" align="end">
            <CalendarComponent
              mode="range"
              selected={{ from: dateRange.from, to: dateRange.to }}
@@ -85,7 +100,7 @@
              }}
              numberOfMonths={2}
              locale={ptBR}
-             className={cn("p-3 pointer-events-auto")}
+             className="p-3 pointer-events-auto"
            />
          </PopoverContent>
        </Popover>
