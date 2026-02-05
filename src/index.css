@@ -2,6 +2,9 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Lora&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Mono&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -51,7 +54,7 @@
     --input: 0 0% 0%;
     --ring: 0 0% 0%;
 
-    --radius: 0rem;
+    --radius: 1.25rem;
 
     /* Semantic */
     --success: 142 76% 36%;
@@ -163,7 +166,7 @@
     --sidebar-ring: 0 0% 100%;
     --sidebar: 0 0% 5%;
 
-    --radius: 0rem;
+    --radius: 1.25rem;
 
     --shadow-2xs: 1px 1px 0px 0px #ffffff;
 
