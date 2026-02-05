@@ -58,9 +58,9 @@ export function DonutChart({ title, data, isLoading }: DonutChartProps) {
                   <Pie
                     data={data}
                     cx="50%"
-                    cy="35%"
+                    cy="50%"
                     innerRadius={50}
-                    outerRadius={75}
+                    outerRadius={80}
                     paddingAngle={2}
                     dataKey="value"
                     nameKey="name"
