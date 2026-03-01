@@ -11,6 +11,7 @@ import { Suspense, lazy } from "react";
 import { Loader2 } from "lucide-react";
 
 const Auth = lazy(() => import("./pages/Auth"));
+const Home = lazy(() => import("./pages/Home"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Financeiro = lazy(() => import("./pages/Financeiro"));
 const Pedidos = lazy(() => import("./pages/Pedidos"));
@@ -40,7 +41,7 @@ const App = () => (
                     path="/"
                     element={
                       <ProtectedRoute>
-                        <Chat />
+                        <Home />
                       </ProtectedRoute>
                     }
                   />
