@@ -1,276 +1,224 @@
 
 
-# Plano: Redesign da Aba do Assistente IA (Estilo AnimatedAIChat)
+# Plano: Refatoracao Completa - Chat NLQ + Correcao de Erros
 
-## Objetivo
-Refatorar completamente a página de Chat (`/chat`) usando o componente AnimatedAIChat como referência, mantendo a integração com o hook `useChatbot` existente e adaptando o visual para o contexto NBL.
+## Problema Atual
 
----
+### Erros de Build (CRITICO)
+O sistema esta quebrado porque `useFinanceiro.ts` referencia `vw_dashboard_financeiro`, que **nao existe** no banco conectado. As unicas views disponiveis sao:
+- `vw_dashboard_pedidos`
+- `v_pedidos_entregas`
 
-## Análise do Componente de Referência
+Para financeiro, existem RPCs: `get_financeiro_kpis` e `get_financeiro_graficos`.
 
-### Elementos Visuais Principais
-1. **Fundo animado**: Grid pattern + glow effects que seguem o mouse
-2. **Header centralizado**: Título "How can I help today?" com ícone Sparkles animado
-3. **Command Palette**: Sugestões de comandos rápidos (ex.: `/clone`, `/figma`)
-4. **Input com auto-resize**: Textarea expansível com minHeight/maxHeight
-5. **Attachments**: Suporte a anexos com preview e remoção
-6. **Indicador de digitação**: Pill flutuante com "Thinking..." e dots animados
-7. **Botões de ação**: Paperclip + Command + Send com animações Framer Motion
-
-### Funcionalidades do Componente Original
-- useAutoResizeTextarea hook customizado
-- Command palette com navegação por teclado (↑↓ Tab Enter Esc)
-- Mouse position tracking para efeito de glow
-- AnimatePresence para transições suaves
-- Typing indicator floating pill
+### Webhook desatualizado
+A Edge Function aponta para o webhook antigo do EasyPanel.
 
 ---
 
-## Adaptações para o Contexto NBL
+## Fase 1: Corrigir Erros de Build (CRITICO)
 
-### Elementos a Adaptar
-| Original | NBL |
-|----------|-----|
-| "How can I help today?" | "Como posso ajudar?" |
-| "zap" (nome do assistente) | "NBL" |
-| "/clone", "/figma", "/page", "/improve" | "/financeiro", "/pedidos", "/receita", "/despesas" |
-| Cores genéricas | Tema primary (#6C47FF) |
-| Placeholder "Ask zap..." | "Pergunte sobre financeiro, pedidos..." |
+### 1.1 Corrigir `src/hooks/useFinanceiro.ts`
+Substituir todas as queries de `vw_dashboard_financeiro` pelas RPCs existentes:
 
-### Funcionalidades a Manter
-- Integração com `useChatbot` hook (mensagens reais)
-- Navegação via `handleActionClick` (ir para módulos)
-- Suporte a `highlights` e `suggestedActions` nas respostas
-- Contexto de datas (`useDateFilter`)
+```typescript
+// KPIs: usar RPC get_financeiro_kpis
+const { data } = await supabase.rpc('get_financeiro_kpis', {
+  p_data_inicio: fromDate,
+  p_data_fim: toDate,
+});
 
-### Funcionalidades Novas (do componente de referência)
-- Command palette para atalhos rápidos
-- Grid background animado
-- Glow effect seguindo mouse
-- Auto-resize do textarea
-
----
-
-## Estrutura de Arquivos
-
-```text
-src/
-├── pages/
-│   └── Chat.tsx (refatorado completo)
-├── components/
-│   └── chat/
-│       ├── AnimatedChatContainer.tsx (novo - wrapper visual)
-│       ├── CommandPalette.tsx (novo - atalhos rápidos)
-│       ├── ChatMessageList.tsx (novo - lista de mensagens)
-│       ├── ChatInputAnimated.tsx (novo - input animado)
-│       ├── TypingIndicatorFloating.tsx (novo - indicator flutuante)
-│       ├── ChatMessage.tsx (existente - manter)
-│       └── TypingIndicator.tsx (existente - manter para mensagens)
-└── hooks/
-    └── useAutoResizeTextarea.ts (novo)
+// Graficos: usar RPC get_financeiro_graficos
+const { data } = await supabase.rpc('get_financeiro_graficos', {
+  p_data_inicio: fromDate,
+  p_data_fim: toDate,
+});
 ```
 
+A funcao `useTransacoesPaginadas` sera removida (nao ha view para listar transacoes individuais).
+
+### 1.2 Atualizar `src/pages/Financeiro.tsx`
+Remover referencia ao `TransactionsTable` (que depende de dados individuais nao disponiveis).
+
 ---
 
-## Detalhes Técnicos
+## Fase 2: Atualizar Webhook
 
-### 1. Hook useAutoResizeTextarea
+### 2.1 Edge Function `supabase/functions/nlq-proxy/index.ts`
+Trocar URL:
+- De: `https://chez-n8n-webhook.jsf0kc.easypanel.host/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6`
+- Para: `https://primary-production-c00b.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6`
+
+### 2.2 Alternativa: chamada direta (sem Edge Function)
+O novo endpoint esta em URL publica. O `useChatbot.ts` pode chamar diretamente via `fetch` em vez de passar pela Edge Function, eliminando o limite de 150s do Supabase. Isso permite timeout de 60s controlado no frontend com AbortController.
+
+**Recomendacao**: Usar fetch direto no hook, removendo dependencia da Edge Function para o chat.
+
+---
+
+## Fase 3: Refatorar `useChatbot.ts` (Chamada Direta)
+
+Mudancas:
+1. Trocar `supabase.functions.invoke('nlq-proxy')` por `fetch` direto ao Railway
+2. Adicionar `AbortController` com timeout de 60s
+3. Expor `cancelRequest` para o botao de cancelar
+4. Persistir historico no `localStorage` (chave `nbl_chat_history`, max 50 msgs)
+5. Adicionar funcao `retryLast` para retry em erros
+
 ```typescript
-// src/hooks/useAutoResizeTextarea.ts
-interface UseAutoResizeTextareaProps {
-  minHeight: number;
-  maxHeight?: number;
-}
+const WEBHOOK_URL = 'https://primary-production-c00b.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
+const TIMEOUT_MS = 60000;
 
-export function useAutoResizeTextarea({ minHeight, maxHeight }: UseAutoResizeTextareaProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+// AbortController para cancelamento
+const abortRef = useRef<AbortController | null>(null);
+
+const sendMessage = useCallback(async (content: string) => {
+  if (!content.trim() || isLoading) return;
+  abortRef.current = new AbortController();
+  const timeoutId = setTimeout(() => abortRef.current?.abort(), TIMEOUT_MS);
   
-  const adjustHeight = useCallback((reset?: boolean) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
+  try {
+    const res = await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: content.trim(), session_id, ... }),
+      signal: abortRef.current.signal,
+    });
+    // ... processar resposta
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}, [...]);
 
-    if (reset) {
-      textarea.style.height = `${minHeight}px`;
-      return;
-    }
-
-    textarea.style.height = `${minHeight}px`;
-    const newHeight = Math.max(
-      minHeight,
-      Math.min(textarea.scrollHeight, maxHeight ?? Infinity)
-    );
-    textarea.style.height = `${newHeight}px`;
-  }, [minHeight, maxHeight]);
-
-  return { textareaRef, adjustHeight };
-}
-```
-
-### 2. CommandPalette - Atalhos NBL
-```typescript
-const nblCommands = [
-  { icon: <DollarSign />, label: "Financeiro", description: "Ver dashboard financeiro", prefix: "/financeiro" },
-  { icon: <Package />, label: "Pedidos", description: "Ver status de pedidos", prefix: "/pedidos" },
-  { icon: <TrendingUp />, label: "Receita", description: "Consultar receitas", prefix: "/receita" },
-  { icon: <TrendingDown />, label: "Despesas", description: "Consultar despesas", prefix: "/despesas" },
-];
-```
-
-### 3. Grid Background Animado
-```css
-/* Adicionar ao index.css */
-.chat-grid-bg {
-  background-image: 
-    linear-gradient(to right, hsl(var(--border) / 0.1) 1px, transparent 1px),
-    linear-gradient(to bottom, hsl(var(--border) / 0.1) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-```
-
-### 4. Glow Effect (Mouse Tracking)
-```typescript
-const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-
-useEffect(() => {
-  const handleMouseMove = (e: MouseEvent) => {
-    setMousePosition({ x: e.clientX, y: e.clientY });
-  };
-  window.addEventListener('mousemove', handleMouseMove);
-  return () => window.removeEventListener('mousemove', handleMouseMove);
+const cancelRequest = useCallback(() => {
+  abortRef.current?.abort();
+  setIsLoading(false);
 }, []);
 ```
 
-### 5. Typing Indicator Flutuante
-Posicionado como `fixed bottom-8` com animação de entrada/saída via AnimatePresence.
+---
+
+## Fase 4: Redesign Visual Completo
+
+### 4.1 Nova Paleta de Cores (`src/index.css`)
+Substituir tema `.dark`:
+
+| Variavel | Valor | Hex |
+|----------|-------|-----|
+| --background | 0 0% 6% | #0F0F0F |
+| --card | 0 0% 10% | #1A1A1A |
+| --primary | 18 82% 51% | #E8501A |
+| --border | 0 0% 16.5% | #2A2A2A |
+| --foreground | 0 0% 96% | #F5F5F5 |
+| --muted-foreground | 0 0% 53% | #888888 |
+| --destructive | 0 84% 60% | #EF4444 |
+| --success | 142 71% 45% | #22C55E |
+
+### 4.2 Layout Single-Page (`src/pages/Chat.tsx`)
+Redesign completo com:
+- Header fixo (56px) com logo "NBL Grafica", subtitulo "Agente de Consulta", indicador de status (verde/amarelo)
+- Sidebar esquerda (240px, recolhivel) com sugestoes estaticas
+- Area de chat central com max-width 780px
+- Input bar fixo no bottom
+
+### 4.3 Sidebar de Sugestoes (novo componente)
+Componente `ChatSuggestionsPanel.tsx`:
+- Background #141414, border-right #2A2A2A
+- Titulo "CONSULTAS FREQUENTES" em uppercase
+- 6 sugestoes pre-definidas como pills clicaveis
+- Ao clicar: preenche o input (nao envia)
+- Em mobile: drawer overlay
+
+Sugestoes:
+1. "Quais sao os 10 clientes com mais pedidos?"
+2. "Qual o faturamento do mes atual?"
+3. "Quais pedidos estao com pagamento pendente?"
+4. "Quais produtos mais vendidos neste mes?"
+5. "Clientes que nao compram ha mais de 60 dias?"
+6. "Qual o ticket medio dos pedidos?"
+
+### 4.4 Baloes de Mensagem
+- **Usuario**: alinhado a direita, bg #E8501A, branco, border-radius 18px 18px 4px 18px, max-width 70%
+- **Assistente**: alinhado a esquerda, bg #1A1A1A, border #2A2A2A, cor #F5F5F5, border-radius 4px 18px 18px 18px, max-width 85%
+- **Erro**: fundo #1A0A0A, borda #EF4444/40%, icone alerta, botao "Tentar novamente"
+
+### 4.5 Input Bar
+- Background #141414, border-top #2A2A2A
+- Textarea auto-resize (max 4 linhas), bg #1A1A1A, border #2A2A2A
+- Focus: border #E8501A, box-shadow com orange
+- Botao enviar: bg #E8501A, icone ArrowUp
+- Durante loading: botao muda para "Cancelar" (X)
+- Enter = enviar, Shift+Enter = nova linha
+
+### 4.6 Typing Indicator
+- 3 dots animados (wave) em cor #E8501A dentro de balao do assistente
+- Texto "Consultando base de dados..." em #555, 12px
+
+### 4.7 Timestamps
+- Abaixo de cada mensagem, cor #444, 11px, formato "14:32"
 
 ---
 
-## Layout Final
+## Fase 5: Remocoes e Limpeza
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  ▂▂▂▂ (sidebar trigger)                                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│                          ░░░░░░░░░░░░░░░░░░░░░░ (grid bg)                   │
-│                                                                              │
-│                        ✨ Como posso ajudar?                                 │
-│                     Digite uma pergunta ou comando                          │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │ 👤 Qual foi a receita de janeiro?                                    │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │ ✨ A receita total de janeiro foi R$ 123.456                         │   │
-│  │    ┌─────────────┐ ┌─────────────┐                                   │   │
-│  │    │ Receita     │ │ Despesas    │                                   │   │
-│  │    │ R$ 123.456  │ │ R$ 98.765   │                                   │   │
-│  │    └─────────────┘ └─────────────┘                                   │   │
-│  │    [Ir para Financeiro]                                              │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │  ┌──────────────────────────────────────┐                            │   │
-│  │  │ /fin ← (command palette popup)       │                            │   │
-│  │  │  💰 Financeiro - Ver dashboard       │                            │   │
-│  │  │  📦 Pedidos - Ver status             │                            │   │
-│  │  └──────────────────────────────────────┘                            │   │
-│  │                                                                      │   │
-│  │  Pergunte sobre financeiro, pedidos...                     [📎][⌘] [→] │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│  ┌──────────────────────────────────────────┐                               │
-│  │ [Financeiro] [Pedidos] [Receita] [Despesas]  ← quick actions           │
-│  └──────────────────────────────────────────┘                               │
-│                                                                              │
-│                    ┌─────────────────────────────┐                          │
-│                    │ NBL • Pensando...  ● ● ●    │  ← floating indicator   │
-│                    └─────────────────────────────┘                          │
-│                                                                              │
-│  🔵 (glow effect following mouse - subtle)                                  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+### 5.1 Remover rotas de Financeiro e Pedidos do App.tsx
+Estas paginas dependem de views/RPCs que servem como dashboards separados. O foco agora e chat-only. As rotas `/financeiro` e `/pedidos` serao removidas.
+
+### 5.2 Remover AppSidebar de navegacao
+O sidebar de navegacao atual (Assistente/Financeiro/Pedidos) sera substituido pelo sidebar de sugestoes.
+
+### 5.3 Remover DashboardLayout
+O chat tera seu proprio layout dedicado, sem wrapper de dashboard.
+
+### 5.4 Remover DateFilterContext do chat
+O chat nao precisa mais de filtro de datas global - o usuario pergunta datas em linguagem natural.
 
 ---
 
-## Entregáveis
+## Fase 6: Persistencia e Acessibilidade
 
-### 1. Novos Arquivos
-- `src/hooks/useAutoResizeTextarea.ts`
-- `src/components/chat/CommandPalette.tsx`
-- `src/components/chat/TypingIndicatorFloating.tsx`
+### 6.1 localStorage
+- Salvar mensagens em `nbl_chat_history` (max 50)
+- Carregar ao inicializar o hook
+- Botao "Limpar historico" no header com confirmacao
 
-### 2. Arquivos Refatorados
+### 6.2 Acessibilidade
+- `role="log"` na area de chat
+- `aria-live="polite"` para novas mensagens
+- `aria-label` em todos os botoes de icone
+- Focus visible com outline #E8501A
+
+---
+
+## Arquivos Afetados
+
+### Novos
+- `src/components/chat/ChatSuggestionsPanel.tsx`
+
+### Modificados
+- `src/hooks/useFinanceiro.ts` (corrigir para usar RPCs)
+- `src/hooks/useChatbot.ts` (fetch direto, AbortController, localStorage)
 - `src/pages/Chat.tsx` (redesign completo)
-- `src/components/chat/ChatInput.tsx` (versão animada)
-- `src/index.css` (adicionar .chat-grid-bg e lab-bg)
+- `src/pages/Financeiro.tsx` (remover TransactionsTable)
+- `src/components/chat/ChatMessage.tsx` (novo estilo, timestamps)
+- `src/components/chat/ChatInput.tsx` (novo estilo, botao cancelar)
+- `src/components/chat/ThinkingBubble.tsx` (dots laranja)
+- `src/index.css` (nova paleta de cores)
+- `src/App.tsx` (simplificar rotas)
 
-### 3. Arquivos Mantidos
-- `src/hooks/useChatbot.ts` (sem alterações)
-- `src/components/chat/ChatMessage.tsx` (sem alterações)
-
----
-
-## CSS Adicional
-
-```css
-/* Adicionar ao index.css */
-
-.chat-grid-bg {
-  background-image: 
-    linear-gradient(to right, hsl(var(--border) / 0.1) 1px, transparent 1px),
-    linear-gradient(to bottom, hsl(var(--border) / 0.1) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
-.lab-bg::before {
-  overflow: hidden;
-  max-width: 100vw;
-  max-height: 100vh;
-  box-sizing: border-box;
-}
-
-/* Ripple animation for command buttons */
-@keyframes ripple {
-  0% { transform: scale(0.5); opacity: 0.6; }
-  100% { transform: scale(2); opacity: 0; }
-}
-```
+### Removidos (conteudo esvaziado/simplificado)
+- `src/components/layout/DateFilterBar.tsx` (mantido para Financeiro/Pedidos se necessario)
 
 ---
 
-## Dependências
+## Sequencia de Execucao
 
-Todas já instaladas:
-- `framer-motion` ✅
-- `lucide-react` ✅
-
----
-
-## Sequência de Implementação
-
-1. Criar hook `useAutoResizeTextarea`
-2. Criar componente `CommandPalette`
-3. Criar componente `TypingIndicatorFloating`
-4. Refatorar `ChatInput` com animações
-5. Refatorar página `Chat.tsx` completa
-6. Adicionar CSS ao `index.css`
-7. Testar fluxo completo
-
----
-
-## Critérios de Sucesso
-
-- [ ] Grid background visível
-- [ ] Glow effect seguindo mouse
-- [ ] Command palette funciona com `/` + navegação por teclado
-- [ ] Input expande automaticamente
-- [ ] Mensagens renderizam com animações
-- [ ] Typing indicator flutuante aparece durante loading
-- [ ] Quick action buttons funcionam
-- [ ] Integração com useChatbot mantida
-- [ ] Responsivo em mobile
+1. Corrigir `useFinanceiro.ts` (resolver build errors)
+2. Atualizar `useChatbot.ts` (fetch direto + AbortController)
+3. Atualizar `index.css` (nova paleta)
+4. Criar `ChatSuggestionsPanel.tsx`
+5. Redesign `Chat.tsx` (layout completo)
+6. Atualizar `ChatMessage.tsx`, `ChatInput.tsx`, `ThinkingBubble.tsx`
+7. Simplificar `App.tsx`
+8. Atualizar Edge Function (webhook URL)
 
