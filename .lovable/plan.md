@@ -1,133 +1,73 @@
 
 
-# Plano: Tela Home (Command Center) + Header Global
+# Plano: Reestruturar Chamada do Agente via Edge Function
 
-## Resumo
+## Problema Identificado
 
-Criar uma nova tela inicial (Home) como command center da aplicacao, substituir o sidebar lateral por um header horizontal global, e implementar navegacao com quick query para o chat.
+O `useChatbot.ts` chama o webhook do n8n **diretamente do navegador** do usuario. Isso causa:
 
----
+1. **Bloqueio por CORS** — o navegador bloqueia a requisicao cross-origin ao Railway, resultando em erro imediato
+2. **Timeout de 60s muito curto** — o agente n8n pode demorar mais que 60s para processar queries complexas (consultar banco, gerar resposta)
+3. **Edge Function existente nao esta sendo usada** — ja existe `supabase/functions/nlq-proxy/index.ts` com logica correta mas o frontend ignora ela
+4. **Config.toml incompleto** — falta `verify_jwt = false` para permitir chamadas a Edge Function
 
-## Arquivos
+## Solucao
 
-### Novos
-- `src/pages/Home.tsx` — Tela principal com Hero, Feature Cards, Quick Query, Sugestoes e KPIs
-- `src/components/layout/AppHeader.tsx` — Header horizontal fixo (56px) com navegacao
+Redirecionar todas as chamadas do chat para passar pela Edge Function `nlq-proxy`, que:
+- Roda server-side (sem CORS)
+- Tem timeout de 150s (suficiente para o agente)
+- Normaliza a resposta antes de devolver ao frontend
 
-### Modificados
-- `src/App.tsx` — Adicionar rota "/" para Home, lazy import
-- `src/pages/Chat.tsx` — Remover header proprio, usar AppHeader, ler `nbl_pending_query` do localStorage ao montar
-- `src/pages/Financeiro.tsx` — Trocar DashboardLayout por AppHeader + layout simples
-- `src/pages/Pedidos.tsx` — Trocar DashboardLayout por AppHeader + layout simples
+## Mudancas
 
-### Mantidos (sem alteracao)
-- `src/hooks/useChatbot.ts`
-- `src/components/chat/*` (ChatMessage, ChatInput, etc.)
+### 1. `supabase/config.toml`
+Adicionar configuracao da Edge Function:
 
----
+```toml
+project_id = "bcypejzqbcwibvtbbfor"
 
-## Detalhes Tecnicos
+[functions.nlq-proxy]
+verify_jwt = false
+```
 
-### 1. AppHeader.tsx
+### 2. `src/hooks/useChatbot.ts`
+Substituir `fetch` direto ao Railway por `supabase.functions.invoke('nlq-proxy')`:
 
-Header fixo horizontal com 56px de altura, aplicado em todas as paginas.
+- Importar o client Supabase
+- Remover a constante `WEBHOOK_URL`
+- Trocar o `fetch` por `supabase.functions.invoke('nlq-proxy', { body: payload })`
+- Aumentar timeout do frontend para 180s (acima dos 150s da Edge Function, para que o timeout server-side seja o que controla)
+- A Edge Function ja normaliza a resposta no formato `{ ok, reply, error }` — o frontend so precisa ler esse contrato
+- Tratar `ok: false` como erro com mensagem amigavel do campo `error.message`
+
+Logica simplificada:
 
 ```text
-[Logo NBL Grafica] [badge "Insights"]    Home | Assistente | Financeiro | Pedidos    [Avatar ▾ Sair]
+1. Usuario envia mensagem
+2. Frontend chama supabase.functions.invoke('nlq-proxy', { body })
+3. Edge Function recebe, faz fetch ao n8n (150s timeout server-side)
+4. Edge Function normaliza resposta e retorna { ok, reply }
+5. Frontend le reply.text e exibe
+6. Se ok=false, exibe error.message com botao retry
 ```
 
-- Background: bg-background (#0F0F0F), border-bottom border-border (#2A2A2A)
-- Nav links centrais com NavLink do react-router-dom, link ativo com border-bottom #E8501A
-- Avatar com iniciais, dropdown simples com "Sair" usando o `useAuth().logout`
-- Mobile: logo + hamburger menu abrindo drawer com Sheet do radix
+### 3. `supabase/functions/nlq-proxy/index.ts`
+A Edge Function ja esta funcional. Apenas ajustar:
+- Verificar que o webhook URL esta correto (ja esta: `https://primary-production-c00b.up.railway.app/webhook/...`)
+- Re-deploy automatico apos alteracao no config.toml
 
-### 2. Home.tsx
+## Beneficios
 
-Pagina com scroll vertical, sem abas, estrutura:
+- **Sem CORS**: Edge Function roda server-side
+- **Timeout adequado**: 150s no servidor, o agente tem tempo de responder
+- **Resposta garantida**: o usuario sempre recebe uma mensagem (sucesso ou erro estruturado)
+- **Seguranca**: webhook URL fica no servidor, nao exposta no bundle do frontend
 
-**Secao Hero** (pt-16 pb-12, max-w-[900px] mx-auto):
-- Saudacao dinamica baseada na hora (Bom dia/Boa tarde/Boa noite + emoji)
-- Data por extenso em pt-BR (usando `Intl.DateTimeFormat`)
-- Subtitulo fixo
+## Arquivos Afetados
 
-**Secao Feature Cards** (3 cards em grid):
-- Card 1: Assistente (MessageSquare, cor laranja, navega /chat)
-- Card 2: Financeiro (TrendingUp, cor verde, navega /financeiro)
-- Card 3: Pedidos (ShoppingBag, cor azul, navega /pedidos)
-- Hover: border laranja, translateY(-2px), box-shadow
-- useNavigate para navegacao ao clicar
-
-**Secao Quick Query**:
-- Textarea simplificado com botao enviar (ArrowRight)
-- Ao submeter: salva em `localStorage.setItem('nbl_pending_query', query)` e `navigate('/chat')`
-
-**Secao Sugestoes** (8 pills em flex-wrap):
-- Ao clicar: mesmo comportamento do quick query (salva + navega)
-
-**Secao KPIs** (4 mini-cards, lazy loaded):
-- Pedidos Hoje: count de `vw_dashboard_pedidos` com `data_criacao` = hoje
-- Faturamento Mes: sum de `valor_total` do mes atual
-- Pendentes: count onde `status_pedido` indica pendencia
-- Clientes Ativos: count distinct `cliente_id` nos ultimos 30 dias
-- Loading: skeleton animado; erro: mostra "—"
-- useEffect com delay de 300ms para nao bloquear render
-
-**Animacoes**: CSS @keyframes fadeSlideUp com delays sequenciais (0ms, 100ms, 200ms, 280ms, 360ms). Sem framer-motion nesta pagina para manter leve.
-
-### 3. Chat.tsx (modificacoes)
-
-- Remover o header interno e o sidebar de sugestoes
-- Adicionar `<AppHeader />` no topo
-- Ajustar layout: `pt-14` para compensar header fixo
-- Ao montar (useEffect), verificar `localStorage.getItem('nbl_pending_query')`:
-  - Se existir: preencher e enviar via `sendMessage`, depois `localStorage.removeItem`
-
-### 4. Financeiro.tsx e Pedidos.tsx
-
-- Substituir `<DashboardLayout>` por:
-  - `<AppHeader />` no topo
-  - Layout simples com `<main className="pt-14 p-6">` + DateFilterBar inline
-- Manter hooks e componentes de dados existentes
-
-### 5. App.tsx
-
-```typescript
-const Home = lazy(() => import("./pages/Home"));
-// ... rotas existentes
-<Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-<Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-```
-
-### 6. index.css
-
-Adicionar animacao fadeSlideUp:
-
-```css
-@keyframes fadeSlideUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.animate-fade-slide-up {
-  animation: fadeSlideUp 400ms ease-out both;
-}
-```
-
----
-
-## Responsividade
-
-- Desktop (>1024px): 3 colunas feature cards, 4 colunas KPIs
-- Tablet (768-1024px): 2+1 feature cards, 2x2 KPIs
-- Mobile (<768px): 1 coluna tudo, header com hamburger menu
-
----
-
-## Sequencia de Implementacao
-
-1. Adicionar CSS de animacao ao index.css
-2. Criar AppHeader.tsx
-3. Criar Home.tsx
-4. Atualizar App.tsx (nova rota)
-5. Atualizar Chat.tsx (AppHeader + pending_query)
-6. Atualizar Financeiro.tsx e Pedidos.tsx (AppHeader)
+| Arquivo | Acao |
+|---------|------|
+| `supabase/config.toml` | Adicionar `[functions.nlq-proxy]` |
+| `src/hooks/useChatbot.ts` | Trocar fetch direto por `supabase.functions.invoke` |
+| `supabase/functions/nlq-proxy/index.ts` | Sem mudanca (re-deploy automatico) |
 
