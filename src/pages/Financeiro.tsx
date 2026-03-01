@@ -1,9 +1,8 @@
- import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { DonutChart } from '@/components/dashboard/DonutChart';
 import { HorizontalBarChart } from '@/components/dashboard/HorizontalBarChart';
-import { TransactionsTable } from '@/components/dashboard/TransactionsTable';
 import { useFinanceiroKPIs, useCategoriasDespesas } from '@/hooks/useFinanceiro';
 
 function formatCurrency(value: number): string {
@@ -14,8 +13,8 @@ function formatCurrency(value: number): string {
     maximumFractionDigits: 0,
   }).format(value);
 }
- 
- export default function Financeiro() {
+
+export default function Financeiro() {
   const { kpis, isLoading: kpisLoading } = useFinanceiroKPIs();
   const { categorias, isLoading: categoriasLoading } = useCategoriasDespesas();
 
@@ -30,11 +29,10 @@ function formatCurrency(value: number): string {
     value: c.valor,
   }));
 
-   return (
-     <DashboardLayout title="Financeiro">
-       <div className="space-y-6">
-         {/* KPI Cards */}
-         <div className="grid gap-4 md:grid-cols-3">
+  return (
+    <DashboardLayout title="Financeiro">
+      <div className="space-y-6">
+        <div className="grid gap-4 md:grid-cols-3">
           <KPICard
             title="Receita Total"
             value={formatCurrency(kpis.receita)}
@@ -59,10 +57,9 @@ function formatCurrency(value: number): string {
             variant={kpis.resultado >= 0 ? 'success' : 'destructive'}
             isLoading={kpisLoading}
           />
-         </div>
- 
-        {/* Charts */}
-         <div className="grid gap-4 md:grid-cols-2">
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
           <DonutChart
             title="Composição de Custos"
             data={donutData}
@@ -74,11 +71,8 @@ function formatCurrency(value: number): string {
             isLoading={categoriasLoading}
             color="hsl(0, 84%, 60%)"
           />
-         </div>
- 
-        {/* Transactions table */}
-        <TransactionsTable />
-       </div>
-     </DashboardLayout>
-   );
- }
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}

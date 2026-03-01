@@ -10,11 +10,10 @@ import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Suspense, lazy } from "react";
 import { Loader2 } from "lucide-react";
 
-// Lazy load pages
 const Auth = lazy(() => import("./pages/Auth"));
+const Chat = lazy(() => import("./pages/Chat"));
 const Financeiro = lazy(() => import("./pages/Financeiro"));
 const Pedidos = lazy(() => import("./pages/Pedidos"));
-const Chat = lazy(() => import("./pages/Chat"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -34,46 +33,44 @@ const App = () => (
             <Toaster />
             <Sonner />
             <BrowserRouter>
-              <div className="dark">
-                <Suspense fallback={<PageLoader />}>
-                  <Routes>
-                    <Route path="/auth" element={<Auth />} />
-                    <Route
-                      path="/"
-                      element={
-                        <ProtectedRoute>
-                          <Chat />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route
-                      path="/financeiro"
-                      element={
-                        <ProtectedRoute>
-                          <Financeiro />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route
-                      path="/pedidos"
-                      element={
-                        <ProtectedRoute>
-                          <Pedidos />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route
-                      path="/chat"
-                      element={
-                        <ProtectedRoute>
-                          <Chat />
-                        </ProtectedRoute>
-                      }
-                    />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </Suspense>
-              </div>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route path="/auth" element={<Auth />} />
+                  <Route
+                    path="/"
+                    element={
+                      <ProtectedRoute>
+                        <Chat />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/chat"
+                    element={
+                      <ProtectedRoute>
+                        <Chat />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/financeiro"
+                    element={
+                      <ProtectedRoute>
+                        <Financeiro />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/pedidos"
+                    element={
+                      <ProtectedRoute>
+                        <Pedidos />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
             </BrowserRouter>
           </TooltipProvider>
         </DateFilterProvider>
