@@ -116,9 +116,14 @@ Deno.serve(async (req) => {
     const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const n8nPayload = { app: 'grafica_nbl_lovable', session_id: body.session_id || 'anonymous', timezone: body.timezone || 'America/Fortaleza', message: body.message.trim(), context: body.context || {} };
+      console.log('[nlq-proxy] Sending to n8n:', N8N_WEBHOOK_URL);
+      console.log('[nlq-proxy] Payload:', JSON.stringify(n8nPayload));
       const n8nResponse = await fetch(N8N_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n8nPayload), signal: controller.signal });
       clearTimeout(timeoutId);
+      console.log('[nlq-proxy] n8n status:', n8nResponse.status);
       if (!n8nResponse.ok) {
+        const errorBody = await n8nResponse.text();
+        console.error('[nlq-proxy] n8n error body:', errorBody);
         return new Response(JSON.stringify({ ok: false, error: { code: 'UPSTREAM_ERROR', message: ERROR_MESSAGES.UPSTREAM_ERROR } } as ChatResponse), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       const rawData = await n8nResponse.text();

@@ -14,6 +14,74 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          error_detail: string | null
+          id: string
+          role: string
+          session_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          error_detail?: string | null
+          id?: string
+          role: string
+          session_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          error_detail?: string | null
+          id?: string
+          role?: string
+          session_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_sessions: {
+        Row: {
+          created_at: string
+          id: string
+          last_message_at: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          title?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       is_clientes: {
         Row: {
           celular: string | null
@@ -1751,6 +1819,27 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "vw_dashboard_pedidos"
             referencedColumns: ["pedido_id"]
+          },
+        ]
+      }
+      vw_chat_context: {
+        Row: {
+          content: string | null
+          created_at: string | null
+          id: string | null
+          role: string | null
+          session_id: string | null
+          session_title: string | null
+          status: string | null
+          user_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
           },
         ]
       }
