@@ -6,7 +6,7 @@ import DotMapCanvas from '@/components/auth/DotMapCanvas'; // Keeping this if ne
 
 export default function Auth() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="dark min-h-screen w-full flex items-center justify-center bg-background p-4">
       <SignInCard />
     </div>
   );

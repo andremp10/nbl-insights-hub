@@ -153,19 +153,20 @@ export function SessionsSidebar({
 
       {/* Toggle button when closed */}
       {!isOpen && (
-        <button
-          onClick={onToggle}
-          className={cn(
-            'fixed left-0 top-1/2 -translate-y-1/2 z-40',
-            'flex items-center justify-center w-6 h-12',
-            'bg-card border border-border border-l-0 rounded-r-lg',
-            'text-muted-foreground hover:text-foreground hover:bg-accent',
-            'transition-colors'
-          )}
-          aria-label="Abrir sidebar"
-        >
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex-shrink-0 flex items-center">
+          <button
+            onClick={onToggle}
+            className={cn(
+              'flex items-center justify-center w-6 h-12',
+              'bg-card border border-border border-l-0 rounded-r-lg',
+              'text-muted-foreground hover:text-foreground hover:bg-accent',
+              'transition-colors'
+            )}
+            aria-label="Abrir sidebar"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
     </>
   );
