@@ -14,6 +14,7 @@ import {
   SidebarMenuItem,
   SidebarFooter,
   SidebarTrigger,
+  SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
@@ -56,6 +57,7 @@ export function AppSidebar() {
             )}
           </div>
           {!collapsed && <SidebarTrigger className="text-muted-foreground hover:text-foreground" />}
+          {collapsed && <SidebarTrigger className="text-muted-foreground hover:text-foreground mt-1" />}
         </div>
       </SidebarHeader>
 
@@ -113,6 +115,7 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   );
 }
