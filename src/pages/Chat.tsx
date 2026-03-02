@@ -105,7 +105,7 @@ export default function Chat() {
           ) : !hasMessages && !sending ? (
             <ChatEmptyState onSuggestionClick={(text) => setSuggestionText(text)} />
           ) : (
-            <div className="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-4">
+            <div className="w-full max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-6">
               {messages.map((message) => (
                 <ChatMessage
                   key={message.id}
@@ -179,8 +179,8 @@ function ChatInputInline({
   };
 
   return (
-    <div className="border-t border-border bg-sidebar-background px-4 py-3 md:px-6">
-      <div className="max-w-3xl mx-auto">
+    <div className="border-t border-border bg-sidebar-background px-4 py-3 md:px-8">
+      <div className="w-full max-w-3xl mx-auto">
         <div className="relative">
           <textarea
             ref={textareaRef}
