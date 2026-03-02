@@ -75,7 +75,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
         </div>
       )}
 
-      <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start', isUser ? 'max-w-[70%]' : 'max-w-[85%]')}>
+      <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start', isUser ? 'max-w-[75%] ml-auto' : 'max-w-[90%]')}>
         <div
           className={cn(
             'px-4 py-3 space-y-3',
