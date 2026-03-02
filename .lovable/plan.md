@@ -1,73 +1,169 @@
 
+# Plano: Chat com Sessoes, Realtime e Fire-and-Forget
 
-# Plano: Reestruturar Chamada do Agente via Edge Function
+## Resumo
 
-## Problema Identificado
+Reestruturar completamente o sistema de chat para usar:
+- Edge Function fire-and-forget (retorna em < 2s, n8n processa em background)
+- Supabase Realtime para receber respostas do agente
+- Sessoes persistidas no banco (chat_sessions + chat_messages)
+- Sidebar de sessoes estilo ChatGPT
+- Guards contra disparos duplicados (4 camadas de protecao)
 
-O `useChatbot.ts` chama o webhook do n8n **diretamente do navegador** do usuario. Isso causa:
+---
 
-1. **Bloqueio por CORS** — o navegador bloqueia a requisicao cross-origin ao Railway, resultando em erro imediato
-2. **Timeout de 60s muito curto** — o agente n8n pode demorar mais que 60s para processar queries complexas (consultar banco, gerar resposta)
-3. **Edge Function existente nao esta sendo usada** — ja existe `supabase/functions/nlq-proxy/index.ts` com logica correta mas o frontend ignora ela
-4. **Config.toml incompleto** — falta `verify_jwt = false` para permitir chamadas a Edge Function
+## Problema Critico: RLS vs Auth
 
-## Solucao
+O app usa autenticacao simples por senha (nao Supabase Auth). As tabelas `chat_sessions` e `chat_messages` tem politicas RLS que exigem `auth.uid()`, o que bloqueia TODAS as operacoes do frontend (leitura, escrita e Realtime).
 
-Redirecionar todas as chamadas do chat para passar pela Edge Function `nlq-proxy`, que:
-- Roda server-side (sem CORS)
-- Tem timeout de 150s (suficiente para o agente)
-- Normaliza a resposta antes de devolver ao frontend
+**Solucao**: Adicionar politicas permissivas para o role `anon` nas tabelas de chat, ja que a seguranca real e a senha do dashboard. Isso permite que o frontend leia mensagens e receba eventos Realtime.
 
-## Mudancas
+---
 
-### 1. `supabase/config.toml`
-Adicionar configuracao da Edge Function:
+## Sequencia de Implementacao
 
-```toml
-project_id = "bcypejzqbcwibvtbbfor"
+### 1. Migracao SQL — Politicas RLS para anon
 
-[functions.nlq-proxy]
-verify_jwt = false
+Adicionar politicas permissivas que permitam operacoes do frontend:
+
+```sql
+-- chat_sessions: anon pode ler, criar, deletar
+CREATE POLICY "anon_select_sessions" ON chat_sessions FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_insert_sessions" ON chat_sessions FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "anon_delete_sessions" ON chat_sessions FOR DELETE TO anon USING (true);
+CREATE POLICY "anon_update_sessions" ON chat_sessions FOR UPDATE TO anon USING (true);
+
+-- chat_messages: anon pode ler (Realtime) e deletar (retry)
+CREATE POLICY "anon_select_messages" ON chat_messages FOR SELECT TO anon USING (true);
+CREATE POLICY "anon_delete_messages" ON chat_messages FOR DELETE TO anon USING (true);
 ```
 
-### 2. `src/hooks/useChatbot.ts`
-Substituir `fetch` direto ao Railway por `supabase.functions.invoke('nlq-proxy')`:
-
-- Importar o client Supabase
-- Remover a constante `WEBHOOK_URL`
-- Trocar o `fetch` por `supabase.functions.invoke('nlq-proxy', { body: payload })`
-- Aumentar timeout do frontend para 180s (acima dos 150s da Edge Function, para que o timeout server-side seja o que controla)
-- A Edge Function ja normaliza a resposta no formato `{ ok, reply, error }` — o frontend so precisa ler esse contrato
-- Tratar `ok: false` como erro com mensagem amigavel do campo `error.message`
-
-Logica simplificada:
-
-```text
-1. Usuario envia mensagem
-2. Frontend chama supabase.functions.invoke('nlq-proxy', { body })
-3. Edge Function recebe, faz fetch ao n8n (150s timeout server-side)
-4. Edge Function normaliza resposta e retorna { ok, reply }
-5. Frontend le reply.text e exibe
-6. Se ok=false, exibe error.message com botao retry
+Tambem habilitar Realtime na tabela chat_messages se ainda nao estiver:
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE chat_messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE chat_sessions;
 ```
 
-### 3. `supabase/functions/nlq-proxy/index.ts`
-A Edge Function ja esta funcional. Apenas ajustar:
-- Verificar que o webhook URL esta correto (ja esta: `https://primary-production-c00b.up.railway.app/webhook/...`)
-- Re-deploy automatico apos alteracao no config.toml
+### 2. Edge Function `nlq-proxy` — Fire-and-Forget
 
-## Beneficios
+Reescrever completamente. Nova logica:
 
-- **Sem CORS**: Edge Function roda server-side
-- **Timeout adequado**: 150s no servidor, o agente tem tempo de responder
-- **Resposta garantida**: o usuario sempre recebe uma mensagem (sucesso ou erro estruturado)
-- **Seguranca**: webhook URL fica no servidor, nao exposta no bundle do frontend
+1. Receber `{ message, session_id }` do frontend
+2. Verificar duplicata (mesma mensagem + session nos ultimos 10s)
+3. Inserir mensagem do usuario (status: complete)
+4. Inserir mensagem pendente do assistente (status: pending)
+5. Buscar ultimas 10 mensagens para contexto
+6. Disparar fetch ao n8n via `EdgeRuntime.waitUntil()` (sem await)
+7. Retornar `{ success: true, pending_message_id }` em < 2s
+
+Sem autenticacao Supabase Auth (app usa senha simples). Usa `SUPABASE_SERVICE_ROLE_KEY` para todas as operacoes de banco.
+
+URL do webhook: `https://n8n-nbl-golfine.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6`
+
+Se o n8n falhar ou nao responder, o handler em background atualiza a mensagem pendente para status `error`.
+
+### 3. Hook `useChatSessions.ts`
+
+Gerencia sessoes do usuario:
+- `fetchSessions()` — lista sessoes ordenadas por last_message_at
+- `createSession()` — cria nova sessao
+- `deleteSession(id)` — exclui sessao
+- `groupedSessions` — agrupa por Hoje/Ontem/Esta semana/Mais antigas
+- Escuta Realtime em `chat_sessions` para atualizacoes automaticas
+
+### 4. Hook `useChatMessages.ts`
+
+Gerencia mensagens de uma sessao:
+- Busca mensagens ao mudar de sessao
+- Escuta Realtime (INSERT e UPDATE) em `chat_messages` filtrado por session_id
+- `sendMessage(content)` — chama Edge Function, recebe pending_message_id
+- Guard sincrono via `useRef` (invokeInProgressRef) para evitar disparos duplos
+- Timeout de 5 minutos: se mensagem pendente nao for resolvida, marca como erro
+- `retryMessage(errorMessageId)` — encontra mensagem do usuario anterior e reenvia
+- Apos invoke, verifica se Edge Function criou o pending mesmo em caso de erro de rede
+
+### 5. Componente `SessionsSidebar.tsx`
+
+Sidebar lateral esquerda (260px desktop, drawer mobile):
+- Botao "+ Nova conversa"
+- Sessoes agrupadas por data (Hoje, Ontem, Esta semana, Mais antigas)
+- Sessao ativa: destaque com borda laranja
+- Menu de contexto com "Excluir" em cada sessao
+- Botao de colapsar sidebar
+- Background #0D0D0D, border-right #2A2A2A
+
+### 6. Componente `ChatEmptyState.tsx`
+
+Estado vazio quando nao ha mensagens na sessao:
+- Icone sparkle grande
+- Titulo "Assistente NBL Grafica"
+- 3 pills de sugestao que preenchem o input (nao enviam)
+
+### 7. Atualizar `ChatMessage.tsx`
+
+Adaptar para o novo tipo de mensagem (do banco, com campo `status`):
+- `status: pending` — mostra ThinkingBubble inline
+- `status: complete` — renderiza markdown normalmente
+- `status: error` — mostra mensagem de erro com botao "Tentar novamente"
+- Remover dependencia do tipo `Message` do useChatbot.ts
+- Usar o novo tipo `ChatMessage` do useChatMessages.ts
+
+### 8. Atualizar `ChatInput.tsx`
+
+- Remover botao de cancelar (sistema nunca cancela)
+- Guard local via submitRef para impedir submit duplo
+- Textarea e botao disabled quando `sending === true`
+- Texto "Aguardando resposta..." abaixo do input quando sending
+- `onSend` retorna Promise para o submitRef funcionar
+
+### 9. Reescrever `Chat.tsx`
+
+Layout com duas colunas:
+- Esquerda: SessionsSidebar (recolhivel)
+- Direita: area de chat com AppHeader
+
+Comportamento ao carregar:
+1. Buscar sessoes
+2. Se existir, selecionar a mais recente
+3. Se nao, criar nova automaticamente
+4. Checar `nbl_pending_query` no localStorage e auto-enviar
+
+### 10. Remover `useChatbot.ts`
+
+O hook antigo (localStorage, fetch sincrono) sera substituido pelos novos hooks. O arquivo pode ser removido ou esvaziado.
+
+---
 
 ## Arquivos Afetados
 
 | Arquivo | Acao |
 |---------|------|
-| `supabase/config.toml` | Adicionar `[functions.nlq-proxy]` |
-| `src/hooks/useChatbot.ts` | Trocar fetch direto por `supabase.functions.invoke` |
-| `supabase/functions/nlq-proxy/index.ts` | Sem mudanca (re-deploy automatico) |
+| Migracao SQL | Criar (RLS + Realtime) |
+| supabase/functions/nlq-proxy/index.ts | Reescrever (fire-and-forget) |
+| src/hooks/useChatSessions.ts | Criar |
+| src/hooks/useChatMessages.ts | Criar |
+| src/components/chat/SessionsSidebar.tsx | Criar |
+| src/components/chat/ChatEmptyState.tsx | Criar |
+| src/components/chat/ChatMessage.tsx | Reescrever (novo tipo + status) |
+| src/components/chat/ChatInput.tsx | Reescrever (sem cancel, com guards) |
+| src/pages/Chat.tsx | Reescrever (sidebar + realtime) |
+| src/hooks/useChatbot.ts | Remover |
 
+---
+
+## Guards Contra Disparos Duplicados (4 camadas)
+
+1. **useRef sincrono** no sendMessage — nao depende de re-render do React
+2. **Edge Function retorna antes do fetch** ao n8n via waitUntil — cliente nunca sofre timeout
+3. **Janela de idempotencia de 10s** na Edge Function — detecta duplicata no banco antes de INSERT
+4. **submitRef local** no ChatInput com disabled no textarea e botao — impossivel enviar fisicamente enquanto aguarda
+
+---
+
+## Regra Critica de UX
+
+O sistema NUNCA abandona o usuario sem resposta. O typing indicator permanece visivel ate:
+- Resposta completa do n8n chegar via Realtime
+- Timeout de 5 minutos sem resposta (marca como erro com opcao de retry)
+
+Nao existe botao de cancelar. A espera faz parte da experiencia.
