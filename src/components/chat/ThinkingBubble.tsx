@@ -1,7 +1,25 @@
-import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Database } from 'lucide-react';
 
+const PHRASES = [
+  'Consultando base de dados...',
+  'Analisando os registros...',
+  'Processando informações...',
+  'Organizando os resultados...',
+  'Preparando a resposta...',
+];
+
 export function ThinkingBubble() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIndex((prev) => (prev + 1) % PHRASES.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -30,7 +48,18 @@ export function ThinkingBubble() {
             />
           ))}
         </div>
-        <span className="text-[12px] text-muted-foreground/60">Consultando base de dados...</span>
+        <AnimatePresence mode="wait">
+          <motion.span
+            key={index}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25 }}
+            className="text-[12px] text-muted-foreground/60"
+          >
+            {PHRASES[index]}
+          </motion.span>
+        </AnimatePresence>
       </div>
     </motion.div>
   );
