@@ -1,111 +1,112 @@
 
-Objetivo imediato: restaurar 100% do fluxo crítico do chat (criar conversa, criar conversa automaticamente ao enviar e disparar webhook sem travar), corrigindo a causa raiz no banco e endurecendo o frontend contra falhas silenciosas.
 
-1) Diagnóstico consolidado (causa raiz real)
-- O travamento não é mais RLS.
-- O bloqueio atual é estrutural no banco:
-  - `chat_sessions.user_id` tem FK `chat_sessions_user_id_fkey -> auth.users(id)`.
-  - `auth.users` está vazio (0 usuários).
-  - O frontend usa `deviceId` local (UUID), não Supabase Auth.
-  - Resultado: `createSession()` falha com 409/23503 e nunca cria sessão.
-- Efeito em cascata:
-  - `currentSessionId` fica `null`.
-  - `sendMessage()` retorna no guard `if (!sessionId)`.
-  - Edge function `nlq-proxy` nunca é chamada.
-  - Usuário percebe “nada acontece”.
+# Plano de Auditoria e Melhorias — NBL Insights Hub
 
-2) Correção de banco (prioridade máxima)
-Criar uma nova migration SQL para remover o acoplamento errado com `auth.users`:
-- Dropar FK problemática:
-  - `ALTER TABLE public.chat_sessions DROP CONSTRAINT IF EXISTS chat_sessions_user_id_fkey;`
-- Manter `user_id uuid NOT NULL` (compatível com `deviceId` atual).
-- Criar índice para leitura por usuário-dispositivo:
-  - `CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON public.chat_sessions(user_id);`
+## Sequencia de Execucao
 
-Ajuste complementar importante:
-- Existe função `public.sync_session_on_message()`, mas hoje não há trigger ativo em `chat_messages`.
-- Criar trigger (idempotente via bloco DO) para atualizar `last_message_at` e título automático:
-  - `AFTER INSERT ON public.chat_messages FOR EACH ROW EXECUTE FUNCTION public.sync_session_on_message();`
+---
 
-3) Correções críticas no frontend (evitar “silêncio” e perda de mensagem)
-Arquivos-alvo:
-- `src/hooks/useChatSessions.ts`
-- `src/hooks/useChatMessages.ts`
-- `src/pages/Chat.tsx` (ChatInputInline interno)
+### 1. Corrigir Duplicacao de Mensagens (Bug Critico)
 
-3.1 `useChatSessions.ts`
-- Fortalecer `createSession()`:
-  - Capturar erro e logar claramente (incluindo código/constraint).
-  - Evitar chamadas concorrentes com `creatingRef` (duplo clique em “Nova conversa”).
-  - Retornar `null` explicitamente em falha.
-- Em `fetchSessions()`, logar erro quando existir (hoje falha é silenciosa).
+**Causa Raiz Identificada:**
+A Edge Function (`nlq-proxy`) insere a mensagem do usuario no banco (linha 66). Simultaneamente, o frontend (`useChatMessages.ts` linhas 101-109) cria uma mensagem otimista com `id: opt-{timestamp}`. Quando o Realtime dispara o evento INSERT da mensagem real (com UUID do banco), o dedup check na linha 61 compara pelo `id` — mas os IDs sao diferentes (`opt-123` vs `uuid-real`). Resultado: duas mensagens do usuario aparecem.
 
-3.2 `Chat.tsx` (fluxo automático robusto)
-- Criar helper `ensureSession()`:
-  - Se já houver `currentSessionId`, retorna.
-  - Se não houver, chama `createSession()`, seta `currentSessionId` e retorna id.
-- Aplicar `ensureSession()` em dois cenários:
-  1. bootstrap inicial (primeiro carregamento);
-  2. envio de mensagem quando não há sessão ativa.
-- Adicionar fila simples para mensagem pendente:
-  - Se usuário enviar sem sessão, guardar mensagem em `pendingToSendRef`.
-  - Após sessão ser criada e `currentSessionId` atualizado, enviar automaticamente.
-- Evitar loops de bootstrap com `bootstrapTriedRef` (impede tentativas repetitivas em renders).
+**Correcao:**
+- Remover a insercao otimista do usuario no `useChatMessages.ts`. A Edge Function ja insere a mensagem do usuario no banco, e o Realtime traz ela automaticamente.
+- Manter apenas o estado `sending=true` para feedback visual.
+- O fluxo correto sera: usuario envia -> frontend chama Edge Function -> Edge Function insere user msg + pending msg -> Realtime traz ambas -> UI renderiza.
 
-3.3 `useChatMessages.ts`
-- Ajustar `sendMessage` para retornar sucesso (`Promise<boolean>`):
-  - `false` quando não enviou (sem sessão, guard ativo, erro real).
-  - `true` quando invoke foi aceito ou quando detectou pending já criado.
-- Manter guard síncrono `invokeInProgressRef` como trava principal.
-- Preservar lógica anti-duplicidade atual (sem retry automático).
+**Arquivo afetado:** `src/hooks/useChatMessages.ts`
 
-3.4 `ChatInputInline` (em `Chat.tsx`)
-- Não limpar input antes da confirmação de envio.
-- Novo fluxo:
-  - chama `onSend(msg)` e só limpa se retornar `true`.
-  - se retornar `false`, mantém texto no campo para o usuário tentar de novo.
-- Isso evita perda de mensagem quando sessão ainda não existe.
+---
 
-4) Edge Function (`nlq-proxy`) – auditoria e ajuste mínimo
-Arquivo:
-- `supabase/functions/nlq-proxy/index.ts`
+### 2. Corrigir Filtros de Data (Views ja Existem)
 
-Status atual:
-- Fire-and-forget e idempotência de 10s já estão corretos.
-- Não há logs porque a função não estava sendo chamada (bloqueio anterior no createSession).
+**Diagnostico:**
+As views `vw_dashboard_pedidos` e as RPCs `get_financeiro_kpis` / `get_financeiro_graficos` ja existem e funcionam. O problema e que o filtro padrao e "Ultimos 30 dias" (marco 2026), mas os dados no banco sao de 2019-2023. Por isso tudo aparece zerado.
 
-Ação:
-- Sem refatoração grande.
-- Apenas validação de consistência pós-correção:
-  - confirmar que ainda retorna imediatamente com `pending_message_id`;
-  - confirmar que continua 1 webhook por mensagem enviada.
+**Correcao:**
+- Alterar o `DateFilterContext` para ter presets mais uteis: "Ultimos 7 dias", "Ultimos 30 dias", "Este Mes", "Este Ano", "Todo Periodo" e "Personalizado".
+- Mudar o padrao inicial para "Todo Periodo" (2019 ate hoje) para que o usuario veja dados ao abrir pela primeira vez.
+- Simplificar o `DateFilterBar` para ser mais compacto: botoes de preset em linha + seletor de datas customizado.
+- Fechar o popover de calendario automaticamente apos selecionar ambas as datas.
 
-5) Sequência de implementação (ordem obrigatória)
-1. Migration SQL: remover FK de `chat_sessions.user_id` e criar trigger ausente.
-2. Ajustar `useChatSessions.ts` (erros + trava de criação concorrente).
-3. Ajustar `Chat.tsx` (ensureSession + fila de envio pendente).
-4. Ajustar `useChatMessages.ts` para retorno booleano de envio.
-5. Ajustar `ChatInputInline` para não limpar input em envio não confirmado.
-6. Validar manualmente no preview + logs/requisições.
+**Arquivos afetados:**
+- `src/contexts/DateFilterContext.tsx`
+- `src/components/layout/DateFilterBar.tsx`
 
-6) Critérios de aceite (teste ponta a ponta)
-- Botão “Nova conversa” cria sessão imediatamente.
-- Ao abrir `/chat` sem sessões, uma sessão é criada automaticamente.
-- Se usuário digitar e enviar sem sessão ativa, sessão é criada e mensagem enviada em seguida (sem perder texto).
-- Network:
-  - `POST /rest/v1/chat_sessions` retorna 201 (não 409).
-  - `POST /functions/v1/nlq-proxy` ocorre ao enviar.
-- Edge logs deixam de ficar vazios.
-- Realtime atualiza pending -> complete/error normalmente.
-- Não há disparo duplicado de webhook para uma única mensagem.
+---
 
-7) Risco técnico e mitigação
-- Remover FK para `auth.users` reduz integridade relacional com Supabase Auth, mas é a correção correta para a arquitetura atual (auth local por senha + `deviceId`).
-- Mitigação futura (quando quiser endurecer segurança): migrar para Supabase Auth real e voltar a usar FK via `profiles`/`auth.users`.
+### 3. Implementar Sidebar Lateral
 
-8) Resultado esperado após aprovação
-- Chat volta a funcionar de forma previsível:
-  - criação de conversa funciona;
-  - envio cria conversa automaticamente quando necessário;
-  - webhook n8n volta a ser disparado;
-  - desaparece o “nada funciona no chat assistente”.
+**Abordagem:**
+Substituir o `AppHeader` horizontal por uma sidebar lateral recolhivel usando o componente `AppSidebar` que ja existe parcialmente. Usar `SidebarProvider` do shadcn/ui.
+
+**Detalhes:**
+- Criar um layout wrapper (`AppLayout`) que envolve todas as paginas protegidas com `SidebarProvider` + `AppSidebar` + conteudo.
+- A sidebar tera: logo NBL Grafica no topo (usando a imagem enviada pelo usuario copiada para `src/assets`), links de navegacao (Home, Assistente, Financeiro, Pedidos) com icones, e avatar + logout no rodape.
+- Quando recolhida: apenas icones com tooltip.
+- Em mobile: drawer que abre sobre o conteudo.
+- Item ativo com destaque laranja (borda lateral + bg primary/10).
+- Remover `AppHeader` das paginas individuais e usar o layout compartilhado.
+- A pagina de Chat mantera sua propria SessionsSidebar interna para conversas.
+
+**Arquivos afetados:**
+- `src/components/layout/AppSidebar.tsx` — reescrever com logo, Home link, e estilo atualizado
+- `src/components/layout/AppLayout.tsx` — criar novo layout wrapper
+- `src/App.tsx` — envolver rotas protegidas com AppLayout
+- `src/pages/Home.tsx` — remover AppHeader
+- `src/pages/Chat.tsx` — remover AppHeader
+- `src/pages/Financeiro.tsx` — remover AppHeader
+- `src/pages/Pedidos.tsx` — remover AppHeader
+- Copiar logo NBL para `src/assets/nbl-logo.png`
+
+---
+
+### 4. Redesenhar Pagina Inicial
+
+**Abordagem:**
+Reescrever `Home.tsx` com hierarquia visual clara:
+1. Saudacao grande e com personalidade no topo
+2. Input de consulta rapida centralizado e em destaque (o Assistente e o foco)
+3. Pills de sugestoes logo abaixo
+4. Cards de navegacao secundaria (Financeiro e Pedidos) menores, em grid 2 colunas
+5. KPIs do resumo do dia discretos na parte inferior
+
+Layout centralizado com `max-w-[800px]` e espacamento generoso.
+
+**Arquivo afetado:** `src/pages/Home.tsx`
+
+---
+
+### 5. Melhorar Componente de Resposta do Agente
+
+**Abordagem:**
+O `ChatMessage.tsx` ja tem suporte a markdown com tabelas via `react-markdown` + `remark-gfm`. Melhorias:
+
+- Adicionar deteccao de conteudo: se a resposta contem apenas um numero/valor monetario com label, renderizar em formato "highlight card" (valor grande centralizado com label descritivo).
+- Melhorar estilo das tabelas: linhas alternadas com `even:bg-muted/30`, valores numericos alinhados a direita (detectar via regex), cabecalho com fundo `primary/10`.
+- Adicionar estilo para blocos de codigo e listas.
+- Manter texto narrativo com boa tipografia e espacamento.
+
+**Arquivo afetado:** `src/components/chat/ChatMessage.tsx`
+
+---
+
+## Resumo de Arquivos
+
+| Arquivo | Acao |
+|---------|------|
+| `src/hooks/useChatMessages.ts` | Remover insercao otimista duplicada |
+| `src/contexts/DateFilterContext.tsx` | Atualizar presets e padrao |
+| `src/components/layout/DateFilterBar.tsx` | Simplificar UI |
+| `src/components/layout/AppSidebar.tsx` | Reescrever com logo e Home |
+| `src/components/layout/AppLayout.tsx` | Criar layout wrapper |
+| `src/App.tsx` | Usar AppLayout nas rotas |
+| `src/pages/Home.tsx` | Redesenhar |
+| `src/pages/Chat.tsx` | Remover AppHeader |
+| `src/pages/Financeiro.tsx` | Remover AppHeader |
+| `src/pages/Pedidos.tsx` | Remover AppHeader |
+| `src/components/chat/ChatMessage.tsx` | Melhorar renderizacao |
+| `src/assets/nbl-logo.png` | Copiar logo |
+
