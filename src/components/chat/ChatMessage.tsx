@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
 import { Database, AlertTriangle, RotateCcw } from 'lucide-react';
 import { ThinkingBubble } from './ThinkingBubble';
+import { useTypewriter } from '@/hooks/useTypewriter';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -42,12 +43,17 @@ function isNumericCell(text: string): boolean {
 interface ChatMessageProps {
   message: ChatMessageType;
   onRetry?: () => void;
+  animate?: boolean;
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate = false }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const isPending = message.status === 'pending';
   const isError = message.status === 'error';
+
+  const shouldAnimate = animate && !isUser && !isPending && !isError;
+  const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 12);
+  const contentToRender = shouldAnimate ? displayedText : message.content;
 
   const highlightCard = useMemo(() => {
     if (isUser || isPending || isError) return null;
@@ -111,6 +117,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
             <div className={cn('text-sm leading-relaxed break-words', isUser ? 'text-primary-foreground' : '')}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                key={shouldAnimate ? displayedText.length : 'static'}
                 components={{
                   table: ({ children, ...props }) => (
                     <div className="my-3 w-full overflow-x-auto rounded-lg border border-border">
@@ -167,8 +174,11 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
                   },
                 }}
               >
-                {message.content}
+                {contentToRender}
               </ReactMarkdown>
+              {isTyping && (
+                <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+              )}
             </div>
           )}
         </div>
