@@ -1,109 +1,111 @@
 
+Objetivo imediato: restaurar 100% do fluxo crítico do chat (criar conversa, criar conversa automaticamente ao enviar e disparar webhook sem travar), corrigindo a causa raiz no banco e endurecendo o frontend contra falhas silenciosas.
 
-# Correcao Critica: RLS Bloqueando Todas as Operacoes do Chat
+1) Diagnóstico consolidado (causa raiz real)
+- O travamento não é mais RLS.
+- O bloqueio atual é estrutural no banco:
+  - `chat_sessions.user_id` tem FK `chat_sessions_user_id_fkey -> auth.users(id)`.
+  - `auth.users` está vazio (0 usuários).
+  - O frontend usa `deviceId` local (UUID), não Supabase Auth.
+  - Resultado: `createSession()` falha com 409/23503 e nunca cria sessão.
+- Efeito em cascata:
+  - `currentSessionId` fica `null`.
+  - `sendMessage()` retorna no guard `if (!sessionId)`.
+  - Edge function `nlq-proxy` nunca é chamada.
+  - Usuário percebe “nada acontece”.
 
-## Problema Identificado
+2) Correção de banco (prioridade máxima)
+Criar uma nova migration SQL para remover o acoplamento errado com `auth.users`:
+- Dropar FK problemática:
+  - `ALTER TABLE public.chat_sessions DROP CONSTRAINT IF EXISTS chat_sessions_user_id_fkey;`
+- Manter `user_id uuid NOT NULL` (compatível com `deviceId` atual).
+- Criar índice para leitura por usuário-dispositivo:
+  - `CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON public.chat_sessions(user_id);`
 
-O problema NAO esta no codigo do frontend nem na Edge Function. O sistema trava porque **as politicas RLS bloqueiam TODAS as operacoes** do frontend nas tabelas de chat.
+Ajuste complementar importante:
+- Existe função `public.sync_session_on_message()`, mas hoje não há trigger ativo em `chat_messages`.
+- Criar trigger (idempotente via bloco DO) para atualizar `last_message_at` e título automático:
+  - `AFTER INSERT ON public.chat_messages FOR EACH ROW EXECUTE FUNCTION public.sync_session_on_message();`
 
-### Evidencia Concreta
+3) Correções críticas no frontend (evitar “silêncio” e perda de mensagem)
+Arquivos-alvo:
+- `src/hooks/useChatSessions.ts`
+- `src/hooks/useChatMessages.ts`
+- `src/pages/Chat.tsx` (ChatInputInline interno)
 
-A network request mostra o erro:
-```
-POST /rest/v1/chat_sessions → 401
-Response: "new row violates row-level security policy for table chat_sessions"
-```
+3.1 `useChatSessions.ts`
+- Fortalecer `createSession()`:
+  - Capturar erro e logar claramente (incluindo código/constraint).
+  - Evitar chamadas concorrentes com `creatingRef` (duplo clique em “Nova conversa”).
+  - Retornar `null` explicitamente em falha.
+- Em `fetchSessions()`, logar erro quando existir (hoje falha é silenciosa).
 
-### Causa Raiz
+3.2 `Chat.tsx` (fluxo automático robusto)
+- Criar helper `ensureSession()`:
+  - Se já houver `currentSessionId`, retorna.
+  - Se não houver, chama `createSession()`, seta `currentSessionId` e retorna id.
+- Aplicar `ensureSession()` em dois cenários:
+  1. bootstrap inicial (primeiro carregamento);
+  2. envio de mensagem quando não há sessão ativa.
+- Adicionar fila simples para mensagem pendente:
+  - Se usuário enviar sem sessão, guardar mensagem em `pendingToSendRef`.
+  - Após sessão ser criada e `currentSessionId` atualizado, enviar automaticamente.
+- Evitar loops de bootstrap com `bootstrapTriedRef` (impede tentativas repetitivas em renders).
 
-Todas as politicas RLS nas tabelas `chat_sessions` e `chat_messages` exigem `auth.uid()`:
+3.3 `useChatMessages.ts`
+- Ajustar `sendMessage` para retornar sucesso (`Promise<boolean>`):
+  - `false` quando não enviou (sem sessão, guard ativo, erro real).
+  - `true` quando invoke foi aceito ou quando detectou pending já criado.
+- Manter guard síncrono `invokeInProgressRef` como trava principal.
+- Preservar lógica anti-duplicidade atual (sem retry automático).
 
-```text
-chat_sessions INSERT: WITH CHECK (user_id = auth.uid())
-chat_sessions SELECT: USING (user_id = auth.uid())
-chat_messages SELECT: USING (session_id IN (SELECT id FROM chat_sessions WHERE user_id = auth.uid()))
-```
+3.4 `ChatInputInline` (em `Chat.tsx`)
+- Não limpar input antes da confirmação de envio.
+- Novo fluxo:
+  - chama `onSend(msg)` e só limpa se retornar `true`.
+  - se retornar `false`, mantém texto no campo para o usuário tentar de novo.
+- Isso evita perda de mensagem quando sessão ainda não existe.
 
-Mas o app NAO usa Supabase Auth. Usa um `deviceId` gerado via `crypto.randomUUID()` e armazenado em localStorage. Portanto `auth.uid()` e sempre NULL e todas as operacoes falham.
+4) Edge Function (`nlq-proxy`) – auditoria e ajuste mínimo
+Arquivo:
+- `supabase/functions/nlq-proxy/index.ts`
 
-### Consequencia em Cascata
+Status atual:
+- Fire-and-forget e idempotência de 10s já estão corretos.
+- Não há logs porque a função não estava sendo chamada (bloqueio anterior no createSession).
 
-1. `createSession()` falha silenciosamente (retorna null)
-2. `currentSessionId` nunca e definido
-3. `sendMessage()` retorna imediatamente no guard `if (!sessionId)`
-4. Nenhum invoke da Edge Function acontece
-5. UI trava sem feedback
+Ação:
+- Sem refatoração grande.
+- Apenas validação de consistência pós-correção:
+  - confirmar que ainda retorna imediatamente com `pending_message_id`;
+  - confirmar que continua 1 webhook por mensagem enviada.
 
-## Solucao
+5) Sequência de implementação (ordem obrigatória)
+1. Migration SQL: remover FK de `chat_sessions.user_id` e criar trigger ausente.
+2. Ajustar `useChatSessions.ts` (erros + trava de criação concorrente).
+3. Ajustar `Chat.tsx` (ensureSession + fila de envio pendente).
+4. Ajustar `useChatMessages.ts` para retorno booleano de envio.
+5. Ajustar `ChatInputInline` para não limpar input em envio não confirmado.
+6. Validar manualmente no preview + logs/requisições.
 
-### Etapa 1: Migracao SQL — Politicas RLS para anon
+6) Critérios de aceite (teste ponta a ponta)
+- Botão “Nova conversa” cria sessão imediatamente.
+- Ao abrir `/chat` sem sessões, uma sessão é criada automaticamente.
+- Se usuário digitar e enviar sem sessão ativa, sessão é criada e mensagem enviada em seguida (sem perder texto).
+- Network:
+  - `POST /rest/v1/chat_sessions` retorna 201 (não 409).
+  - `POST /functions/v1/nlq-proxy` ocorre ao enviar.
+- Edge logs deixam de ficar vazios.
+- Realtime atualiza pending -> complete/error normalmente.
+- Não há disparo duplicado de webhook para uma única mensagem.
 
-Adicionar politicas permissivas que permitam o role `anon` operar nas tabelas de chat. A seguranca real do app e a senha do dashboard (AuthContext), nao Supabase Auth.
+7) Risco técnico e mitigação
+- Remover FK para `auth.users` reduz integridade relacional com Supabase Auth, mas é a correção correta para a arquitetura atual (auth local por senha + `deviceId`).
+- Mitigação futura (quando quiser endurecer segurança): migrar para Supabase Auth real e voltar a usar FK via `profiles`/`auth.users`.
 
-```sql
--- chat_sessions: permitir anon fazer tudo
-CREATE POLICY "anon_select_sessions" ON public.chat_sessions
-  FOR SELECT TO anon USING (true);
-
-CREATE POLICY "anon_insert_sessions" ON public.chat_sessions
-  FOR INSERT TO anon WITH CHECK (true);
-
-CREATE POLICY "anon_delete_sessions" ON public.chat_sessions
-  FOR DELETE TO anon USING (true);
-
-CREATE POLICY "anon_update_sessions" ON public.chat_sessions
-  FOR UPDATE TO anon USING (true);
-
--- chat_messages: permitir anon ler e deletar
-CREATE POLICY "anon_select_messages" ON public.chat_messages
-  FOR SELECT TO anon USING (true);
-
-CREATE POLICY "anon_insert_messages" ON public.chat_messages
-  FOR INSERT TO anon WITH CHECK (true);
-
-CREATE POLICY "anon_update_messages" ON public.chat_messages
-  FOR UPDATE TO anon USING (true);
-
-CREATE POLICY "anon_delete_messages" ON public.chat_messages
-  FOR DELETE TO anon USING (true);
-```
-
-Tambem garantir que Realtime esta habilitado:
-```sql
-ALTER PUBLICATION supabase_realtime ADD TABLE chat_messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE chat_sessions;
-```
-
-### Etapa 2: Corrigir warnings do React (ref em function components)
-
-O console mostra dois warnings de ref em function components (`ChatEmptyState` e `ChatInputInline`). Isso nao causa o travamento mas polui o console. Nao e prioridade nesta correcao.
-
-### Etapa 3: Adicionar console.logs de diagnostico no sendMessage
-
-Apos a migracao SQL, o fluxo deve funcionar. Adicionar logs temporarios para confirmar:
-
-```typescript
-// Em useChatMessages.ts sendMessage:
-console.log('[sendMessage] sessionId:', sessionId, 'inProgress:', invokeInProgressRef.current);
-```
-
-## Resumo
-
-O unico bloqueio real e a falta de politicas RLS para o role `anon`. A migracao SQL desbloqueia todo o sistema sem precisar alterar nenhum arquivo de codigo.
-
-| Item | Status |
-|------|--------|
-| Edge Function (nlq-proxy) | OK — fire-and-forget com idempotencia |
-| useChatMessages.ts | OK — guards, Realtime, timeout |
-| useChatSessions.ts | OK — deviceId, CRUD |
-| ChatInput (Chat.tsx inline) | OK — submitRef, disabled |
-| RLS policies | BLOQUEANDO — precisa de politicas anon |
-| Realtime publication | Verificar se ja inclui as tabelas |
-
-## Arquivos Afetados
-
-| Arquivo | Acao |
-|---------|------|
-| Migracao SQL | Criar politicas RLS para anon |
-| Nenhum arquivo .ts/.tsx | Sem alteracao necessaria |
-
+8) Resultado esperado após aprovação
+- Chat volta a funcionar de forma previsível:
+  - criação de conversa funciona;
+  - envio cria conversa automaticamente quando necessário;
+  - webhook n8n volta a ser disparado;
+  - desaparece o “nada funciona no chat assistente”.
