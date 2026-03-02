@@ -12,6 +12,8 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initialMsgIdsRef = useRef<Set<string>>(new Set());
+  const hasSetInitialRef = useRef(false);
   const pendingHandled = useRef(false);
   const [suggestionText, setSuggestionText] = useState('');
   const bootstrapTriedRef = useRef(false);
@@ -24,15 +26,22 @@ export default function Chat() {
     return null;
   }, [currentSessionId, createSession]);
 
+  // Track initial message IDs to avoid animating history
   useEffect(() => {
-    if (sessionsLoading || currentSessionId || bootstrapTriedRef.current) return;
-    bootstrapTriedRef.current = true;
-    if (sessions.length > 0) {
-      setCurrentSessionId(sessions[0].id);
-    } else {
-      createSession().then(s => { if (s) setCurrentSessionId(s.id); });
+    if (!messagesLoading && messages.length > 0 && !hasSetInitialRef.current) {
+      hasSetInitialRef.current = true;
+      initialMsgIdsRef.current = new Set(messages.map(m => m.id));
     }
-  }, [sessions, sessionsLoading, currentSessionId, createSession]);
+    if (currentSessionId && hasSetInitialRef.current === false && !messagesLoading && messages.length === 0) {
+      hasSetInitialRef.current = true;
+    }
+  }, [messages, messagesLoading, currentSessionId]);
+
+  // Reset tracking when session changes
+  useEffect(() => {
+    hasSetInitialRef.current = false;
+    initialMsgIdsRef.current = new Set();
+  }, [currentSessionId]);
 
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
@@ -106,13 +115,17 @@ export default function Chat() {
             <ChatEmptyState onSuggestionClick={(text) => setSuggestionText(text)} />
           ) : (
             <div className="w-full max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-6">
-              {messages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
-                />
-              ))}
+              {messages.map((message) => {
+                const isNew = !initialMsgIdsRef.current.has(message.id);
+                return (
+                  <ChatMessage
+                    key={message.id}
+                    message={message}
+                    animate={isNew && message.role === 'assistant' && message.status === 'complete'}
+                    onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
+                  />
+                );
+              })}
               <div ref={messagesEndRef} className="h-1" />
             </div>
           )}
