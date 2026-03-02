@@ -56,12 +56,12 @@ export function SessionsSidebar({
   }, []);
 
   return (
-    <>
+    <div className="relative flex-shrink-0 flex">
       {/* Sidebar */}
       <div
         className={cn(
-          'relative flex-shrink-0 border-r border-border bg-sidebar-background transition-all duration-200 overflow-hidden',
-          isOpen ? 'w-[260px]' : 'w-0'
+          'relative flex-shrink-0 border-r border-border bg-sidebar-background transition-all duration-300 overflow-hidden',
+          isOpen ? 'w-[260px]' : 'w-0 border-r-0'
         )}
       >
         {isOpen && (
@@ -71,7 +71,7 @@ export function SessionsSidebar({
               <span className="text-sm font-semibold text-foreground">Conversas</span>
               <button
                 onClick={onToggle}
-                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 aria-label="Fechar sidebar"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -211,17 +211,17 @@ export function SessionsSidebar({
           <button
             onClick={onToggle}
             className={cn(
-              'flex items-center justify-center w-6 h-12',
-              'bg-card border border-border border-l-0 rounded-r-lg',
+              'flex items-center justify-center w-8 h-14',
+              'bg-card/80 backdrop-blur-sm border border-border border-l-0 rounded-r-xl',
               'text-muted-foreground hover:text-foreground hover:bg-accent',
-              'transition-colors'
+              'transition-all duration-200 shadow-sm hover:shadow-md'
             )}
             aria-label="Abrir sidebar"
           >
-            <ChevronRight className="w-3.5 h-3.5" />
+            <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       )}
-    </>
+    </div>
   );
 }

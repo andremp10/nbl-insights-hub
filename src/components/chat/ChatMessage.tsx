@@ -75,7 +75,10 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={cn('flex gap-3', isUser ? 'justify-end' : 'justify-start')}
+      className={cn(
+        'flex gap-3 w-full',
+        isUser ? 'justify-end pl-12' : 'justify-start pr-12'
+      )}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
@@ -94,7 +97,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
         </div>
       )}
 
-      <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start', isUser ? 'max-w-[75%] ml-auto' : 'max-w-[90%]')}>
+      <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start', isUser ? 'max-w-[75%]' : 'max-w-[85%]')}>
         <div
           className={cn(
             'px-4 py-3 space-y-3',

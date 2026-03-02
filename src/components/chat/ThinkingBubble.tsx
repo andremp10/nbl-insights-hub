@@ -26,7 +26,7 @@ export function ThinkingBubble() {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
       transition={{ duration: 0.2 }}
-      className="flex gap-3 justify-start"
+      className="flex gap-3 justify-start w-full pr-12"
     >
       {/* Avatar com ring pulsante */}
       <div className="relative flex-shrink-0 mt-1">

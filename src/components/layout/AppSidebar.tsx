@@ -38,9 +38,9 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar-background/80 backdrop-blur-xl">
-      <SidebarHeader className="border-b border-sidebar-border/50 p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <SidebarHeader className={cn("border-b border-sidebar-border/50 transition-all duration-200", collapsed ? "p-2 flex items-center justify-center" : "p-4")}>
+        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
+          <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
             <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-semibold shadow-lg shadow-primary/20 shrink-0">
               <Sparkles className="h-4 w-4" />
             </div>
