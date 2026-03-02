@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar } from '@/components/chat/SessionsSidebar';
@@ -7,7 +8,7 @@ import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 
 export default function Chat() {
-  const { sessions, groupedSessions, createSession, deleteSession, loading: sessionsLoading } = useChatSessions();
+  const { sessions, groupedSessions, createSession, deleteSession, updateSessionTitle, loading: sessionsLoading } = useChatSessions();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
@@ -16,8 +17,8 @@ export default function Chat() {
   const hasSetInitialRef = useRef(false);
   const pendingHandled = useRef(false);
   const [suggestionText, setSuggestionText] = useState('');
-  const bootstrapTriedRef = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
+  const pendingAutoTitleRef = useRef<string | null>(null);
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (currentSessionId) return currentSessionId;
@@ -43,12 +44,21 @@ export default function Chat() {
     initialMsgIdsRef.current = new Set();
   }, [currentSessionId]);
 
+  // Send pending message after session is created
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
     const msg = pendingToSendRef.current;
     pendingToSendRef.current = null;
     sendMessage(msg);
   }, [currentSessionId, sendMessage]);
+
+  // Apply pending auto-title after session is created
+  useEffect(() => {
+    if (!currentSessionId || !pendingAutoTitleRef.current) return;
+    const title = pendingAutoTitleRef.current;
+    pendingAutoTitleRef.current = null;
+    updateSessionTitle(currentSessionId, title);
+  }, [currentSessionId, updateSessionTitle]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -83,12 +93,30 @@ export default function Chat() {
   }, [currentSessionId, sessions, deleteSession, createSession]);
 
   const handleSend = useCallback(async (msg: string): Promise<boolean> => {
-    if (currentSessionId) return sendMessage(msg);
+    const isFirstUserMessage = messages.filter(m => m.role === 'user').length === 0;
+
+    if (currentSessionId) {
+      const ok = await sendMessage(msg);
+      if (ok && isFirstUserMessage) {
+        const session = sessions.find(s => s.id === currentSessionId);
+        if (session?.title === 'Nova conversa') {
+          updateSessionTitle(currentSessionId, msg.slice(0, 50));
+        }
+      }
+      return ok;
+    }
+
+    // No session yet — create one and queue the message
+    if (isFirstUserMessage) pendingAutoTitleRef.current = msg.slice(0, 50);
     pendingToSendRef.current = msg;
     const sid = await ensureSession();
-    if (!sid) { pendingToSendRef.current = null; return false; }
+    if (!sid) {
+      pendingToSendRef.current = null;
+      pendingAutoTitleRef.current = null;
+      return false;
+    }
     return true;
-  }, [currentSessionId, sendMessage, ensureSession]);
+  }, [currentSessionId, sendMessage, ensureSession, messages, sessions, updateSessionTitle]);
 
   const hasMessages = messages.length > 0;
 
@@ -100,6 +128,7 @@ export default function Chat() {
         onSelectSession={setCurrentSessionId}
         onCreateSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
+        onRenameSession={updateSessionTitle}
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(prev => !prev)}
         loading={sessionsLoading}
@@ -108,8 +137,9 @@ export default function Chat() {
       <div className="flex flex-col flex-1 min-w-0">
         <div className="flex-1 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
           {messagesLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-sm text-muted-foreground animate-pulse">Carregando mensagens...</p>
+            <div className="flex items-center justify-center h-full gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Carregando mensagens...</p>
             </div>
           ) : !hasMessages && !sending ? (
             <ChatEmptyState onSuggestionClick={(text) => setSuggestionText(text)} />
@@ -191,6 +221,8 @@ function ChatInputInline({
     }
   };
 
+  const canSend = !sending && input.trim().length > 0;
+
   return (
     <div className="border-t border-border bg-sidebar-background px-4 py-3 md:px-8">
       <div className="w-full max-w-3xl mx-auto">
@@ -208,25 +240,54 @@ function ChatInputInline({
             aria-label="Campo de mensagem"
           />
           <div className="absolute right-2 bottom-2">
-            <button
+            <motion.button
               onClick={handleSubmit}
-              disabled={sending || !input.trim()}
+              disabled={!canSend}
               aria-label="Enviar mensagem"
+              whileTap={canSend ? { scale: 0.92 } : {}}
               className={`flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200 ${
-                !sending && input.trim()
-                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                canSend
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
                   : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
               }`}
             >
-              <ArrowUp className="w-4 h-4" />
-            </button>
+              {sending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ArrowUp className="w-4 h-4" />
+              )}
+            </motion.button>
           </div>
         </div>
-        {sending && (
-          <p className="text-center text-xs text-muted-foreground mt-2 animate-pulse">
-            Aguardando resposta...
-          </p>
-        )}
+
+        <div className="flex items-center justify-between mt-1.5 px-1">
+          <AnimatePresence mode="wait">
+            {sending ? (
+              <motion.p
+                key="sending"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+              >
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Aguardando resposta do agente...
+              </motion.p>
+            ) : (
+              <motion.p
+                key="hint"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.2 }}
+                className="text-[11px] text-muted-foreground/40"
+              >
+                Enter para enviar · Shift+Enter para nova linha
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );

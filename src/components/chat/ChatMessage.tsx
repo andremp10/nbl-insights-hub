@@ -1,12 +1,13 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
-import { Database, AlertTriangle, RotateCcw } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Bot, Copy, Check } from 'lucide-react';
 import { ThinkingBubble } from './ThinkingBubble';
 import { useTypewriter } from '@/hooks/useTypewriter';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { toast } from 'sonner';
 
 function formatTime(timestamp: string): string {
   try {
@@ -16,24 +17,19 @@ function formatTime(timestamp: string): string {
   }
 }
 
-// Detect if content is a single KPI-like value (e.g. "Receita: R$ 1.234,56" or just "R$ 1.234,56")
 function detectHighlightCard(content: string): { label: string; value: string } | null {
   const trimmed = content.trim();
-  // Skip if has newlines (multi-line), tables, or lists
   if (trimmed.includes('\n') || trimmed.includes('|') || trimmed.includes('- ') || trimmed.length > 120) return null;
 
-  // Pattern: "Label: R$ 1.234,56" or "Label: 1.234"
   const colonMatch = trimmed.match(/^(.+?):\s*(R?\$?\s*[\d.,]+(?:\s*%)?)\s*$/);
   if (colonMatch) return { label: colonMatch[1].trim(), value: colonMatch[2].trim() };
 
-  // Pattern: Just a currency value "R$ 1.234,56"
   const currencyOnly = trimmed.match(/^R?\$\s*[\d.,]+$/);
   if (currencyOnly) return { label: 'Resultado', value: trimmed };
 
   return null;
 }
 
-// Detect if a cell value looks numeric for right-alignment
 function isNumericCell(text: string): boolean {
   if (!text) return false;
   const cleaned = text.replace(/[R$%.,\s]/g, '');
@@ -50,6 +46,8 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
   const isUser = message.role === 'user';
   const isPending = message.status === 'pending';
   const isError = message.status === 'error';
+  const [copied, setCopied] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   const shouldAnimate = animate && !isUser && !isPending && !isError;
   const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 12);
@@ -60,23 +58,38 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
     return detectHighlightCard(message.content);
   }, [message.content, isUser, isPending, isError]);
 
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      toast.success('Copiado para a área de transferência');
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [message.content]);
+
   if (isPending && !isUser) {
     return <ThinkingBubble />;
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
+      transition={{ duration: 0.3 }}
       className={cn('flex gap-3', isUser ? 'justify-end' : 'justify-start')}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       {!isUser && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center mt-1">
+        <div className={cn(
+          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-1 transition-all duration-200',
+          isError
+            ? 'bg-destructive/10 border border-destructive/30'
+            : 'bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20'
+        )}>
           {isError ? (
             <AlertTriangle className="h-4 w-4 text-destructive" />
           ) : (
-            <Database className="h-4 w-4 text-muted-foreground" />
+            <Bot className="h-4 w-4 text-primary" />
           )}
         </div>
       )}
@@ -108,7 +121,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
               )}
             </div>
           ) : highlightCard ? (
-            // Highlight card for single KPI values
             <div className="text-center py-2">
               <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">{highlightCard.label}</p>
               <p className="text-2xl font-bold text-primary">{highlightCard.value}</p>
@@ -183,9 +195,27 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
           )}
         </div>
 
-        <span className="text-[11px] text-muted-foreground/50 mt-1 px-1">
-          {formatTime(message.created_at)}
-        </span>
+        <div className="flex items-center gap-2 mt-1 px-1">
+          <span className="text-[11px] text-muted-foreground/50">
+            {formatTime(message.created_at)}
+          </span>
+          {!isUser && !isError && !isPending && message.content && (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: hovered ? 1 : 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={handleCopy}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+              aria-label="Copiar mensagem"
+            >
+              {copied ? (
+                <><Check className="w-3 h-3 text-green-500" /><span className="text-green-500">Copiado</span></>
+              ) : (
+                <><Copy className="w-3 h-3" /><span>Copiar</span></>
+              )}
+            </motion.button>
+          )}
+        </div>
       </div>
     </motion.div>
   );

@@ -89,6 +89,14 @@ export function useChatSessions() {
     setSessions(prev => prev.filter(s => s.id !== sessionId));
   }, []);
 
+  const updateSessionTitle = useCallback(async (sessionId: string, title: string) => {
+    const trimmed = title.trim().slice(0, 60);
+    if (!trimmed) return;
+    // Optimistic update
+    setSessions(prev => prev.map((s: ChatSession) => s.id === sessionId ? { ...s, title: trimmed } : s));
+    await supabase.from('chat_sessions').update({ title: trimmed }).eq('id', sessionId);
+  }, []);
+
   const groupedSessions = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -116,5 +124,5 @@ export function useChatSessions() {
     return Object.entries(groups).filter(([, items]) => items.length > 0);
   }, [sessions]);
 
-  return { sessions, loading, groupedSessions, createSession, deleteSession, refetch: fetchSessions };
+  return { sessions, loading, groupedSessions, createSession, deleteSession, updateSessionTitle, refetch: fetchSessions };
 }
