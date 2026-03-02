@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DateFilterProvider } from "@/contexts/DateFilterContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Suspense, lazy } from "react";
 import { Loader2 } from "lucide-react";
@@ -25,6 +26,12 @@ const PageLoader = () => (
   </div>
 );
 
+const ProtectedPage = ({ children }: { children: React.ReactNode }) => (
+  <ProtectedRoute>
+    <AppLayout>{children}</AppLayout>
+  </ProtectedRoute>
+);
+
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -37,38 +44,10 @@ const App = () => (
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/auth" element={<Auth />} />
-                  <Route
-                    path="/"
-                    element={
-                      <ProtectedRoute>
-                        <Home />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/chat"
-                    element={
-                      <ProtectedRoute>
-                        <Chat />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/financeiro"
-                    element={
-                      <ProtectedRoute>
-                        <Financeiro />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/pedidos"
-                    element={
-                      <ProtectedRoute>
-                        <Pedidos />
-                      </ProtectedRoute>
-                    }
-                  />
+                  <Route path="/" element={<ProtectedPage><Home /></ProtectedPage>} />
+                  <Route path="/chat" element={<ProtectedPage><Chat /></ProtectedPage>} />
+                  <Route path="/financeiro" element={<ProtectedPage><Financeiro /></ProtectedPage>} />
+                  <Route path="/pedidos" element={<ProtectedPage><Pedidos /></ProtectedPage>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>

@@ -98,15 +98,8 @@ export function useChatMessages(sessionId: string | null) {
     invokeInProgressRef.current = true;
     setSending(true);
 
-    const optimisticUserMsg: ChatMessage = {
-      id: `opt-${Date.now()}`,
-      session_id: sessionId,
-      role: 'user',
-      content: content.trim(),
-      status: 'complete',
-      created_at: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, optimisticUserMsg]);
+    // No optimistic insert — the Edge Function inserts user msg + pending msg,
+    // and Realtime delivers both. This prevents duplicate messages.
 
     try {
       console.log('[sendMessage] invoking nlq-proxy, sessionId:', sessionId);

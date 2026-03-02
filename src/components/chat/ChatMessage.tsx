@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
@@ -15,6 +15,30 @@ function formatTime(timestamp: string): string {
   }
 }
 
+// Detect if content is a single KPI-like value (e.g. "Receita: R$ 1.234,56" or just "R$ 1.234,56")
+function detectHighlightCard(content: string): { label: string; value: string } | null {
+  const trimmed = content.trim();
+  // Skip if has newlines (multi-line), tables, or lists
+  if (trimmed.includes('\n') || trimmed.includes('|') || trimmed.includes('- ') || trimmed.length > 120) return null;
+
+  // Pattern: "Label: R$ 1.234,56" or "Label: 1.234"
+  const colonMatch = trimmed.match(/^(.+?):\s*(R?\$?\s*[\d.,]+(?:\s*%)?)\s*$/);
+  if (colonMatch) return { label: colonMatch[1].trim(), value: colonMatch[2].trim() };
+
+  // Pattern: Just a currency value "R$ 1.234,56"
+  const currencyOnly = trimmed.match(/^R?\$\s*[\d.,]+$/);
+  if (currencyOnly) return { label: 'Resultado', value: trimmed };
+
+  return null;
+}
+
+// Detect if a cell value looks numeric for right-alignment
+function isNumericCell(text: string): boolean {
+  if (!text) return false;
+  const cleaned = text.replace(/[R$%.,\s]/g, '');
+  return /^\d+$/.test(cleaned);
+}
+
 interface ChatMessageProps {
   message: ChatMessageType;
   onRetry?: () => void;
@@ -25,7 +49,11 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   const isPending = message.status === 'pending';
   const isError = message.status === 'error';
 
-  // Pending assistant message → show thinking bubble
+  const highlightCard = useMemo(() => {
+    if (isUser || isPending || isError) return null;
+    return detectHighlightCard(message.content);
+  }, [message.content, isUser, isPending, isError]);
+
   if (isPending && !isUser) {
     return <ThinkingBubble />;
   }
@@ -37,7 +65,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       transition={{ duration: 0.25 }}
       className={cn('flex gap-3', isUser ? 'justify-end' : 'justify-start')}
     >
-      {/* Avatar - assistant only */}
       {!isUser && (
         <div className="flex-shrink-0 w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center mt-1">
           {isError ? (
@@ -49,7 +76,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       )}
 
       <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start', isUser ? 'max-w-[70%]' : 'max-w-[85%]')}>
-        {/* Bubble */}
         <div
           className={cn(
             'px-4 py-3 space-y-3',
@@ -75,13 +101,19 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
                 </button>
               )}
             </div>
+          ) : highlightCard ? (
+            // Highlight card for single KPI values
+            <div className="text-center py-2">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">{highlightCard.label}</p>
+              <p className="text-2xl font-bold text-primary">{highlightCard.value}</p>
+            </div>
           ) : (
             <div className={cn('text-sm leading-relaxed break-words', isUser ? 'text-primary-foreground' : '')}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
                   table: ({ children, ...props }) => (
-                    <div className="my-3 w-full overflow-hidden rounded-lg border border-border">
+                    <div className="my-3 w-full overflow-x-auto rounded-lg border border-border">
                       <table className="w-full text-sm" {...props}>{children}</table>
                     </div>
                   ),
@@ -89,7 +121,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
                     <thead className="bg-primary/10 border-b border-border" {...props}>{children}</thead>
                   ),
                   tbody: ({ children, ...props }) => (
-                    <tbody className="[&_tr:nth-child(even)]:bg-card [&_tr:last-child]:border-0" {...props}>{children}</tbody>
+                    <tbody className="[&_tr:nth-child(even)]:bg-muted/30 [&_tr:last-child]:border-0" {...props}>{children}</tbody>
                   ),
                   tr: ({ children, ...props }) => (
                     <tr className="border-b border-border/50" {...props}>{children}</tr>
@@ -97,9 +129,13 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
                   th: ({ children, ...props }) => (
                     <th className="h-9 px-3 text-left align-middle font-semibold text-muted-foreground text-xs" {...props}>{children}</th>
                   ),
-                  td: ({ children, ...props }) => (
-                    <td className="px-3 py-2 align-middle text-sm" {...props}>{children}</td>
-                  ),
+                  td: ({ children, ...props }) => {
+                    const text = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : '';
+                    const numeric = isNumericCell(String(text));
+                    return (
+                      <td className={cn("px-3 py-2 align-middle text-sm", numeric && "text-right font-mono tabular-nums")} {...props}>{children}</td>
+                    );
+                  },
                   p: ({ children, ...props }) => (
                     <p className="mb-2 last:mb-0 leading-relaxed" {...props}>{children}</p>
                   ),
@@ -137,7 +173,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
           )}
         </div>
 
-        {/* Timestamp */}
         <span className="text-[11px] text-muted-foreground/50 mt-1 px-1">
           {formatTime(message.created_at)}
         </span>

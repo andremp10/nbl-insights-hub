@@ -3,7 +3,6 @@ import { ArrowUp } from 'lucide-react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar } from '@/components/chat/SessionsSidebar';
-import { AppHeader } from '@/components/layout/AppHeader';
 import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 
@@ -18,18 +17,13 @@ export default function Chat() {
   const bootstrapTriedRef = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
 
-  // Helper: ensure a session exists, create if needed
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (currentSessionId) return currentSessionId;
     const s = await createSession();
-    if (s) {
-      setCurrentSessionId(s.id);
-      return s.id;
-    }
+    if (s) { setCurrentSessionId(s.id); return s.id; }
     return null;
   }, [currentSessionId, createSession]);
 
-  // Bootstrap: select or create initial session
   useEffect(() => {
     if (sessionsLoading || currentSessionId || bootstrapTriedRef.current) return;
     bootstrapTriedRef.current = true;
@@ -40,7 +34,6 @@ export default function Chat() {
     }
   }, [sessions, sessionsLoading, currentSessionId, createSession]);
 
-  // Flush pending message after session is ready
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
     const msg = pendingToSendRef.current;
@@ -48,12 +41,10 @@ export default function Chat() {
     sendMessage(msg);
   }, [currentSessionId, sendMessage]);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, sending]);
 
-  // Check pending query from Home
   useEffect(() => {
     if (!currentSessionId || pendingHandled.current) return;
     const pending = localStorage.getItem('nbl_pending_query');
@@ -83,77 +74,63 @@ export default function Chat() {
   }, [currentSessionId, sessions, deleteSession, createSession]);
 
   const handleSend = useCallback(async (msg: string): Promise<boolean> => {
-    if (currentSessionId) {
-      return sendMessage(msg);
-    }
-    // No session yet — create one and queue the message
+    if (currentSessionId) return sendMessage(msg);
     pendingToSendRef.current = msg;
     const sid = await ensureSession();
-    if (!sid) {
-      pendingToSendRef.current = null;
-      return false;
-    }
+    if (!sid) { pendingToSendRef.current = null; return false; }
     return true;
   }, [currentSessionId, sendMessage, ensureSession]);
 
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="dark flex flex-col h-screen bg-background">
-      <AppHeader />
+    <div className="flex flex-1 min-h-0">
+      <SessionsSidebar
+        groupedSessions={groupedSessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={setCurrentSessionId}
+        onCreateSession={handleNewSession}
+        onDeleteSession={handleDeleteSession}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(prev => !prev)}
+        loading={sessionsLoading}
+      />
 
-      <div className="flex flex-1 pt-14 min-h-0">
-        <SessionsSidebar
-          groupedSessions={groupedSessions}
-          currentSessionId={currentSessionId}
-          onSelectSession={setCurrentSessionId}
-          onCreateSession={handleNewSession}
-          onDeleteSession={handleDeleteSession}
-          isOpen={sidebarOpen}
-          onToggle={() => setSidebarOpen(prev => !prev)}
-          loading={sessionsLoading}
-        />
-
-        <div className="flex flex-col flex-1 min-w-0">
-          <div className="flex-1 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
-            {messagesLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-sm text-muted-foreground animate-pulse">Carregando mensagens...</p>
-              </div>
-            ) : !hasMessages && !sending ? (
-              <ChatEmptyState onSuggestionClick={(text) => setSuggestionText(text)} />
-            ) : (
-              <div className="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-4">
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    message={message}
-                    onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
-                  />
-                ))}
-                <div ref={messagesEndRef} className="h-1" />
-              </div>
-            )}
-          </div>
-
-          <ChatInputInline
-            onSend={handleSend}
-            sending={sending}
-            suggestionText={suggestionText}
-            onSuggestionConsumed={() => setSuggestionText('')}
-          />
+      <div className="flex flex-col flex-1 min-w-0">
+        <div className="flex-1 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
+          {messagesLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-sm text-muted-foreground animate-pulse">Carregando mensagens...</p>
+            </div>
+          ) : !hasMessages && !sending ? (
+            <ChatEmptyState onSuggestionClick={(text) => setSuggestionText(text)} />
+          ) : (
+            <div className="max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-4">
+              {messages.map((message) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
+                />
+              ))}
+              <div ref={messagesEndRef} className="h-1" />
+            </div>
+          )}
         </div>
+
+        <ChatInputInline
+          onSend={handleSend}
+          sending={sending}
+          suggestionText={suggestionText}
+          onSuggestionConsumed={() => setSuggestionText('')}
+        />
       </div>
     </div>
   );
 }
 
-// Inline ChatInput with suggestion support
 function ChatInputInline({
-  onSend,
-  sending,
-  suggestionText,
-  onSuggestionConsumed,
+  onSend, sending, suggestionText, onSuggestionConsumed,
 }: {
   onSend: (msg: string) => Promise<boolean>;
   sending: boolean;
@@ -183,7 +160,6 @@ function ChatInputInline({
     if (submitRef.current || sending || !input.trim()) return;
     submitRef.current = true;
     const msg = input.trim();
-
     try {
       const ok = await onSend(msg);
       if (ok) {
