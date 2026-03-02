@@ -1,95 +1,66 @@
 
 
-# Plano de Auditoria e Melhorias — NBL Insights Hub
-
-## Sequencia de Execucao
+# Plano de Melhorias — Layout do Chat, ThinkingBubble, e Pagina de Login
 
 ---
 
-### 1. Corrigir Duplicacao de Mensagens (Bug Critico)
+## 1. Corrigir Layout do Chat (centralizar e alinhar com sidebar)
 
-**Causa Raiz Identificada:**
-A Edge Function (`nlq-proxy`) insere a mensagem do usuario no banco (linha 66). Simultaneamente, o frontend (`useChatMessages.ts` linhas 101-109) cria uma mensagem otimista com `id: opt-{timestamp}`. Quando o Realtime dispara o evento INSERT da mensagem real (com UUID do banco), o dedup check na linha 61 compara pelo `id` — mas os IDs sao diferentes (`opt-123` vs `uuid-real`). Resultado: duas mensagens do usuario aparecem.
+**Problemas identificados:**
+- A `SessionsSidebar` do chat usa `fixed left-0` no botao de toggle quando fechada, o que se sobrepoe a `AppSidebar` principal (que tambem esta no lado esquerdo).
+- A area de mensagens e o input nao estao centralizados corretamente quando a SessionsSidebar esta aberta/fechada.
+- O container principal do Chat (`flex flex-1 min-h-0`) nao respeita a altura disponivel adequadamente.
 
-**Correcao:**
-- Remover a insercao otimista do usuario no `useChatMessages.ts`. A Edge Function ja insere a mensagem do usuario no banco, e o Realtime traz ela automaticamente.
-- Manter apenas o estado `sending=true` para feedback visual.
-- O fluxo correto sera: usuario envia -> frontend chama Edge Function -> Edge Function insere user msg + pending msg -> Realtime traz ambas -> UI renderiza.
-
-**Arquivo afetado:** `src/hooks/useChatMessages.ts`
-
----
-
-### 2. Corrigir Filtros de Data (Views ja Existem)
-
-**Diagnostico:**
-As views `vw_dashboard_pedidos` e as RPCs `get_financeiro_kpis` / `get_financeiro_graficos` ja existem e funcionam. O problema e que o filtro padrao e "Ultimos 30 dias" (marco 2026), mas os dados no banco sao de 2019-2023. Por isso tudo aparece zerado.
-
-**Correcao:**
-- Alterar o `DateFilterContext` para ter presets mais uteis: "Ultimos 7 dias", "Ultimos 30 dias", "Este Mes", "Este Ano", "Todo Periodo" e "Personalizado".
-- Mudar o padrao inicial para "Todo Periodo" (2019 ate hoje) para que o usuario veja dados ao abrir pela primeira vez.
-- Simplificar o `DateFilterBar` para ser mais compacto: botoes de preset em linha + seletor de datas customizado.
-- Fechar o popover de calendario automaticamente apos selecionar ambas as datas.
+**Correcoes:**
+- **`SessionsSidebar.tsx`**: Mudar o botao de toggle de `fixed left-0` para posicionamento relativo dentro do fluxo do layout. Isso elimina a sobreposicao com a AppSidebar principal.
+- **`Chat.tsx`**: Garantir que o container de mensagens use `h-full` com flex correto para que a rolagem funcione dentro do espaco disponivel (entre header mobile e input). Alinhar `max-w-3xl mx-auto` tanto nas mensagens quanto no input para consistencia visual.
+- **`AppLayout.tsx`**: Verificar que o `main` tem `overflow-hidden` para que o scroll fique contido no Chat e nao na pagina inteira.
 
 **Arquivos afetados:**
-- `src/contexts/DateFilterContext.tsx`
-- `src/components/layout/DateFilterBar.tsx`
+- `src/components/chat/SessionsSidebar.tsx` — remover `fixed`, usar posicao relativa
+- `src/pages/Chat.tsx` — ajustar estrutura flex para altura correta
+- `src/components/layout/AppLayout.tsx` — adicionar `overflow-hidden` no main
 
 ---
 
-### 3. Implementar Sidebar Lateral
+## 2. ThinkingBubble com frases rotativas
 
-**Abordagem:**
-Substituir o `AppHeader` horizontal por uma sidebar lateral recolhivel usando o componente `AppSidebar` que ja existe parcialmente. Usar `SidebarProvider` do shadcn/ui.
+**Problema:** A mensagem "Consultando base de dados..." e estatica e nao transmite sensacao de progresso.
 
-**Detalhes:**
-- Criar um layout wrapper (`AppLayout`) que envolve todas as paginas protegidas com `SidebarProvider` + `AppSidebar` + conteudo.
-- A sidebar tera: logo NBL Grafica no topo (usando a imagem enviada pelo usuario copiada para `src/assets`), links de navegacao (Home, Assistente, Financeiro, Pedidos) com icones, e avatar + logout no rodape.
-- Quando recolhida: apenas icones com tooltip.
-- Em mobile: drawer que abre sobre o conteudo.
-- Item ativo com destaque laranja (borda lateral + bg primary/10).
-- Remover `AppHeader` das paginas individuais e usar o layout compartilhado.
-- A pagina de Chat mantera sua propria SessionsSidebar interna para conversas.
+**Correcao:**
+Adicionar um array de 5 frases que rotacionam a cada 3 segundos usando `useState` + `setInterval`:
+
+1. "Consultando base de dados..."
+2. "Analisando os registros..."
+3. "Processando informacoes..."
+4. "Organizando os resultados..."
+5. "Preparando a resposta..."
+
+A transicao entre frases sera suave com `AnimatePresence` do framer-motion (fade out/in).
+
+**Arquivo afetado:** `src/components/chat/ThinkingBubble.tsx`
+
+---
+
+## 3. Adaptar Pagina de Login ao tema escuro
+
+**Problema:** A pagina `Auth.tsx` usa fundo claro (`bg-gradient-to-br from-blue-50 to-indigo-100`) e o `SignInCard` tem fundo branco com cores azuis — totalmente fora do design system escuro/laranja da aplicacao.
+
+**Correcao:**
+Reescrever o componente `SignInCard` (em `travel-connect-signin-1.tsx`) para usar o tema escuro:
+
+- Fundo do container: `bg-background` (escuro #0F0F0F)
+- Card: `bg-card` com `border-border` em vez de `bg-white`
+- Cores de texto: `text-foreground` em vez de `text-gray-800`
+- Gradiente do botao: trocar azul/indigo por `bg-primary` (laranja #E8501A)
+- Inputs: `bg-muted border-border text-foreground` em vez de `bg-gray-50 text-gray-800`
+- Mapa de pontos (DotMap): trocar cores azuis por `rgba(232, 80, 26, opacity)` (laranja primary)
+- Overlay de texto: gradiente laranja em vez de azul
+- Auth.tsx: trocar fundo para `bg-background` com classe `dark`
 
 **Arquivos afetados:**
-- `src/components/layout/AppSidebar.tsx` — reescrever com logo, Home link, e estilo atualizado
-- `src/components/layout/AppLayout.tsx` — criar novo layout wrapper
-- `src/App.tsx` — envolver rotas protegidas com AppLayout
-- `src/pages/Home.tsx` — remover AppHeader
-- `src/pages/Chat.tsx` — remover AppHeader
-- `src/pages/Financeiro.tsx` — remover AppHeader
-- `src/pages/Pedidos.tsx` — remover AppHeader
-- Copiar logo NBL para `src/assets/nbl-logo.png`
-
----
-
-### 4. Redesenhar Pagina Inicial
-
-**Abordagem:**
-Reescrever `Home.tsx` com hierarquia visual clara:
-1. Saudacao grande e com personalidade no topo
-2. Input de consulta rapida centralizado e em destaque (o Assistente e o foco)
-3. Pills de sugestoes logo abaixo
-4. Cards de navegacao secundaria (Financeiro e Pedidos) menores, em grid 2 colunas
-5. KPIs do resumo do dia discretos na parte inferior
-
-Layout centralizado com `max-w-[800px]` e espacamento generoso.
-
-**Arquivo afetado:** `src/pages/Home.tsx`
-
----
-
-### 5. Melhorar Componente de Resposta do Agente
-
-**Abordagem:**
-O `ChatMessage.tsx` ja tem suporte a markdown com tabelas via `react-markdown` + `remark-gfm`. Melhorias:
-
-- Adicionar deteccao de conteudo: se a resposta contem apenas um numero/valor monetario com label, renderizar em formato "highlight card" (valor grande centralizado com label descritivo).
-- Melhorar estilo das tabelas: linhas alternadas com `even:bg-muted/30`, valores numericos alinhados a direita (detectar via regex), cabecalho com fundo `primary/10`.
-- Adicionar estilo para blocos de codigo e listas.
-- Manter texto narrativo com boa tipografia e espacamento.
-
-**Arquivo afetado:** `src/components/chat/ChatMessage.tsx`
+- `src/pages/Auth.tsx` — trocar fundo para tema escuro
+- `src/components/ui/travel-connect-signin-1.tsx` — adaptar todas as cores para o design system
 
 ---
 
@@ -97,16 +68,10 @@ O `ChatMessage.tsx` ja tem suporte a markdown com tabelas via `react-markdown` +
 
 | Arquivo | Acao |
 |---------|------|
-| `src/hooks/useChatMessages.ts` | Remover insercao otimista duplicada |
-| `src/contexts/DateFilterContext.tsx` | Atualizar presets e padrao |
-| `src/components/layout/DateFilterBar.tsx` | Simplificar UI |
-| `src/components/layout/AppSidebar.tsx` | Reescrever com logo e Home |
-| `src/components/layout/AppLayout.tsx` | Criar layout wrapper |
-| `src/App.tsx` | Usar AppLayout nas rotas |
-| `src/pages/Home.tsx` | Redesenhar |
-| `src/pages/Chat.tsx` | Remover AppHeader |
-| `src/pages/Financeiro.tsx` | Remover AppHeader |
-| `src/pages/Pedidos.tsx` | Remover AppHeader |
-| `src/components/chat/ChatMessage.tsx` | Melhorar renderizacao |
-| `src/assets/nbl-logo.png` | Copiar logo |
+| `src/components/chat/SessionsSidebar.tsx` | Corrigir posicionamento do toggle (remover fixed) |
+| `src/pages/Chat.tsx` | Ajustar estrutura flex para centralizacao e scroll |
+| `src/components/layout/AppLayout.tsx` | Adicionar overflow-hidden no main |
+| `src/components/chat/ThinkingBubble.tsx` | Adicionar 5 frases rotativas com transicao |
+| `src/pages/Auth.tsx` | Adaptar fundo ao tema escuro |
+| `src/components/ui/travel-connect-signin-1.tsx` | Reescrever cores para design system escuro/laranja |
 
