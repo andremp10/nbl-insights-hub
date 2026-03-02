@@ -1,4 +1,4 @@
-import { Home, DollarSign, ShoppingCart, MessageSquare, LogOut, Sparkles } from 'lucide-react';
+import { Home, DollarSign, ShoppingCart, MessageSquare, LogOut, Printer } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
@@ -7,7 +7,6 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -38,16 +37,22 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar-background/80 backdrop-blur-xl">
-      <SidebarHeader className={cn("border-b border-sidebar-border/50 transition-all duration-200", collapsed ? "p-2 flex items-center justify-center" : "p-4")}>
-        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
+      <SidebarHeader className={cn(
+        "border-b border-sidebar-border/50 transition-all duration-200",
+        collapsed ? "p-2" : "p-4"
+      )}>
+        <div className={cn(
+          "flex items-center",
+          collapsed ? "flex-col gap-2" : "justify-between"
+        )}>
           <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
-            <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-semibold shadow-lg shadow-primary/20 shrink-0">
-              <Sparkles className="h-4 w-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
+              <Printer className="h-4 w-4" />
             </div>
             {!collapsed && (
-              <div className="flex flex-col">
-                <span className="text-sm font-semibold text-sidebar-foreground tracking-tight">
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-semibold text-sidebar-foreground tracking-tight truncate">
                   NBL Gráfica
                 </span>
                 <span className="text-[10px] text-muted-foreground font-medium">
@@ -56,37 +61,39 @@ export function AppSidebar() {
               </div>
             )}
           </div>
-          {!collapsed && <SidebarTrigger className="text-muted-foreground hover:text-foreground" />}
-          {collapsed && <SidebarTrigger className="text-muted-foreground hover:text-foreground mt-1" />}
+          <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
         </div>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup className="px-3 py-4">
-          <SidebarGroupLabel className="text-[10px] uppercase tracking-widest text-muted-foreground/70 font-medium px-3 mb-2">
-            Menu
-          </SidebarGroupLabel>
+        <SidebarGroup className={cn(collapsed ? "px-1 py-2" : "px-2 py-3")}>
+          {!collapsed && (
+            <div className="px-3 mb-2 text-[10px] uppercase tracking-widest text-muted-foreground/60 font-medium">
+              Menu
+            </div>
+          )}
           <SidebarGroupContent>
-            <SidebarMenu className="space-y-1">
+            <SidebarMenu className="space-y-0.5">
               {menuItems.map((item) => {
                 const active = isActive(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={active}>
+                    <SidebarMenuButton asChild isActive={active} tooltip={item.title}>
                       <NavLink
                         to={item.url}
                         end={item.url === '/'}
                         className={cn(
-                          'relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200',
+                          'relative flex items-center rounded-lg transition-all duration-150',
+                          collapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2',
                           active
                             ? 'bg-primary/15 text-primary'
-                            : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
                         )}
                       >
-                        {active && (
+                        {active && !collapsed && (
                           <motion.div
                             layoutId="activeIndicator"
-                            className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-full"
+                            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-full"
                             transition={{ type: "spring", stiffness: 300, damping: 30 }}
                           />
                         )}
@@ -102,12 +109,16 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border/50 p-3">
+      <SidebarFooter className={cn("border-t border-sidebar-border/50", collapsed ? "p-1" : "p-2")}>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={logout}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-200"
+              tooltip="Sair"
+              className={cn(
+                'flex items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-150',
+                collapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2'
+              )}
             >
               <LogOut className="h-[18px] w-[18px] shrink-0" />
               {!collapsed && <span className="text-sm">Sair</span>}
