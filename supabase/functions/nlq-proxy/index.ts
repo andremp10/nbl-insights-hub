@@ -1,140 +1,152 @@
-const N8N_WEBHOOK_URL = "https://n8n-nbl-golfine.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const TIMEOUT_MS = 150000;
+const N8N_WEBHOOK_URL = 'https://n8n-nbl-golfine.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-// Supabase Edge Function definition.
-//
-// Follow this format:
-// - Deno: https://supabase.com/docs/guides/functions/deno
-// - Typescript: https://supabase.com/docs/guides/functions/typescript
-//
-// Environment variables:
-// - Follow this format:
-//   - `SUPABASE_PROJECT_REF` - The Supabase project ref.
-//   - `SUPABASE_ANON_KEY` - The Supabase anon key.
-//   - `N8N_WEBHOOK_URL` - The n8n webhook URL.
-//
-// Input:
-// - Follow this format:
-//   - `session_id` - The session ID.
-//   - `timezone` - The timezone.
-//   - `message` - The message.
-//   - `context` - The context.
-//     - `date_range` - The date range.
-//       - `from` - The from date.
-//       - `to` - The to date.
-//     - `active_module` - The active module.
-//
-// Output:
-// - Follow this format:
-//   - `ok` - The status.
-//   - `reply` - The reply.
-//     - `text` - The text.
-//     - `highlights` - The highlights.
-//       - `label` - The label.
-//       - `value` - The value.
-//     - `suggested_actions` - The suggested actions.
-//       - `type` - The type.
-//       - `from` - The from date.
-//       - `to` - The to date.
-//       - `module` - The module.
-//     - `chart_payloads` - The chart payloads.
-//       - `chart` - The chart.
-//       - `title` - The title.
-//       - `series` - The series.
-//         - `name` - The name.
-//         - `value` - The value.
-//   - `error` - The error.
-//     - `code` - The code.
-//     - `message` - The message.
-
-interface ChatRequest {
-  session_id: string;
-  timezone?: string;
-  message: string;
-  context?: {
-    date_range?: { from: string; to: string };
-    active_module?: string;
-  };
-}
-
-interface ChatReply {
-  text: string;
-  highlights?: { label: string; value: number }[];
-  suggested_actions?: { type: string; from?: string; to?: string; module?: string }[];
-  chart_payloads?: Array<{ chart: string; title: string; series: { name: string; value: number }[] }>;
-}
-
-interface ChatResponse {
-  ok: boolean;
-  reply?: ChatReply;
-  error?: { code: string; message: string };
-}
-
-const ERROR_MESSAGES: Record<string, string> = {
-  TIMEOUT: 'O assistente demorou para responder. Por favor, tente uma pergunta mais simples.',
-  UPSTREAM_ERROR: 'O assistente não conseguiu processar sua pergunta. Tente novamente.',
-  BAD_RESPONSE: 'Resposta inesperada do assistente. Tente novamente.',
-  BAD_REQUEST: 'Mensagem inválida. Por favor, digite sua pergunta.',
-  NETWORK_ERROR: 'Erro de conexão com o assistente. Tente novamente em alguns instantes.',
-};
-
-function normalizeN8NResponse(rawData: string): ChatReply {
-  const reply: ChatReply = { text: '', highlights: [], suggested_actions: [] };
-  try {
-    const parsed = JSON.parse(rawData);
-    if (parsed.reply?.text) return { text: parsed.reply.text, highlights: parsed.reply.highlights || [], suggested_actions: parsed.reply.suggested_actions || [], chart_payloads: parsed.reply.chart_payloads };
-    if (parsed.text) return { text: parsed.text, highlights: parsed.highlights || [], suggested_actions: parsed.suggested_actions || [], chart_payloads: parsed.chart_payloads };
-    if (parsed.output) { reply.text = typeof parsed.output === 'string' ? parsed.output : JSON.stringify(parsed.output); return reply; }
-    if (typeof parsed === 'string') { reply.text = parsed; return reply; }
-    reply.text = JSON.stringify(parsed, null, 2);
-    return reply;
-  } catch {
-    reply.text = rawData || 'Resposta vazia do servidor.';
-    return reply;
-  }
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
+
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ ok: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'Método não permitido.' } }), { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    return new Response(
+      JSON.stringify({ success: false, error: 'Método não permitido' }),
+      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
+
   try {
-    const body: ChatRequest = await req.json();
-    if (!body.message?.trim()) {
-      return new Response(JSON.stringify({ ok: false, error: { code: 'BAD_REQUEST', message: ERROR_MESSAGES.BAD_REQUEST } } as ChatResponse), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+
+    const { message, session_id } = await req.json();
+    if (!message?.trim()) throw new Error('Mensagem vazia');
+    if (!session_id) throw new Error('session_id obrigatório');
+
+    const trimmedMessage = message.trim();
+
+    // IDEMPOTENCY: Check for duplicate message in last 10 seconds
+    const windowStart = new Date(Date.now() - 10000).toISOString();
+    const { data: recentDuplicate } = await supabase
+      .from('chat_messages')
+      .select('id')
+      .eq('session_id', session_id)
+      .eq('role', 'user')
+      .eq('content', trimmedMessage)
+      .gte('created_at', windowStart)
+      .maybeSingle();
+
+    if (recentDuplicate) {
+      // Already processed — find existing pending
+      const { data: existingPending } = await supabase
+        .from('chat_messages')
+        .select('id')
+        .eq('session_id', session_id)
+        .eq('role', 'assistant')
+        .eq('status', 'pending')
+        .gte('created_at', windowStart)
+        .maybeSingle();
+
+      console.log('[nlq-proxy] Deduplicated message, returning existing pending');
+      return new Response(
+        JSON.stringify({ success: true, pending_message_id: existingPending?.id || null, deduplicated: true }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
     }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    try {
-      const n8nPayload = { app: 'grafica_nbl_lovable', session_id: body.session_id || 'anonymous', timezone: body.timezone || 'America/Fortaleza', message: body.message.trim(), context: body.context || {} };
-      console.log('[nlq-proxy] Sending to n8n:', N8N_WEBHOOK_URL);
-      console.log('[nlq-proxy] Payload:', JSON.stringify(n8nPayload));
-      const n8nResponse = await fetch(N8N_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(n8nPayload), signal: controller.signal });
-      clearTimeout(timeoutId);
-      console.log('[nlq-proxy] n8n status:', n8nResponse.status);
-      if (!n8nResponse.ok) {
-        const errorBody = await n8nResponse.text();
-        console.error('[nlq-proxy] n8n error body:', errorBody);
-        return new Response(JSON.stringify({ ok: false, error: { code: 'UPSTREAM_ERROR', message: ERROR_MESSAGES.UPSTREAM_ERROR } } as ChatResponse), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    // STEP 1: Insert user message
+    const { error: userMsgError } = await supabase
+      .from('chat_messages')
+      .insert({ session_id, role: 'user', content: trimmedMessage, status: 'complete' });
+
+    if (userMsgError) {
+      console.error('[nlq-proxy] Error inserting user message:', userMsgError);
+      throw userMsgError;
+    }
+
+    // STEP 2: Insert pending assistant message
+    const { data: pendingMsg, error: pendingError } = await supabase
+      .from('chat_messages')
+      .insert({ session_id, role: 'assistant', content: '', status: 'pending' })
+      .select('id')
+      .single();
+
+    if (pendingError || !pendingMsg) {
+      console.error('[nlq-proxy] Error inserting pending message:', pendingError);
+      throw pendingError || new Error('Failed to create pending message');
+    }
+
+    // STEP 3: Fetch last 10 messages for context
+    const { data: history } = await supabase
+      .from('chat_messages')
+      .select('role, content')
+      .eq('session_id', session_id)
+      .eq('status', 'complete')
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    const context = (history || []).reverse();
+
+    // STEP 4: Prepare response BEFORE dispatching webhook
+    const responseBody = JSON.stringify({
+      success: true,
+      pending_message_id: pendingMsg.id,
+    });
+
+    // STEP 5: Fire-and-forget webhook call
+    const webhookPromise = fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app: 'grafica_nbl_lovable',
+        message: trimmedMessage,
+        session_id,
+        pending_message_id: pendingMsg.id,
+        context,
+        supabase_url: Deno.env.get('SUPABASE_URL'),
+        supabase_service_key: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
+      }),
+    }).then(async (res) => {
+      console.log('[nlq-proxy] n8n responded with status:', res.status);
+      if (!res.ok) {
+        const errorBody = await res.text();
+        console.error('[nlq-proxy] n8n error:', errorBody);
+        await supabase
+          .from('chat_messages')
+          .update({ status: 'error', content: '', error_detail: `Webhook retornou ${res.status}` })
+          .eq('id', pendingMsg.id);
       }
-      const rawData = await n8nResponse.text();
-      const reply = normalizeN8NResponse(rawData);
-      return new Response(JSON.stringify({ ok: true, reply } as ChatResponse), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      const isTimeout = fetchError instanceof Error && fetchError.name === 'AbortError';
-      return new Response(JSON.stringify({ ok: false, error: { code: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR', message: isTimeout ? ERROR_MESSAGES.TIMEOUT : ERROR_MESSAGES.NETWORK_ERROR } } as ChatResponse), { status: isTimeout ? 504 : 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }).catch(async (err) => {
+      console.error('[nlq-proxy] Webhook fetch failed:', err.message);
+      await supabase
+        .from('chat_messages')
+        .update({ status: 'error', content: '', error_detail: err.message })
+        .eq('id', pendingMsg.id);
+    });
+
+    // Register background work
+    // @ts-ignore - EdgeRuntime.waitUntil exists in Supabase Edge Functions
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(webhookPromise);
     }
+
+    // STEP 6: Return immediately
+    return new Response(responseBody, {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
+    });
   } catch (error) {
-    return new Response(JSON.stringify({ ok: false, error: { code: 'BAD_RESPONSE', message: ERROR_MESSAGES.BAD_RESPONSE } } as ChatResponse), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    console.error('[nlq-proxy] Error:', error);
+    return new Response(
+      JSON.stringify({ success: false, error: (error as Error).message }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+    );
   }
 });
