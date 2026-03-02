@@ -1,4 +1,4 @@
-const N8N_WEBHOOK_URL = "https://primary-production-c00b.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6";
+const N8N_WEBHOOK_URL = "https://n8n-nbl-golfine.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6";
 
 const TIMEOUT_MS = 150000;
 
