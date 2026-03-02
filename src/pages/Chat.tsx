@@ -15,16 +15,38 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingHandled = useRef(false);
   const [suggestionText, setSuggestionText] = useState('');
+  const bootstrapTriedRef = useRef(false);
+  const pendingToSendRef = useRef<string | null>(null);
 
-  // Select initial session or create new
+  // Helper: ensure a session exists, create if needed
+  const ensureSession = useCallback(async (): Promise<string | null> => {
+    if (currentSessionId) return currentSessionId;
+    const s = await createSession();
+    if (s) {
+      setCurrentSessionId(s.id);
+      return s.id;
+    }
+    return null;
+  }, [currentSessionId, createSession]);
+
+  // Bootstrap: select or create initial session
   useEffect(() => {
-    if (sessionsLoading || currentSessionId) return;
+    if (sessionsLoading || currentSessionId || bootstrapTriedRef.current) return;
+    bootstrapTriedRef.current = true;
     if (sessions.length > 0) {
       setCurrentSessionId(sessions[0].id);
     } else {
       createSession().then(s => { if (s) setCurrentSessionId(s.id); });
     }
   }, [sessions, sessionsLoading, currentSessionId, createSession]);
+
+  // Flush pending message after session is ready
+  useEffect(() => {
+    if (!currentSessionId || !pendingToSendRef.current) return;
+    const msg = pendingToSendRef.current;
+    pendingToSendRef.current = null;
+    sendMessage(msg);
+  }, [currentSessionId, sendMessage]);
 
   // Auto-scroll
   useEffect(() => {
@@ -60,9 +82,19 @@ export default function Chat() {
     }
   }, [currentSessionId, sessions, deleteSession, createSession]);
 
-  const handleSend = useCallback(async (msg: string) => {
-    await sendMessage(msg);
-  }, [sendMessage]);
+  const handleSend = useCallback(async (msg: string): Promise<boolean> => {
+    if (currentSessionId) {
+      return sendMessage(msg);
+    }
+    // No session yet — create one and queue the message
+    pendingToSendRef.current = msg;
+    const sid = await ensureSession();
+    if (!sid) {
+      pendingToSendRef.current = null;
+      return false;
+    }
+    return true;
+  }, [currentSessionId, sendMessage, ensureSession]);
 
   const hasMessages = messages.length > 0;
 
@@ -71,7 +103,6 @@ export default function Chat() {
       <AppHeader />
 
       <div className="flex flex-1 pt-14 min-h-0">
-        {/* Sessions Sidebar */}
         <SessionsSidebar
           groupedSessions={groupedSessions}
           currentSessionId={currentSessionId}
@@ -83,9 +114,7 @@ export default function Chat() {
           loading={sessionsLoading}
         />
 
-        {/* Chat Area */}
         <div className="flex flex-col flex-1 min-w-0">
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
             {messagesLoading ? (
               <div className="flex items-center justify-center h-full">
@@ -107,7 +136,6 @@ export default function Chat() {
             )}
           </div>
 
-          {/* Input */}
           <ChatInputInline
             onSend={handleSend}
             sending={sending}
@@ -127,7 +155,7 @@ function ChatInputInline({
   suggestionText,
   onSuggestionConsumed,
 }: {
-  onSend: (msg: string) => Promise<void> | void;
+  onSend: (msg: string) => Promise<boolean>;
   sending: boolean;
   suggestionText: string;
   onSuggestionConsumed: () => void;
@@ -151,13 +179,20 @@ function ChatInputInline({
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }, []);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (submitRef.current || sending || !input.trim()) return;
     submitRef.current = true;
     const msg = input.trim();
-    setInput('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    Promise.resolve(onSend(msg)).finally(() => { submitRef.current = false; });
+
+    try {
+      const ok = await onSend(msg);
+      if (ok) {
+        setInput('');
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      }
+    } finally {
+      submitRef.current = false;
+    }
   }, [input, sending, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
