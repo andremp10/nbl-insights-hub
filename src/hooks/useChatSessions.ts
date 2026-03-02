@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface ChatSession {
@@ -25,6 +25,7 @@ export function useChatSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [loading, setLoading] = useState(true);
   const deviceId = useMemo(() => getDeviceId(), []);
+  const creatingRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
     const { data, error } = await supabase
@@ -33,6 +34,9 @@ export function useChatSessions() {
       .eq('user_id', deviceId)
       .order('last_message_at', { ascending: false, nullsFirst: false });
 
+    if (error) {
+      console.error('[useChatSessions] fetchSessions error:', error.message, error.code);
+    }
     if (!error && data) setSessions(data as ChatSession[]);
     setLoading(false);
   }, [deviceId]);
@@ -53,20 +57,33 @@ export function useChatSessions() {
   }, [fetchSessions]);
 
   const createSession = useCallback(async (): Promise<ChatSession | null> => {
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .insert({ user_id: deviceId, title: 'Nova conversa' })
-      .select()
-      .single();
+    if (creatingRef.current) {
+      console.warn('[useChatSessions] createSession already in progress, skipping');
+      return null;
+    }
+    creatingRef.current = true;
 
-    if (error || !data) return null;
-    const session = data as ChatSession;
-    setSessions(prev => [session, ...prev]);
-    return session;
+    try {
+      const { data, error } = await supabase
+        .from('chat_sessions')
+        .insert({ user_id: deviceId, title: 'Nova conversa' })
+        .select()
+        .single();
+
+      if (error || !data) {
+        console.error('[useChatSessions] createSession error:', error?.message, error?.code, error?.details);
+        return null;
+      }
+
+      const session = data as ChatSession;
+      setSessions(prev => [session, ...prev]);
+      return session;
+    } finally {
+      creatingRef.current = false;
+    }
   }, [deviceId]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
-    // Delete messages first, then session
     await supabase.from('chat_messages').delete().eq('session_id', sessionId);
     await supabase.from('chat_sessions').delete().eq('id', sessionId);
     setSessions(prev => prev.filter(s => s.id !== sessionId));

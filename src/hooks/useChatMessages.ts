@@ -11,7 +11,7 @@ export interface ChatMessage {
   created_at: string;
 }
 
-const MAX_WAIT_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_WAIT_MS = 5 * 60 * 1000;
 
 export function useChatMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -20,7 +20,6 @@ export function useChatMessages(sessionId: string | null) {
   const invokeInProgressRef = useRef(false);
   const pendingTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
-  // Fetch messages when session changes
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
@@ -40,7 +39,6 @@ export function useChatMessages(sessionId: string | null) {
         if (data) {
           const msgs = data as ChatMessage[];
           setMessages(msgs);
-          // Check if there's a pending message already
           const hasPending = msgs.some(m => m.status === 'pending');
           if (hasPending) {
             setSending(true);
@@ -50,7 +48,6 @@ export function useChatMessages(sessionId: string | null) {
         setLoading(false);
       });
 
-    // REALTIME: listen for changes on this session
     const channel = supabase
       .channel(`messages-${sessionId}`)
       .on('postgres_changes', {
@@ -75,7 +72,6 @@ export function useChatMessages(sessionId: string | null) {
         setMessages(prev =>
           prev.map(m => m.id === updated.id ? { ...m, ...updated } : m)
         );
-        // Release lock when resolved
         if (updated.status !== 'pending') {
           const timeout = pendingTimeouts.current.get(updated.id);
           if (timeout) {
@@ -95,15 +91,13 @@ export function useChatMessages(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  const sendMessage = useCallback(async (content: string) => {
-    // Synchronous guard — doesn't depend on re-render
-    if (invokeInProgressRef.current) return;
-    if (!content.trim() || !sessionId) return;
+  const sendMessage = useCallback(async (content: string): Promise<boolean> => {
+    if (invokeInProgressRef.current) return false;
+    if (!content.trim() || !sessionId) return false;
 
     invokeInProgressRef.current = true;
     setSending(true);
 
-    // Optimistic: add user message immediately
     const optimisticUserMsg: ChatMessage = {
       id: `opt-${Date.now()}`,
       session_id: sessionId,
@@ -115,12 +109,12 @@ export function useChatMessages(sessionId: string | null) {
     setMessages(prev => [...prev, optimisticUserMsg]);
 
     try {
+      console.log('[sendMessage] invoking nlq-proxy, sessionId:', sessionId);
       const { data, error } = await supabase.functions.invoke('nlq-proxy', {
         body: { message: content.trim(), session_id: sessionId },
       });
 
       if (error) {
-        // Check if Edge Function partially executed
         const { data: check } = await supabase
           .from('chat_messages')
           .select('id, status')
@@ -132,19 +126,15 @@ export function useChatMessages(sessionId: string | null) {
           .maybeSingle();
 
         if (check) {
-          // Pending exists — just wait for Realtime
           setSending(true);
-          return;
+          return true;
         }
-
         throw error;
       }
 
       if (!data?.success) throw new Error(data?.error || 'Erro desconhecido');
 
       const pendingId: string = data.pending_message_id;
-
-      // Set timeout for max wait
       if (pendingId) {
         const timeout = setTimeout(async () => {
           const { data: checkMsg } = await supabase
@@ -167,14 +157,14 @@ export function useChatMessages(sessionId: string | null) {
           invokeInProgressRef.current = false;
           setSending(false);
         }, MAX_WAIT_MS);
-
         pendingTimeouts.current.set(pendingId, timeout);
       }
+
+      return true;
     } catch (err) {
       console.error('Erro ao enviar:', err);
       invokeInProgressRef.current = false;
       setSending(false);
-      // Add error message locally
       setMessages(prev => [...prev, {
         id: `err-${Date.now()}`,
         session_id: sessionId,
@@ -183,6 +173,7 @@ export function useChatMessages(sessionId: string | null) {
         status: 'error',
         created_at: new Date().toISOString(),
       }]);
+      return false;
     }
   }, [sessionId]);
 
@@ -197,7 +188,6 @@ export function useChatMessages(sessionId: string | null) {
 
     if (!userMessage) return;
 
-    // Remove error message
     if (!errorMessageId.startsWith('err-') && !errorMessageId.startsWith('opt-')) {
       await supabase.from('chat_messages').delete().eq('id', errorMessageId);
     }
