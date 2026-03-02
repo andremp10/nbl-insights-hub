@@ -121,7 +121,7 @@ export default function Chat() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="flex flex-1 min-h-0">
+    <div className="flex flex-1 min-h-0 overflow-hidden">
       <SessionsSidebar
         groupedSessions={groupedSessions}
         currentSessionId={currentSessionId}
