@@ -145,7 +145,7 @@ export default function Chat() {
   }
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden auth-grid-bg">
+    <div className="flex flex-1 min-h-0 overflow-hidden">
       <SessionsSidebar
         groupedSessions={groupedSessions}
         currentSessionId={currentSessionId}
@@ -158,7 +158,7 @@ export default function Chat() {
         loading={sessionsLoading}
       />
 
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 auth-grid-bg">
         {/* ── Header fixo ── */}
         <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-2.5 border-b border-border bg-background sticky top-0 z-10">
           <div className="flex items-center gap-2.5">
