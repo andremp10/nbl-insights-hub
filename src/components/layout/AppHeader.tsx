@@ -14,7 +14,7 @@ const navItems = [
 ];
 
 export function AppHeader() {
-  const { logout } = useAuth();
+  const { signOut } = useAuth();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -65,7 +65,7 @@ export function AppHeader() {
       <div className="flex items-center gap-2">
         <ThemeToggle />
         <button
-          onClick={logout}
+          onClick={signOut}
           aria-label="Sair"
           className="hidden md:flex items-center gap-2 text-sm text-muted-foreground hover:text-destructive transition-colors"
         >
@@ -86,7 +86,7 @@ export function AppHeader() {
             <nav className="flex flex-col gap-6 mt-8">
               <NavLinks onClick={() => setMobileOpen(false)} />
               <button
-                onClick={() => { logout(); setMobileOpen(false); }}
+                onClick={() => { signOut(); setMobileOpen(false); }}
                 className="flex items-center gap-2 text-sm text-muted-foreground hover:text-destructive transition-colors mt-4"
               >
                 <LogOut className="w-4 h-4" />

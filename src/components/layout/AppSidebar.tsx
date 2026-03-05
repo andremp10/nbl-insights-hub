@@ -28,7 +28,7 @@ const menuItems = [
 ];
 
 export function AppSidebar() {
-  const { logout } = useAuth();
+  const { signOut } = useAuth();
   const { state } = useSidebar();
   const location = useLocation();
   const collapsed = state === 'collapsed';
@@ -117,7 +117,7 @@ export function AppSidebar() {
               <ThemeToggle />
               <Separator orientation={collapsed ? "horizontal" : "vertical"} className={collapsed ? "w-6" : "h-5"} />
               <SidebarMenuButton
-                onClick={logout}
+                onClick={signOut}
                 tooltip="Sair"
                 className={cn(
                   'flex items-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-150',

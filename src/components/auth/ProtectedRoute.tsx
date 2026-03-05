@@ -6,13 +6,13 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, loading } = useAuth();
+  const { session, loading } = useAuth();
 
   if (loading) {
     return null;
   }
 
-  if (!isAuthenticated) {
+  if (!session) {
     return <Navigate to="/auth" replace />;
   }
 
