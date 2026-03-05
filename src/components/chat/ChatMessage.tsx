@@ -31,12 +31,6 @@ function isNumericCell(text: string): boolean {
   return /^\d+$/.test(cleaned);
 }
 
-const QUICK_ACTIONS = [
-  { label: 'Detalhar mais', query: 'Com base na sua última resposta, detalhe mais os dados. Inclua breakdown por categoria ou cliente quando possível' },
-  { label: 'Últimos 7 dias', query: 'Refaça a mesma consulta anterior, mas considerando apenas os últimos 7 dias' },
-  { label: 'Comparar períodos', query: 'Compare os dados da última consulta com o período anterior equivalente e mostre a variação' },
-  { label: 'Exportar tabela', query: 'Mostre os dados da última consulta em formato de tabela completa para que eu possa copiar' },
-];
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -71,7 +65,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
 
   if (isPending && !isUser) return <ThinkingBubble />;
 
-  const showQuickActions = !isUser && !isError && !isPending && message.content && !isTyping;
+  
 
   return (
     <motion.div
@@ -156,7 +150,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
                     if (isMetadata) {
                       const parts = text.split('·').map(s => s.trim()).filter(Boolean);
                       return (
-                        <span className="flex flex-wrap gap-1.5 my-2">
+                        <span className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border/30">
                           {parts.map((part, i) => (
                             <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/50 border border-border/50 text-[11px] text-muted-foreground">
                               {i === 0 ? <Calendar className="w-3 h-3 shrink-0" /> : <Info className="w-3 h-3 shrink-0" />}
@@ -211,20 +205,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
           )}
         </div>
 
-        {/* Quick action chips for assistant messages */}
-        {showQuickActions && onFollowUp && (
-          <div className="flex flex-wrap gap-1.5 mt-2 px-1">
-            {QUICK_ACTIONS.map(a => (
-              <button
-                key={a.label}
-                onClick={() => onFollowUp(a.query)}
-                className="text-[11px] px-2.5 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
-              >
-                {a.label}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </motion.div>
   );
