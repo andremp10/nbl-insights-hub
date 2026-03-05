@@ -1,29 +1,17 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ArrowRight, Bot, Wallet, PackageSearch, Package } from 'lucide-react';
+import { MessageSquare, ArrowRight, Bot, Wallet, PackageSearch, Package, TrendingUp, AlertTriangle, ShoppingBag } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion } from 'framer-motion';
 
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h >= 5 && h < 12) return 'Bom dia';
-  if (h >= 12 && h < 18) return 'Boa tarde';
-  return 'Boa noite';
-}
-
 function formatCurrency(v: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
-}
-
-function formatCurrencyCompact(v: number): string {
-  if (v >= 1000000) return `R$ ${(v / 1000000).toFixed(1)}M`;
-  if (v >= 1000) return `R$ ${(v / 1000).toFixed(1)}k`;
-  return formatCurrency(v);
 }
 
 function getInitials(name: string): string {
@@ -31,10 +19,9 @@ function getInitials(name: string): string {
 }
 
 interface HomeKpis {
-  receita: number | null;
-  despesas: number | null;
   totalPedidos: number | null;
   atrasados: number | null;
+  resultado: number | null;
 }
 
 interface RecentOrder {
@@ -46,72 +33,53 @@ interface RecentOrder {
   is_atrasado: boolean;
 }
 
-const SUGGESTION_CHIPS = [
-  'Faturamento do mês',
-  'Pedidos pendentes',
-  'Top clientes',
+const QUICK_SUGGESTIONS = [
+  { title: 'Faturamento do mês', prompt: 'Qual o faturamento total do mês atual? Compare com o mês anterior e mostre a variação percentual' },
+  { title: 'Pedidos atrasados', prompt: 'Quais pedidos estão atrasados neste momento? Mostre cliente, valor e dias de atraso' },
+  { title: 'Top clientes', prompt: 'Liste os 10 maiores clientes por valor total de pedidos nos últimos 30 dias' },
+  { title: 'Resumo financeiro', prompt: 'Resumo financeiro do mês atual: receita total, despesas totais e resultado líquido' },
 ];
 
-const modules = [
+const NAV_CARDS = [
   {
     title: 'Assistente IA',
-    description: 'Consulte dados em linguagem natural. Pergunte sobre pedidos, financeiro e clientes.',
+    description: 'Consulte dados em linguagem natural',
     icon: Bot,
     route: '/chat',
-    gradient: 'from-primary/8 to-transparent',
-    iconBg: 'bg-primary/10 text-primary',
-    accentColor: 'border-l-primary',
-  },
-  {
-    title: 'Financeiro',
-    description: 'Receitas, despesas e resultado líquido. Visualize gráficos e composição de custos.',
-    icon: Wallet,
-    route: '/financeiro',
-    gradient: 'from-success/8 to-transparent',
-    iconBg: 'bg-success/10 text-success',
-    accentColor: 'border-l-success',
+    accent: 'border-l-primary',
+    iconColor: 'text-primary',
   },
   {
     title: 'Pedidos',
-    description: 'Acompanhe status, prazos, clientes e produção em tempo real.',
+    description: 'Acompanhe status, prazos e produção',
     icon: PackageSearch,
     route: '/pedidos',
-    gradient: 'from-info/8 to-transparent',
-    iconBg: 'bg-info/10 text-info',
-    accentColor: 'border-l-info',
+    accent: 'border-l-info',
+    iconColor: 'text-info',
+  },
+  {
+    title: 'Financeiro',
+    description: 'Receitas, despesas e resultado líquido',
+    icon: Wallet,
+    route: '/financeiro',
+    accent: 'border-l-success',
+    iconColor: 'text-success',
   },
 ];
 
 export default function Home() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [kpis, setKpis] = useState<HomeKpis>({ receita: null, despesas: null, totalPedidos: null, atrasados: null });
+  const [kpis, setKpis] = useState<HomeKpis>({ totalPedidos: null, atrasados: null, resultado: null });
   const [kpisLoading, setKpisLoading] = useState(true);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
-
-  const greeting = useMemo(getGreeting, []);
-  const dateString = useMemo(() => {
-    return format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR });
-  }, []);
 
   const handleQuickQuery = (q: string) => {
     if (!q.trim()) return;
     localStorage.setItem('nbl_pending_query', q.trim());
     navigate('/chat');
   };
-
-  const modulesWithPreview = useMemo(() => {
-    return modules.map(m => {
-      if (m.route === '/financeiro' && kpis.receita !== null) {
-        return { ...m, preview: formatCurrencyCompact(kpis.receita), previewLabel: 'Receita este mês' };
-      }
-      if (m.route === '/pedidos' && kpis.totalPedidos !== null) {
-        return { ...m, preview: `${kpis.totalPedidos}`, previewLabel: 'pedidos este mês' };
-      }
-      return { ...m, preview: null as string | null, previewLabel: null as string | null };
-    });
-  }, [kpis]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -124,19 +92,21 @@ export default function Home() {
           supabase.rpc('get_financeiro_kpis', { p_data_inicio: startOfMonth, p_data_fim: endOfMonth }),
           supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).gte('data_criacao', startOfMonth).lte('data_criacao', endOfMonth + 'T23:59:59'),
           supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).eq('is_atrasado', true).eq('is_finalizado', false),
-          supabase.from('vw_dashboard_pedidos').select('pedido_id, cliente_nome, data_criacao, valor_total, status_pedido, is_atrasado').order('data_criacao', { ascending: false }).limit(5),
+          supabase.from('vw_dashboard_pedidos').select('pedido_id, cliente_nome, data_criacao, valor_total, status_pedido, is_atrasado').order('data_criacao', { ascending: false }).limit(4),
         ]);
 
         const finRow = Array.isArray(finRes.data) ? finRes.data[0] : finRes.data;
+        const receita = Number(finRow?.receita || 0);
+        const despesa = Number(finRow?.despesa || 0);
+
         setKpis({
-          receita: Number(finRow?.receita || 0),
-          despesas: Number(finRow?.despesa || 0),
           totalPedidos: pedRes.count ?? 0,
           atrasados: atrasRes.count ?? 0,
+          resultado: receita - despesa,
         });
         setRecentOrders((recentRes.data || []) as RecentOrder[]);
       } catch {
-        // KPIs são opcionais
+        // KPIs são opcionais na home
       } finally {
         setKpisLoading(false);
         setRecentLoading(false);
@@ -146,236 +116,235 @@ export default function Home() {
   }, []);
 
   const kpiItems = [
-    { label: 'Receita', value: kpis.receita, format: formatCurrency, color: 'text-success' },
-    { label: 'Despesas', value: kpis.despesas, format: formatCurrency, color: 'text-destructive' },
-    { label: 'Pedidos', value: kpis.totalPedidos, format: (v: number) => v.toString(), color: 'text-info' },
-    { label: 'Atrasados', value: kpis.atrasados, format: (v: number) => v.toString(), color: 'text-warning' },
+    { label: 'Pedidos em aberto', value: kpis.totalPedidos, format: (v: number) => v.toString(), icon: ShoppingBag, color: 'text-info' },
+    { label: 'Atrasados', value: kpis.atrasados, format: (v: number) => v.toString(), icon: AlertTriangle, color: 'text-warning' },
+    { label: 'Resultado do mês', value: kpis.resultado, format: formatCurrency, icon: TrendingUp, color: kpis.resultado !== null && kpis.resultado >= 0 ? 'text-success' : 'text-destructive' },
   ];
 
-  const resultado = kpis.receita !== null && kpis.despesas !== null ? kpis.receita - kpis.despesas : null;
+  const hasKpiData = kpiItems.some(k => k.value !== null && k.value !== 0) || kpisLoading;
 
   return (
     <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-4 md:px-8">
 
-      {/* ── Hero Section ── */}
-      <section className="px-4 md:px-8 pt-12 pb-8 md:pt-20 md:pb-12 max-w-5xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
+        {/* ── Hero Institucional ── */}
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.35 }}
+          className="pt-10 pb-6 md:pt-16 md:pb-8"
         >
-          <h1 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight">
-            {greeting} 👋
+          <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight leading-tight">
+            Bem-vindo à plataforma de inteligência da NBL
           </h1>
-          <div className="mt-2 flex items-center gap-2">
-            <Badge variant="secondary" className="text-xs font-normal capitalize">
-              {dateString}
-            </Badge>
-          </div>
-          <p className="text-base text-muted-foreground mt-3 max-w-lg">
-            Consulte dados operacionais, acompanhe pedidos e analise o financeiro da NBL Gráfica.
+          <p className="text-sm text-muted-foreground mt-2 max-w-lg leading-relaxed">
+            Consulte dados operacionais, acompanhe pedidos e visualize o financeiro em um só lugar.
           </p>
-        </motion.div>
+          <div className="flex flex-wrap items-center gap-3 mt-5">
+            <Button onClick={() => navigate('/chat')} size="default" className="gap-2">
+              <Bot className="w-4 h-4" />
+              Abrir Assistente
+            </Button>
+            <Button onClick={() => navigate('/pedidos')} variant="outline" size="default" className="gap-2">
+              <PackageSearch className="w-4 h-4" />
+              Ver Pedidos
+            </Button>
+            <Button onClick={() => navigate('/financeiro')} variant="outline" size="default" className="gap-2">
+              <Wallet className="w-4 h-4" />
+              Ver Financeiro
+            </Button>
+          </div>
+        </motion.section>
 
-        {/* Search integrated in hero */}
-        <motion.div
+        {/* ── Cards de Navegação ── */}
+        <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.1 }}
+          transition={{ duration: 0.35, delay: 0.08 }}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {NAV_CARDS.map((card) => {
+              const Icon = card.icon;
+              return (
+                <button
+                  key={card.route}
+                  onClick={() => navigate(card.route)}
+                  className={cn(
+                    'group flex items-center gap-3 p-4 rounded-xl border border-border bg-card text-left',
+                    'border-l-2 transition-colors duration-150',
+                    'hover:bg-accent/50',
+                    card.accent
+                  )}
+                >
+                  <div className={cn('w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0')}>
+                    <Icon className={cn('w-4.5 h-4.5', card.iconColor)} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-foreground">{card.title}</span>
+                    <p className="text-xs text-muted-foreground truncate">{card.description}</p>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-foreground transition-colors shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        </motion.section>
+
+        {/* ── Pergunte ao Assistente ── */}
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.14 }}
           className="mt-8"
         >
-          <div className="relative rounded-xl border border-border bg-card shadow-sm">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">
+            Pergunte ao assistente
+          </p>
+          <div className="relative rounded-xl border border-border bg-card">
             <div className="relative flex items-center">
-              <MessageSquare className="absolute left-4 w-5 h-5 text-muted-foreground/40" />
+              <MessageSquare className="absolute left-3.5 w-4 h-4 text-muted-foreground/40" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuickQuery(query); } }}
-                placeholder="Pergunte algo ao assistente..."
-                className="w-full bg-transparent py-4 pl-12 pr-14 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none rounded-xl"
+                placeholder="Ex: Quanto faturamos esse mês?"
+                className="w-full bg-transparent py-3 pl-10 pr-12 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none rounded-xl"
               />
               <button
                 onClick={() => handleQuickQuery(query)}
                 disabled={!query.trim()}
                 aria-label="Enviar consulta"
-                className="absolute right-3 w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-20 hover:bg-primary/90 transition-colors"
+                className="absolute right-2.5 w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-20 hover:bg-primary/90 transition-colors"
               >
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 mt-3">
-            {SUGGESTION_CHIPS.map((chip) => (
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
+            {QUICK_SUGGESTIONS.map((s) => (
               <button
-                key={chip}
-                onClick={() => handleQuickQuery(chip)}
-                className="px-3.5 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-all"
+                key={s.title}
+                onClick={() => handleQuickQuery(s.prompt)}
+                className="px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-all"
               >
-                {chip}
+                {s.title}
               </button>
             ))}
           </div>
-        </motion.div>
-      </section>
+        </motion.section>
 
-      {/* ── Module Cards ── */}
-      <section className="px-4 md:px-8 max-w-5xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
-          {modulesWithPreview.map((mod, i) => {
-            const Icon = mod.icon;
-            return (
-              <motion.div
-                key={mod.title}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.15 + i * 0.08 }}
-                onClick={() => navigate(mod.route)}
-                className={cn(
-                  'group relative bg-card border border-border rounded-xl cursor-pointer overflow-hidden',
-                  'border-l-[4px] transition-all duration-200',
-                  'hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-1',
-                  mod.accentColor
-                )}
-              >
-                <div className={cn('absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-300', mod.gradient)} />
-                <div className="relative p-6 md:p-8">
-                  <div className={cn('flex items-center justify-center w-14 h-14 rounded-xl mb-5 transition-transform duration-200 group-hover:scale-110', mod.iconBg)}>
-                    <Icon className="h-7 w-7" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-foreground mb-1.5">{mod.title}</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed mb-4">{mod.description}</p>
-                  
-                  {mod.preview && !kpisLoading ? (
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-xl font-bold text-foreground">{mod.preview}</span>
-                      <span className="text-xs text-muted-foreground">{mod.previewLabel}</span>
-                    </div>
-                  ) : kpisLoading && mod.route !== '/chat' ? (
-                    <Skeleton className="h-6 w-28" />
-                  ) : null}
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ── KPI Ribbon ── */}
-      <section className="px-4 md:px-8 mt-10 max-w-5xl mx-auto">
-        <motion.div
+        {/* ── KPIs Discretos ── */}
+        <motion.section
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.4, delay: 0.4 }}
-          className="rounded-xl bg-muted/30 py-5 px-6"
+          transition={{ duration: 0.35, delay: 0.2 }}
+          className="mt-8"
         >
-          <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium mb-3">Resumo do mês</p>
-          <div className="flex flex-wrap items-center gap-y-3">
-            {kpiItems.map((k, i) => (
-              <div key={k.label} className="flex items-center">
-                {i > 0 && <div className="hidden md:block w-px h-8 bg-border mx-6" />}
-                <div className={cn('pr-6 md:pr-0', i > 0 && 'pl-0')}>
-                  <span className="text-[11px] text-muted-foreground block">{k.label}</span>
-                  {kpisLoading ? (
-                    <Skeleton className="h-7 w-20 mt-0.5" />
-                  ) : (
-                    <span className={cn('text-xl font-semibold tabular-nums', k.color)}>
-                      {k.value !== null ? k.format(k.value) : '—'}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {/* Resultado líquido */}
-            <div className="flex items-center">
-              <div className="hidden md:block w-px h-8 bg-border mx-6" />
-              <div>
-                <span className="text-[11px] text-muted-foreground block">Resultado</span>
-                {kpisLoading ? (
-                  <Skeleton className="h-7 w-20 mt-0.5" />
-                ) : (
-                  <span className={cn('text-xl font-semibold tabular-nums', resultado !== null && resultado >= 0 ? 'text-success' : 'text-destructive')}>
-                    {resultado !== null ? formatCurrency(resultado) : '—'}
-                  </span>
-                )}
-              </div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">
+            Indicadores do mês
+          </p>
+          {hasKpiData ? (
+            <div className="grid grid-cols-3 gap-3">
+              {kpiItems.map((k) => {
+                const Icon = k.icon;
+                return (
+                  <div key={k.label} className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Icon className={cn('w-3.5 h-3.5', k.color)} />
+                      <span className="text-[11px] text-muted-foreground">{k.label}</span>
+                    </div>
+                    {kpisLoading ? (
+                      <Skeleton className="h-6 w-16" />
+                    ) : (
+                      <span className={cn('text-lg font-semibold tabular-nums', k.color)}>
+                        {k.value !== null ? k.format(k.value) : '—'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        </motion.div>
-      </section>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-6 text-center">
+              <p className="text-sm text-muted-foreground">
+                Os indicadores aparecerão aqui quando houver dados disponíveis.
+              </p>
+            </div>
+          )}
+        </motion.section>
 
-      {/* ── Atividade Recente ── */}
-      <section className="px-4 md:px-8 mt-8 pb-12 max-w-5xl mx-auto">
-        <motion.div
+        {/* ── Atividade Recente ── */}
+        <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.5 }}
-          className="rounded-xl border border-border bg-card"
+          transition={{ duration: 0.35, delay: 0.26 }}
+          className="mt-8 pb-12"
         >
-          <div className="flex items-center justify-between px-6 pt-5 pb-3">
-            <h2 className="text-sm font-medium text-foreground">Atividade recente</h2>
-            <button
-              onClick={() => navigate('/pedidos')}
-              className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
-            >
-              Ver todos <ArrowRight className="w-3 h-3" />
-            </button>
+          <div className="rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between px-5 pt-4 pb-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Atividade recente
+              </p>
+              <button
+                onClick={() => navigate('/pedidos')}
+                className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+              >
+                Ver todos <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="px-5 pb-4">
+              {recentLoading ? (
+                <div className="space-y-2.5">
+                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-11 w-full rounded-lg" />)}
+                </div>
+              ) : recentOrders.length === 0 ? (
+                <div className="py-6 text-center">
+                  <Package className="h-7 w-7 text-muted-foreground/20 mx-auto mb-1.5" />
+                  <p className="text-sm text-muted-foreground">Nenhum pedido recente</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {recentOrders.map((order) => {
+                    const name = order.cliente_nome || 'Cliente';
+                    return (
+                      <div key={order.pedido_id} className="flex items-center gap-3 py-2.5">
+                        <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0">
+                          <span className="text-[9px] font-semibold text-muted-foreground">{getInitials(name)}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-foreground truncate">{name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {format(new Date(order.data_criacao), 'dd/MM/yy', { locale: ptBR })}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <span className="text-sm font-medium text-foreground tabular-nums">
+                            {formatCurrency(order.valor_total)}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'text-[10px]',
+                              order.is_atrasado
+                                ? 'bg-destructive/10 text-destructive border-destructive/30'
+                                : order.status_pedido === 'Finalizado'
+                                ? 'bg-success/10 text-success border-success/30'
+                                : 'bg-muted text-muted-foreground border-border'
+                            )}
+                          >
+                            {order.is_atrasado ? 'Atrasado' : order.status_pedido}
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-          <div className="px-6 pb-5">
-            {recentLoading ? (
-              <div className="space-y-3">
-                {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
-              </div>
-            ) : recentOrders.length === 0 ? (
-              <div className="py-8 text-center">
-                <Package className="h-8 w-8 text-muted-foreground/20 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Nenhum pedido recente</p>
-              </div>
-            ) : (
-              <div className="space-y-0 divide-y divide-border">
-                {recentOrders.map((order) => {
-                  const name = order.cliente_nome || 'Cliente';
-                  return (
-                    <div key={order.pedido_id} className="flex items-center gap-3 py-3">
-                      {/* Avatar */}
-                      <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0">
-                        <span className="text-[10px] font-semibold text-muted-foreground">{getInitials(name)}</span>
-                      </div>
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-foreground truncate">{name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {format(new Date(order.data_criacao), 'dd/MM/yy', { locale: ptBR })}
-                        </p>
-                      </div>
-                      {/* Value + Badge */}
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-sm font-medium text-foreground tabular-nums">
-                          {formatCurrency(order.valor_total)}
-                        </span>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            'text-[10px]',
-                            order.is_atrasado
-                              ? 'bg-destructive/10 text-destructive border-destructive/30'
-                              : order.status_pedido === 'Finalizado'
-                              ? 'bg-success/10 text-success border-success/30'
-                              : 'bg-muted text-muted-foreground border-border'
-                          )}
-                        >
-                          {order.is_atrasado ? 'Atrasado' : order.status_pedido}
-                        </Badge>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </motion.div>
-      </section>
+        </motion.section>
 
+      </div>
     </div>
   );
 }
