@@ -1,37 +1,37 @@
 import { motion } from 'framer-motion';
-import { TrendingUp, Users, Package, AlertTriangle, BarChart2, Clock, Bot } from 'lucide-react';
+import { TrendingUp, Users, Package, CreditCard, BarChart2, Clock, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const SUGGESTIONS = [
   {
     icon: TrendingUp,
-    text: 'Faturamento do mês atual',
-    description: 'Receita total do mês',
+    text: 'Qual o faturamento deste mês?',
+    description: 'Receita total do período atual',
   },
   {
     icon: Users,
-    text: 'Top 10 clientes',
-    description: 'Por volume de pedidos',
+    text: 'Top 10 clientes por valor de pedidos',
+    description: 'Ranking por volume financeiro',
   },
   {
     icon: Package,
-    text: 'Pedidos pendentes',
-    description: 'Em produção ou aguardando',
-  },
-  {
-    icon: AlertTriangle,
-    text: 'Pedidos atrasados',
-    description: 'Fora do prazo de entrega',
+    text: 'Pedidos em produção agora',
+    description: 'Status atual da produção',
   },
   {
     icon: BarChart2,
-    text: 'Despesas por categoria',
-    description: 'Distribuição de custos',
+    text: 'Comparar receita vs despesas do mês',
+    description: 'Visão geral do resultado',
+  },
+  {
+    icon: CreditCard,
+    text: 'Quais categorias de despesa mais cresceram?',
+    description: 'Análise de custos por categoria',
   },
   {
     icon: Clock,
-    text: 'Pedidos de hoje',
-    description: 'Criados nas últimas 24h',
+    text: 'Pedidos com pagamento pendente',
+    description: 'Aguardando confirmação',
   },
 ];
 
@@ -39,13 +39,13 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.07, delayChildren: 0.15 },
+    transition: { staggerChildren: 0.06, delayChildren: 0.1 },
   },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.25 } },
 };
 
 interface ChatEmptyStateProps {
@@ -61,7 +61,6 @@ export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        {/* Hero */}
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 mb-5 relative">
           <Bot className="w-8 h-8 text-primary" />
           <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-green-500 border-2 border-background" />
@@ -71,10 +70,9 @@ export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
           Assistente NBL Gráfica
         </h2>
         <p className="text-sm text-muted-foreground mb-8">
-          Consulte dados em linguagem natural. Experimente uma das sugestões abaixo.
+          Consulte dados em linguagem natural. Escolha uma sugestão ou digite sua pergunta.
         </p>
 
-        {/* Sugestões em grid 2 colunas */}
         <motion.div
           className="grid grid-cols-1 sm:grid-cols-2 gap-2"
           variants={containerVariants}

@@ -20,13 +20,10 @@ function formatTime(timestamp: string): string {
 function detectHighlightCard(content: string): { label: string; value: string } | null {
   const trimmed = content.trim();
   if (trimmed.includes('\n') || trimmed.includes('|') || trimmed.includes('- ') || trimmed.length > 120) return null;
-
   const colonMatch = trimmed.match(/^(.+?):\s*(R?\$?\s*[\d.,]+(?:\s*%)?)\s*$/);
   if (colonMatch) return { label: colonMatch[1].trim(), value: colonMatch[2].trim() };
-
   const currencyOnly = trimmed.match(/^R?\$\s*[\d.,]+$/);
   if (currencyOnly) return { label: 'Resultado', value: trimmed };
-
   return null;
 }
 
@@ -50,7 +47,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
   const [hovered, setHovered] = useState(false);
 
   const shouldAnimate = animate && !isUser && !isPending && !isError;
-  const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 12);
+  const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 8);
   const contentToRender = shouldAnimate ? displayedText : message.content;
 
   const highlightCard = useMemo(() => {
@@ -132,7 +129,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
             <div className={cn('text-sm leading-relaxed break-words', isUser ? 'text-primary-foreground' : '')}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                key={shouldAnimate ? displayedText.length : 'static'}
                 components={{
                   table: ({ children, ...props }) => (
                     <div className="my-3 w-full overflow-x-auto rounded-lg border border-border">

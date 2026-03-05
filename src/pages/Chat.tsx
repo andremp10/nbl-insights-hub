@@ -16,9 +16,11 @@ export default function Chat() {
   const initialMsgIdsRef = useRef<Set<string>>(new Set());
   const hasSetInitialRef = useRef(false);
   const pendingHandled = useRef(false);
-  const [suggestionText, setSuggestionText] = useState('');
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
+  // Track which message ID was last animated to avoid re-animation
+  const lastAnimatedIdRef = useRef<string | null>(null);
+  const animatedIdsRef = useRef<Set<string>>(new Set());
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (currentSessionId) return currentSessionId;
@@ -42,6 +44,8 @@ export default function Chat() {
   useEffect(() => {
     hasSetInitialRef.current = false;
     initialMsgIdsRef.current = new Set();
+    animatedIdsRef.current = new Set();
+    lastAnimatedIdRef.current = null;
   }, [currentSessionId]);
 
   // Send pending message after session is created
@@ -106,7 +110,6 @@ export default function Chat() {
       return ok;
     }
 
-    // No session yet — create one and queue the message
     if (isFirstUserMessage) pendingAutoTitleRef.current = msg.slice(0, 50);
     pendingToSendRef.current = msg;
     const sid = await ensureSession();
@@ -118,7 +121,28 @@ export default function Chat() {
     return true;
   }, [currentSessionId, sendMessage, ensureSession, messages, sessions, updateSessionTitle]);
 
+  // Suggestion click sends directly
+  const handleSuggestionClick = useCallback((text: string) => {
+    handleSend(text);
+  }, [handleSend]);
+
   const hasMessages = messages.length > 0;
+
+  // Determine which message should animate (only the LAST new assistant message)
+  const lastAssistantMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const animateId = lastAssistantMsg &&
+    lastAssistantMsg.role === 'assistant' &&
+    lastAssistantMsg.status === 'complete' &&
+    !initialMsgIdsRef.current.has(lastAssistantMsg.id) &&
+    !animatedIdsRef.current.has(lastAssistantMsg.id)
+    ? lastAssistantMsg.id
+    : null;
+
+  // Mark as animated once identified
+  if (animateId && animateId !== lastAnimatedIdRef.current) {
+    lastAnimatedIdRef.current = animateId;
+    // Will be added to animatedIdsRef after typewriter completes (on next render cycle where isTyping=false)
+  }
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -142,16 +166,20 @@ export default function Chat() {
               <p className="text-sm text-muted-foreground">Carregando mensagens...</p>
             </div>
           ) : !hasMessages && !sending ? (
-            <ChatEmptyState onSuggestionClick={(text) => setSuggestionText(text)} />
+            <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
           ) : (
             <div className="w-full max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-6">
               {messages.map((message) => {
-                const isNew = !initialMsgIdsRef.current.has(message.id);
+                const shouldAnimate = message.id === animateId;
+                // Once a message finishes animating, mark it so it won't re-animate
+                if (!shouldAnimate && lastAnimatedIdRef.current === message.id && message.status === 'complete') {
+                  animatedIdsRef.current.add(message.id);
+                }
                 return (
                   <ChatMessage
                     key={message.id}
                     message={message}
-                    animate={isNew && message.role === 'assistant' && message.status === 'complete'}
+                    animate={shouldAnimate}
                     onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
                   />
                 );
@@ -164,8 +192,6 @@ export default function Chat() {
         <ChatInputInline
           onSend={handleSend}
           sending={sending}
-          suggestionText={suggestionText}
-          onSuggestionConsumed={() => setSuggestionText('')}
         />
       </div>
     </div>
@@ -173,24 +199,14 @@ export default function Chat() {
 }
 
 function ChatInputInline({
-  onSend, sending, suggestionText, onSuggestionConsumed,
+  onSend, sending,
 }: {
   onSend: (msg: string) => Promise<boolean>;
   sending: boolean;
-  suggestionText: string;
-  onSuggestionConsumed: () => void;
 }) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submitRef = useRef(false);
-
-  useEffect(() => {
-    if (suggestionText) {
-      setInput(suggestionText);
-      onSuggestionConsumed();
-      setTimeout(() => textareaRef.current?.focus(), 0);
-    }
-  }, [suggestionText, onSuggestionConsumed]);
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
