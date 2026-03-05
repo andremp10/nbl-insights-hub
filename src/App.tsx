@@ -11,6 +11,7 @@ import { PageTransition } from "@/components/layout/PageTransition";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { Suspense, lazy } from "react";
 import { AnimatePresence } from "framer-motion";
+import { PageSkeleton } from "@/components/layout/PageSkeleton";
 
 const Auth = lazy(() => import("./pages/Auth"));
 const Home = lazy(() => import("./pages/Home"));
@@ -31,7 +32,7 @@ function AnimatedRoutes() {
   const location = useLocation();
   return (
     <AnimatePresence mode="wait">
-      <Suspense fallback={null}>
+      <Suspense fallback={<PageSkeleton />}>
         <Routes location={location} key={location.pathname}>
           <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
           <Route path="/" element={<ProtectedPage><PageTransition><Home /></PageTransition></ProtectedPage>} />

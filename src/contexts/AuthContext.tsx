@@ -1,26 +1,29 @@
- import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
- 
- interface AuthContextType {
-   isAuthenticated: boolean;
-   login: (password: string) => boolean;
-   logout: () => void;
- }
- 
- const AuthContext = createContext<AuthContextType | undefined>(undefined);
- 
- // Simple password - in production, use env variable or Supabase auth
- const VALID_PASSWORD = 'nbl2024';
- const AUTH_KEY = 'nbl_dashboard_auth';
- 
- export function AuthProvider({ children }: { children: ReactNode }) {
-   const [isAuthenticated, setIsAuthenticated] = useState(false);
- 
-   useEffect(() => {
-     const stored = localStorage.getItem(AUTH_KEY);
-     if (stored === 'true') {
-       setIsAuthenticated(true);
-     }
-   }, []);
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+
+interface AuthContextType {
+  isAuthenticated: boolean;
+  loading: boolean;
+  login: (password: string) => boolean;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Simple password - in production, use env variable or Supabase auth
+const VALID_PASSWORD = 'nbl2024';
+const AUTH_KEY = 'nbl_dashboard_auth';
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const stored = localStorage.getItem(AUTH_KEY);
+    if (stored === 'true') {
+      setIsAuthenticated(true);
+    }
+    setLoading(false);
+  }, []);
  
    const login = (password: string): boolean => {
      if (password === VALID_PASSWORD) {
@@ -36,11 +39,11 @@
      setIsAuthenticated(false);
    };
  
-   return (
-     <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
-       {children}
-     </AuthContext.Provider>
-   );
+  return (
+    <AuthContext.Provider value={{ isAuthenticated, loading, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
  }
  
  export function useAuth() {
