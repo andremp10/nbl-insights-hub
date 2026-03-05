@@ -1,11 +1,26 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowUp, Loader2, Bot, Plus, Download, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar } from '@/components/chat/SessionsSidebar';
 import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+
+const PERIOD_CHIPS = [
+  { label: 'Últimos 7d', prefix: '[Últimos 7 dias] ' },
+  { label: 'Últimos 30d', prefix: '[Últimos 30 dias] ' },
+  { label: 'Este mês', prefix: '[Este mês] ' },
+];
+
+const INTENT_CHIPS = [
+  { label: 'Resumo', prefix: '[Resumo] ' },
+  { label: 'Comparar', prefix: '[Comparar] ' },
+  { label: 'Listar', prefix: '[Listar] ' },
+];
 
 export default function Chat() {
   const { sessions, groupedSessions, createSession, deleteSession, updateSessionTitle, loading: sessionsLoading } = useChatSessions();
@@ -18,7 +33,6 @@ export default function Chat() {
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
-  // Track which message ID was last animated to avoid re-animation
   const lastAnimatedIdRef = useRef<string | null>(null);
   const animatedIdsRef = useRef<Set<string>>(new Set());
 
@@ -40,7 +54,6 @@ export default function Chat() {
     }
   }, [messages, messagesLoading, currentSessionId]);
 
-  // Reset tracking when session changes
   useEffect(() => {
     hasSetInitialRef.current = false;
     initialMsgIdsRef.current = new Set();
@@ -48,7 +61,6 @@ export default function Chat() {
     lastAnimatedIdRef.current = null;
   }, [currentSessionId]);
 
-  // Send pending message after session is created
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
     const msg = pendingToSendRef.current;
@@ -56,7 +68,6 @@ export default function Chat() {
     sendMessage(msg);
   }, [currentSessionId, sendMessage]);
 
-  // Apply pending auto-title after session is created
   useEffect(() => {
     if (!currentSessionId || !pendingAutoTitleRef.current) return;
     const title = pendingAutoTitleRef.current;
@@ -98,7 +109,6 @@ export default function Chat() {
 
   const handleSend = useCallback(async (msg: string): Promise<boolean> => {
     const isFirstUserMessage = messages.filter(m => m.role === 'user').length === 0;
-
     if (currentSessionId) {
       const ok = await sendMessage(msg);
       if (ok && isFirstUserMessage) {
@@ -109,7 +119,6 @@ export default function Chat() {
       }
       return ok;
     }
-
     if (isFirstUserMessage) pendingAutoTitleRef.current = msg.slice(0, 50);
     pendingToSendRef.current = msg;
     const sid = await ensureSession();
@@ -121,14 +130,38 @@ export default function Chat() {
     return true;
   }, [currentSessionId, sendMessage, ensureSession, messages, sessions, updateSessionTitle]);
 
-  // Suggestion click sends directly
   const handleSuggestionClick = useCallback((text: string) => {
     handleSend(text);
   }, [handleSend]);
 
+  const handleExport = useCallback(() => {
+    if (messages.length === 0) return;
+    const md = messages.map(m => `**${m.role === 'user' ? 'Você' : 'Assistente'}** (${new Date(m.created_at).toLocaleString('pt-BR')}):\n${m.content}`).join('\n\n---\n\n');
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-nbl-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Conversa exportada');
+  }, [messages]);
+
+  const handleClearContext = useCallback(async () => {
+    await handleNewSession();
+    toast.success('Contexto limpo');
+  }, [handleNewSession]);
+
   const hasMessages = messages.length > 0;
 
-  // Determine which message should animate (only the LAST new assistant message)
+  // Determine status for header badge
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const chatStatus: 'idle' | 'sending' | 'error' = sending
+    ? 'sending'
+    : lastMsg?.status === 'error'
+      ? 'error'
+      : 'idle';
+
   const lastAssistantMsg = messages.length > 0 ? messages[messages.length - 1] : null;
   const animateId = lastAssistantMsg &&
     lastAssistantMsg.role === 'assistant' &&
@@ -138,10 +171,8 @@ export default function Chat() {
     ? lastAssistantMsg.id
     : null;
 
-  // Mark as animated once identified
   if (animateId && animateId !== lastAnimatedIdRef.current) {
     lastAnimatedIdRef.current = animateId;
-    // Will be added to animatedIdsRef after typewriter completes (on next render cycle where isTyping=false)
   }
 
   return (
@@ -159,6 +190,23 @@ export default function Chat() {
       />
 
       <div className="flex flex-col flex-1 min-w-0">
+        {/* ── Header fixo ── */}
+        <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-2.5 border-b border-border bg-background sticky top-0 z-10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-primary" />
+            </div>
+            <span className="text-sm font-semibold text-foreground">Assistente NBL</span>
+            <StatusBadge status={chatStatus} />
+          </div>
+          <div className="flex items-center gap-1">
+            <HeaderButton icon={Plus} label="Nova conversa" onClick={handleNewSession} />
+            <HeaderButton icon={Download} label="Exportar" onClick={handleExport} disabled={messages.length === 0} />
+            <HeaderButton icon={Trash2} label="Limpar contexto" onClick={handleClearContext} />
+          </div>
+        </div>
+
+        {/* ── Corpo central ── */}
         <div className="flex-1 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
           {messagesLoading ? (
             <div className="flex items-center justify-center h-full gap-2">
@@ -168,10 +216,9 @@ export default function Chat() {
           ) : !hasMessages && !sending ? (
             <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
           ) : (
-            <div className="w-full max-w-3xl mx-auto px-4 md:px-8 py-8 space-y-6">
+            <div className="w-full max-w-[860px] mx-auto px-4 md:px-8 py-8 space-y-6">
               {messages.map((message) => {
                 const shouldAnimate = message.id === animateId;
-                // Once a message finishes animating, mark it so it won't re-animate
                 if (!shouldAnimate && lastAnimatedIdRef.current === message.id && message.status === 'complete') {
                   animatedIdsRef.current.add(message.id);
                 }
@@ -181,6 +228,7 @@ export default function Chat() {
                     message={message}
                     animate={shouldAnimate}
                     onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
+                    onFollowUp={handleSuggestionClick}
                   />
                 );
               })}
@@ -189,22 +237,58 @@ export default function Chat() {
           )}
         </div>
 
-        <ChatInputInline
-          onSend={handleSend}
-          sending={sending}
-        />
+        {/* ── Composer ── */}
+        <ChatComposer onSend={handleSend} sending={sending} />
       </div>
     </div>
   );
 }
 
-function ChatInputInline({
-  onSend, sending,
-}: {
-  onSend: (msg: string) => Promise<boolean>;
-  sending: boolean;
-}) {
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sub-components (header, composer)
+═══════════════════════════════════════════════════════════════════════════ */
+
+function StatusBadge({ status }: { status: 'idle' | 'sending' | 'error' }) {
+  if (status === 'sending') {
+    return (
+      <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 border-warning/40 text-warning gap-1">
+        <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+        Consultando…
+      </Badge>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 border-destructive/40 text-destructive gap-1">
+        <span className="w-1.5 h-1.5 rounded-full bg-destructive" />
+        Erro
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-[10px] px-2 py-0 h-5 border-success/40 text-success gap-1">
+      <span className="w-1.5 h-1.5 rounded-full bg-success" />
+      Conectado
+    </Badge>
+  );
+}
+
+function HeaderButton({ icon: Icon, label, onClick, disabled }: { icon: React.ElementType; label: string; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none"
+    >
+      <Icon className="w-4 h-4" />
+    </button>
+  );
+}
+
+function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
   const [input, setInput] = useState('');
+  const [responseMode, setResponseMode] = useState<'curta' | 'detalhada'>('curta');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submitRef = useRef(false);
 
@@ -218,7 +302,8 @@ function ChatInputInline({
   const handleSubmit = useCallback(async () => {
     if (submitRef.current || sending || !input.trim()) return;
     submitRef.current = true;
-    const msg = input.trim();
+    let msg = input.trim();
+    if (responseMode === 'detalhada') msg += ' [resposta detalhada]';
     try {
       const ok = await onSend(msg);
       if (ok) {
@@ -228,7 +313,7 @@ function ChatInputInline({
     } finally {
       submitRef.current = false;
     }
-  }, [input, sending, onSend]);
+  }, [input, sending, onSend, responseMode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !sending) {
@@ -237,11 +322,52 @@ function ChatInputInline({
     }
   };
 
+  const appendChip = (prefix: string) => {
+    setInput(prev => prefix + prev);
+    textareaRef.current?.focus();
+  };
+
   const canSend = !sending && input.trim().length > 0;
 
   return (
-    <div className="border-t border-border bg-sidebar-background px-4 py-3 md:px-8">
-      <div className="w-full max-w-3xl mx-auto">
+    <div className="border-t border-border bg-background px-4 py-3 md:px-6">
+      <div className="w-full max-w-[860px] mx-auto space-y-2">
+        {/* Chip bar */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {PERIOD_CHIPS.map(c => (
+            <button
+              key={c.label}
+              onClick={() => appendChip(c.prefix)}
+              className="text-[11px] px-2.5 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+            >
+              {c.label}
+            </button>
+          ))}
+          <span className="w-px h-4 bg-border mx-1" />
+          {INTENT_CHIPS.map(c => (
+            <button
+              key={c.label}
+              onClick={() => appendChip(c.prefix)}
+              className="text-[11px] px-2.5 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+            >
+              {c.label}
+            </button>
+          ))}
+          <span className="w-px h-4 bg-border mx-1" />
+          <button
+            onClick={() => setResponseMode(prev => prev === 'curta' ? 'detalhada' : 'curta')}
+            className={cn(
+              "text-[11px] px-2.5 py-1 rounded-md border transition-colors",
+              responseMode === 'detalhada'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {responseMode === 'curta' ? 'Curta' : 'Detalhada'}
+          </button>
+        </div>
+
+        {/* Textarea */}
         <div className="relative">
           <textarea
             ref={textareaRef}
@@ -249,7 +375,7 @@ function ChatInputInline({
             disabled={sending}
             onChange={(e) => { if (!sending) { setInput(e.target.value); adjustHeight(); } }}
             onKeyDown={handleKeyDown}
-            placeholder="Pergunte algo sobre pedidos, clientes, financeiro..."
+            placeholder="Pergunte sobre pedidos, clientes, financeiro..."
             rows={1}
             className="w-full resize-none rounded-lg border border-border bg-card px-4 py-3 pr-14 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary disabled:cursor-not-allowed disabled:opacity-50 transition-colors duration-150"
             style={{ minHeight: '48px', maxHeight: '120px' }}
@@ -261,44 +387,29 @@ function ChatInputInline({
               disabled={!canSend}
               aria-label="Enviar mensagem"
               whileTap={canSend ? { scale: 0.92 } : {}}
-              className={`flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200 ${
+              className={cn(
+                'flex items-center justify-center w-9 h-9 rounded-lg transition-all duration-200',
                 canSend
                   ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
                   : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-              }`}
-            >
-              {sending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <ArrowUp className="w-4 h-4" />
               )}
+            >
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
             </motion.button>
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-1.5 px-1">
+        <div className="flex items-center justify-between px-1">
           <AnimatePresence mode="wait">
             {sending ? (
-              <motion.p
-                key="sending"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.2 }}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground"
-              >
+              <motion.p key="sending" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 Aguardando resposta do agente...
               </motion.p>
             ) : (
-              <motion.p
-                key="hint"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.2 }}
-                className="text-[11px] text-muted-foreground/40"
-              >
+              <motion.p key="hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="text-[11px] text-muted-foreground/40">
                 Enter para enviar · Shift+Enter para nova linha
               </motion.p>
             )}
