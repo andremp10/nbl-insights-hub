@@ -292,7 +292,7 @@ function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<bo
   return (
     <div className="border-t border-border bg-background px-4 py-3 md:px-6">
       <div className="w-full max-w-[860px] mx-auto">
-        <div className="relative bg-muted/40 rounded-2xl p-1.5">
+        <div className="relative bg-muted/40 rounded-2xl p-2">
           <textarea
             ref={textareaRef}
             value={input}
@@ -311,7 +311,7 @@ function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<bo
             aria-label="Enviar mensagem"
             whileTap={canSend ? { scale: 0.92 } : {}}
             className={cn(
-              'absolute right-3 bottom-3 flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200',
+              'absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200',
               canSend
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
                 : 'bg-muted-foreground/20 text-muted-foreground cursor-not-allowed'

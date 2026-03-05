@@ -1,34 +1,34 @@
 import { Bot, Wallet, PackageSearch, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const STRUCTURED_PROMPTS = [
-  'Qual o faturamento total do mês atual? Compare com o mês anterior e mostre a variação percentual',
-  'Liste os 10 maiores clientes por valor total de pedidos nos últimos 30 dias, em formato de ranking',
-  'Quais pedidos estão atrasados neste momento? Mostre cliente, valor e dias de atraso',
-  'Resumo financeiro do mês atual: receita total, despesas totais e resultado líquido',
-  'Quais as 5 maiores categorias de despesa dos últimos 30 dias? Mostre valor e percentual do total',
-  'Quantos pedidos temos em cada status atualmente? Mostre em formato de resumo',
-  'Compare receita e despesas dos últimos 3 meses, mês a mês',
-  'Quais pagamentos ou contas estão pendentes? Liste por valor e data de vencimento',
+const SUGGESTIONS = [
+  { title: 'Faturamento vs mês anterior', prompt: 'Qual o faturamento total do mês atual? Compare com o mês anterior e mostre a variação percentual' },
+  { title: 'Top 10 clientes', prompt: 'Liste os 10 maiores clientes por valor total de pedidos nos últimos 30 dias, em formato de ranking' },
+  { title: 'Pedidos atrasados', prompt: 'Quais pedidos estão atrasados neste momento? Mostre cliente, valor e dias de atraso' },
+  { title: 'Resumo financeiro do mês', prompt: 'Resumo financeiro do mês atual: receita total, despesas totais e resultado líquido' },
+  { title: 'Maiores despesas', prompt: 'Quais as 5 maiores categorias de despesa dos últimos 30 dias? Mostre valor e percentual do total' },
+  { title: 'Status dos pedidos', prompt: 'Quantos pedidos temos em cada status atualmente? Mostre em formato de resumo' },
+  { title: 'Receita vs despesas (3 meses)', prompt: 'Compare receita e despesas dos últimos 3 meses, mês a mês' },
+  { title: 'Pagamentos pendentes', prompt: 'Quais pagamentos ou contas estão pendentes? Liste por valor e data de vencimento' },
 ];
 
 const QUICK_MODELS = [
   {
     icon: Wallet,
     title: 'Resumo Financeiro',
-    description: 'Receitas, despesas e resultado líquido com as maiores categorias de custo',
+    description: 'Receitas, despesas e resultado líquido',
     query: 'Gere um resumo financeiro completo do mês atual. Inclua receita total, despesas totais, resultado líquido e as 3 maiores categorias de despesa com valores',
   },
   {
     icon: PackageSearch,
     title: 'Status de Pedidos',
-    description: 'Visão geral dos pedidos por status e alertas de atraso',
+    description: 'Visão geral por status e alertas',
     query: 'Faça um resumo do status atual de todos os pedidos. Quantos estão aprovados, em produção, concluídos e atrasados? Destaque os que precisam de atenção',
   },
   {
     icon: Users,
     title: 'Top Clientes',
-    description: 'Ranking dos clientes com maior volume de compras no mês',
+    description: 'Ranking por volume de compras',
     query: 'Mostre o ranking dos 10 maiores clientes por valor total de pedidos no mês atual, com nome e valor total de cada um',
   },
 ];
@@ -50,25 +50,23 @@ export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
           <h2 className="text-lg font-semibold text-foreground mb-1">Assistente NBL</h2>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Consulte dados financeiros e de pedidos em linguagem natural.
-            <br />
-            Escolha uma sugestão abaixo ou digite sua pergunta.
           </p>
         </div>
 
-        {/* Structured prompts grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-          {STRUCTURED_PROMPTS.map((text) => (
+        {/* Compact suggestion chips */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {SUGGESTIONS.map((s) => (
             <button
-              key={text}
-              onClick={() => onSuggestionClick(text)}
+              key={s.title}
+              onClick={() => onSuggestionClick(s.prompt)}
               className={cn(
-                'text-sm px-3.5 py-3 rounded-xl border border-border text-left',
+                'text-xs font-medium px-3 py-2.5 rounded-lg border border-border text-center',
                 'text-muted-foreground hover:text-foreground',
                 'hover:border-primary/40 hover:bg-primary/5',
-                'transition-all duration-150 line-clamp-2'
+                'transition-all duration-150'
               )}
             >
-              {text}
+              {s.title}
             </button>
           ))}
         </div>
