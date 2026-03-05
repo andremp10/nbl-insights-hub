@@ -130,8 +130,22 @@
   .dark body {
     background-image:
       radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.04) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 100%, hsl(var(--info) / 0.02) 0%, transparent 40%);
+      radial-gradient(ellipse at 80% 100%, hsl(var(--info) / 0.02) 0%, transparent 40%),
+      linear-gradient(hsl(var(--foreground) / 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--foreground) / 0.03) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
   }
+}
+
+/* Auth pages — more dramatic grid + glow */
+.auth-grid-bg {
+  background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.08) 0%, transparent 60%),
+    radial-gradient(ellipse at 50% 100%, hsl(var(--primary) / 0.04) 0%, transparent 40%),
+    linear-gradient(hsl(var(--foreground) / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
 }
 
 @layer utilities {

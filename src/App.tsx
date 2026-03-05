@@ -19,6 +19,7 @@ const Home = lazy(() => import("./pages/Home"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Financeiro = lazy(() => import("./pages/Financeiro"));
 const Pedidos = lazy(() => import("./pages/Pedidos"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -36,6 +37,7 @@ function AnimatedRoutes() {
       <Suspense fallback={<PageSkeleton />}>
         <Routes location={location} key={location.pathname}>
           <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
+          <Route path="/reset-password" element={<PageTransition><ResetPassword /></PageTransition>} />
           <Route path="/" element={<ProtectedPage><PageTransition><Home /></PageTransition></ProtectedPage>} />
           <Route path="/chat" element={<ProtectedPage><PageTransition><Chat /></PageTransition></ProtectedPage>} />
           <Route path="/financeiro" element={<ProtectedPage><PageTransition><Financeiro /></PageTransition></ProtectedPage>} />
