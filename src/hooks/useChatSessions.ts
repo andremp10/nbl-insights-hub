@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface ChatSession {
   id: string;
@@ -10,28 +11,19 @@ export interface ChatSession {
   user_id: string;
 }
 
-const DEVICE_ID_KEY = 'nbl_device_id';
-
-function getDeviceId(): string {
-  let id = localStorage.getItem(DEVICE_ID_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_ID_KEY, id);
-  }
-  return id;
-}
-
 export function useChatSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const deviceId = useMemo(() => getDeviceId(), []);
+  const { user } = useAuth();
+  const userId = user?.id;
   const creatingRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
+    if (!userId) { setLoading(false); return; }
     const { data, error } = await supabase
       .from('chat_sessions')
       .select('*')
-      .eq('user_id', deviceId)
+      .eq('user_id', userId)
       .order('last_message_at', { ascending: false, nullsFirst: false });
 
     if (error) {
@@ -39,7 +31,7 @@ export function useChatSessions() {
     }
     if (!error && data) setSessions(data as ChatSession[]);
     setLoading(false);
-  }, [deviceId]);
+  }, [userId]);
 
   useEffect(() => {
     fetchSessions();
@@ -57,6 +49,7 @@ export function useChatSessions() {
   }, [fetchSessions]);
 
   const createSession = useCallback(async (): Promise<ChatSession | null> => {
+    if (!userId) return null;
     if (creatingRef.current) {
       console.warn('[useChatSessions] createSession already in progress, skipping');
       return null;
@@ -66,7 +59,7 @@ export function useChatSessions() {
     try {
       const { data, error } = await supabase
         .from('chat_sessions')
-        .insert({ user_id: deviceId, title: 'Nova conversa' })
+        .insert({ user_id: userId, title: 'Nova conversa' })
         .select()
         .single();
 
@@ -81,7 +74,7 @@ export function useChatSessions() {
     } finally {
       creatingRef.current = false;
     }
-  }, [deviceId]);
+  }, [userId]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     await supabase.from('chat_messages').delete().eq('session_id', sessionId);
@@ -92,7 +85,6 @@ export function useChatSessions() {
   const updateSessionTitle = useCallback(async (sessionId: string, title: string) => {
     const trimmed = title.trim().slice(0, 60);
     if (!trimmed) return;
-    // Optimistic update
     setSessions(prev => prev.map((s: ChatSession) => s.id === sessionId ? { ...s, title: trimmed } : s));
     await supabase.from('chat_sessions').update({ title: trimmed }).eq('id', sessionId);
   }, []);
