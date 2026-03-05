@@ -1,26 +1,18 @@
 
 
-# Plano — Melhorar renderizacao de metadados de periodo nas respostas do agente
+# Plano — Remover Quick Actions e Melhorar Hierarquia
 
-## Problema
+## Mudancas em `src/components/chat/ChatMessage.tsx`
 
-O agente retorna linhas de metadados como `*Períodos: 01/02/2026 a 29/02/2026 e 01/03/2026 a 31/03/2026 · Escopo: Faturamento (Comercial)*` que renderizam como texto italico simples — visualmente feio e sem hierarquia.
+1. **Remover QUICK_ACTIONS**: Apagar a constante `QUICK_ACTIONS` (linhas 34-39), a variavel `showQuickActions` (linha 74), e o bloco de renderizacao dos chips (linhas 214-227).
 
-## Solucao
+2. **Melhorar hierarquia dos metadados**: Os badges de periodo/escopo ficam bem, mas vou refinar o spacing e a separacao visual entre o corpo da resposta e os metadados — adicionar um separador sutil (`border-t border-border/30 pt-2 mt-2`) antes dos badges de metadados para criar uma separacao clara entre conteudo e contexto.
 
-Interceptar o componente `em` (italico) no ReactMarkdown para detectar linhas de metadados (que contenham "Períodos:", "Escopo:", "Limitação:") e renderiza-las como badges/chips estilizados em vez de italico plano.
+3. **Limpar prop nao usada**: A prop `onFollowUp` continua disponivel na interface mas nao sera mais usada internamente para quick actions. Manter na interface pois pode ser usada por outros componentes no futuro.
 
-### Regras de deteccao e estilo
-
-1. **Periodos/Escopo** (contem "Períodos:" ou "Escopo:"): renderizar como um chip compacto com fundo `bg-muted/50`, borda `border-border/50`, icone de calendario pequeno, texto `text-xs text-muted-foreground` — parece um badge de contexto, nao texto corrido.
-
-2. **Limitacao/Aviso** (contem "Limitação:" ou "Nota:"): renderizar como um alerta sutil inline com fundo `bg-amber-500/10`, borda `border-amber-500/20`, icone de alerta, texto `text-xs text-amber-400`.
-
-3. **Demais italicos**: manter `<em>` normal.
-
-### Arquivo
+## Arquivo
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/chat/ChatMessage.tsx` | Adicionar componente `em` customizado no ReactMarkdown que detecta e estiliza metadados |
+| `src/components/chat/ChatMessage.tsx` | Remover QUICK_ACTIONS, remover bloco de chips, adicionar separador visual nos metadados |
 
