@@ -113,7 +113,7 @@ export default function Home() {
   const hasKpiData = kpiItems.some(k => k.value !== null && k.value !== 0) || kpisLoading;
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto auth-grid-bg">
       <div className="max-w-4xl mx-auto px-4 md:px-8">
 
         {/* ── Hero Institucional ── */}
