@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ArrowRight, Bot, Wallet, PackageSearch, Package, TrendingUp, AlertTriangle, ShoppingBag } from 'lucide-react';
+import { ArrowRight, Bot, Wallet, PackageSearch, Package, TrendingUp, AlertTriangle, ShoppingBag } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,53 +33,42 @@ interface RecentOrder {
   is_atrasado: boolean;
 }
 
-const QUICK_SUGGESTIONS = [
-  { title: 'Faturamento do mês', prompt: 'Qual o faturamento total do mês atual? Compare com o mês anterior e mostre a variação percentual' },
-  { title: 'Pedidos atrasados', prompt: 'Quais pedidos estão atrasados neste momento? Mostre cliente, valor e dias de atraso' },
-  { title: 'Top clientes', prompt: 'Liste os 10 maiores clientes por valor total de pedidos nos últimos 30 dias' },
-  { title: 'Resumo financeiro', prompt: 'Resumo financeiro do mês atual: receita total, despesas totais e resultado líquido' },
-];
-
 const NAV_CARDS = [
   {
     title: 'Assistente IA',
-    description: 'Consulte dados em linguagem natural',
+    description: 'Consulte dados em linguagem natural e obtenha respostas instantâneas',
     icon: Bot,
     route: '/chat',
     accent: 'border-l-primary',
     iconColor: 'text-primary',
+    iconBg: 'bg-primary/10',
   },
   {
     title: 'Pedidos',
-    description: 'Acompanhe status, prazos e produção',
+    description: 'Acompanhe status, prazos de entrega e produção em tempo real',
     icon: PackageSearch,
     route: '/pedidos',
     accent: 'border-l-info',
     iconColor: 'text-info',
+    iconBg: 'bg-info/10',
   },
   {
     title: 'Financeiro',
-    description: 'Receitas, despesas e resultado líquido',
+    description: 'Visualize receitas, despesas e resultado líquido do período',
     icon: Wallet,
     route: '/financeiro',
     accent: 'border-l-success',
     iconColor: 'text-success',
+    iconBg: 'bg-success/10',
   },
 ];
 
 export default function Home() {
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
   const [kpis, setKpis] = useState<HomeKpis>({ totalPedidos: null, atrasados: null, resultado: null });
   const [kpisLoading, setKpisLoading] = useState(true);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
-
-  const handleQuickQuery = (q: string) => {
-    if (!q.trim()) return;
-    localStorage.setItem('nbl_pending_query', q.trim());
-    navigate('/chat');
-  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -170,66 +159,23 @@ export default function Home() {
                   key={card.route}
                   onClick={() => navigate(card.route)}
                   className={cn(
-                    'group flex items-center gap-3 p-4 rounded-xl border border-border bg-card text-left',
-                    'border-l-2 transition-colors duration-150',
-                    'hover:bg-accent/50',
+                    'group flex items-start gap-3.5 p-5 rounded-xl border border-border bg-card text-left',
+                    'border-l-2 transition-all duration-200',
+                    'hover:border-primary/30 hover:shadow-sm hover:bg-accent/40',
                     card.accent
                   )}
                 >
-                  <div className={cn('w-9 h-9 rounded-lg bg-muted flex items-center justify-center shrink-0')}>
-                    <Icon className={cn('w-4.5 h-4.5', card.iconColor)} />
+                  <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', card.iconBg)}>
+                    <Icon className={cn('w-5 h-5', card.iconColor)} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-foreground">{card.title}</span>
-                    <p className="text-xs text-muted-foreground truncate">{card.description}</p>
+                    <span className="text-sm font-semibold text-foreground">{card.title}</span>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{card.description}</p>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-foreground transition-colors shrink-0" />
+                  <ArrowRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-colors shrink-0 mt-0.5" />
                 </button>
               );
             })}
-          </div>
-        </motion.section>
-
-        {/* ── Pergunte ao Assistente ── */}
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.14 }}
-          className="mt-8"
-        >
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">
-            Pergunte ao assistente
-          </p>
-          <div className="relative rounded-xl border border-border bg-card">
-            <div className="relative flex items-center">
-              <MessageSquare className="absolute left-3.5 w-4 h-4 text-muted-foreground/40" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuickQuery(query); } }}
-                placeholder="Ex: Quanto faturamos esse mês?"
-                className="w-full bg-transparent py-3 pl-10 pr-12 text-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none rounded-xl"
-              />
-              <button
-                onClick={() => handleQuickQuery(query)}
-                disabled={!query.trim()}
-                aria-label="Enviar consulta"
-                className="absolute right-2.5 w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-20 hover:bg-primary/90 transition-colors"
-              >
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5 mt-2.5">
-            {QUICK_SUGGESTIONS.map((s) => (
-              <button
-                key={s.title}
-                onClick={() => handleQuickQuery(s.prompt)}
-                className="px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-all"
-              >
-                {s.title}
-              </button>
-            ))}
           </div>
         </motion.section>
 
@@ -237,7 +183,7 @@ export default function Home() {
         <motion.section
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.35, delay: 0.2 }}
+          transition={{ duration: 0.35, delay: 0.14 }}
           className="mt-8"
         >
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">
@@ -277,7 +223,7 @@ export default function Home() {
         <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.26 }}
+          transition={{ duration: 0.35, delay: 0.2 }}
           className="mt-8 pb-12"
         >
           <div className="rounded-xl border border-border bg-card">
