@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ArrowRight, Bot, TrendingUp, PackageSearch, TrendingDown, AlertTriangle, Package } from 'lucide-react';
+import { MessageSquare, ArrowRight, Bot, TrendingUp, PackageSearch, Package } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -50,27 +50,30 @@ const SUGGESTION_CHIPS = [
 
 const modules = [
   {
-    title: 'Assistente',
-    description: 'Consulte dados em linguagem natural',
+    title: 'Assistente IA',
+    description: 'Consulte dados em linguagem natural. Pergunte sobre pedidos, financeiro e clientes.',
     icon: Bot,
     route: '/chat',
-    borderColor: 'border-l-primary',
+    accentClass: 'border-t-primary',
+    iconBg: 'bg-primary/10 text-primary',
     preview: null as string | null,
   },
   {
     title: 'Financeiro',
-    description: 'Receitas, despesas e resultado',
+    description: 'Receitas, despesas e resultado líquido. Visualize gráficos e composição de custos.',
     icon: TrendingUp,
     route: '/financeiro',
-    borderColor: 'border-l-success',
+    accentClass: 'border-t-success',
+    iconBg: 'bg-success/10 text-success',
     preview: null as string | null,
   },
   {
     title: 'Pedidos',
-    description: 'Status e acompanhamento',
+    description: 'Acompanhe status, prazos, clientes e produção em tempo real.',
     icon: PackageSearch,
     route: '/pedidos',
-    borderColor: 'border-l-info',
+    accentClass: 'border-t-info',
+    iconBg: 'bg-info/10 text-info',
     preview: null as string | null,
   },
 ];
@@ -94,14 +97,13 @@ export default function Home() {
     navigate('/chat');
   };
 
-  // Build module previews from KPIs
   const modulesWithPreview = useMemo(() => {
     return modules.map(m => {
       if (m.route === '/financeiro' && kpis.receita !== null) {
-        return { ...m, preview: formatCurrencyCompact(kpis.receita) };
+        return { ...m, preview: `Receita: ${formatCurrencyCompact(kpis.receita)}` };
       }
       if (m.route === '/pedidos' && kpis.totalPedidos !== null) {
-        return { ...m, preview: `${kpis.totalPedidos} pedidos` };
+        return { ...m, preview: `${kpis.totalPedidos} pedidos este mês` };
       }
       return m;
     });
@@ -148,16 +150,16 @@ export default function Home() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[880px] mx-auto px-4 md:px-8 py-10 md:py-16 space-y-8">
+      <div className="max-w-5xl mx-auto px-4 md:px-8 py-10 md:py-16 space-y-10">
 
         {/* Hero */}
         <section>
-          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+          <h1 className="text-2xl md:text-3xl font-semibold text-foreground tracking-tight">
             {greeting}
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5 capitalize">{dateString}</p>
+          <p className="text-sm text-muted-foreground mt-1 capitalize">{dateString}</p>
           <p className="text-sm text-muted-foreground mt-1">
-            Consulte pedidos e financeiro em tempo real
+            Plataforma de consulta operacional da NBL Gráfica
           </p>
         </section>
 
@@ -196,8 +198,46 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Module Cards — Large, prominent, landing-page style */}
+        <section>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-4">Módulos</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {modulesWithPreview.map((mod) => {
+              const Icon = mod.icon;
+              return (
+                <div
+                  key={mod.title}
+                  onClick={() => navigate(mod.route)}
+                  className={cn(
+                    'bg-card border border-border rounded-lg p-6 md:p-8 cursor-pointer border-t-[3px] transition-all duration-200',
+                    'hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5',
+                    mod.accentClass
+                  )}
+                >
+                  <div className={cn('flex items-center justify-center w-12 h-12 rounded-lg mb-4', mod.iconBg)}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-base font-semibold text-foreground mb-1.5">{mod.title}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed mb-3">{mod.description}</p>
+                  {mod.preview && !kpisLoading && (
+                    <p className="text-sm text-primary font-medium">{mod.preview}</p>
+                  )}
+                  {kpisLoading && mod.route !== '/chat' && (
+                    <Skeleton className="h-4 w-24" />
+                  )}
+                  <div className="flex items-center gap-1 mt-3 text-xs text-muted-foreground/60">
+                    <span>Acessar</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
         {/* KPIs */}
         <section>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-3">Resumo do mês</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {kpiCards.map((k) => (
               <div key={k.label} className="bg-card border border-border rounded-lg p-4">
@@ -211,35 +251,6 @@ export default function Home() {
                 )}
               </div>
             ))}
-          </div>
-        </section>
-
-        {/* Module tiles */}
-        <section>
-          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-3">Acesso rápido</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {modulesWithPreview.map((mod) => {
-              const Icon = mod.icon;
-              return (
-                <div
-                  key={mod.title}
-                  onClick={() => navigate(mod.route)}
-                  className={cn(
-                    'bg-card border border-border rounded-lg p-4 cursor-pointer border-l-[3px] transition-colors hover:border-primary/40',
-                    mod.borderColor
-                  )}
-                >
-                  <div className="flex items-center gap-2.5 mb-1.5">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium text-foreground">{mod.title}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{mod.description}</p>
-                  {mod.preview && !kpisLoading && (
-                    <p className="text-xs text-primary font-medium mt-2">{mod.preview}</p>
-                  )}
-                </div>
-              );
-            })}
           </div>
         </section>
 

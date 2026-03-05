@@ -53,9 +53,12 @@ export function AppSidebar() {
               <Printer className="h-4 w-4" />
             </div>
             {!collapsed && (
-              <span className="text-[13px] font-semibold text-sidebar-foreground tracking-tight truncate">
-                NBL Gráfica
-              </span>
+              <div className="flex flex-col">
+                <span className="text-[13px] font-semibold text-sidebar-foreground tracking-tight truncate">
+                  NBL Gráfica
+                </span>
+                <span className="text-[10px] text-muted-foreground -mt-0.5">Insights Hub</span>
+              </div>
             )}
           </div>
           <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
@@ -64,6 +67,9 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup className={cn(collapsed ? "px-1 py-2" : "px-2 py-3")}>
+          {!collapsed && (
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-medium px-3 mb-1.5">Menu</span>
+          )}
           <SidebarGroupContent>
             <SidebarMenu className="space-y-0.5">
               {menuItems.map((item) => {
