@@ -1,18 +1,92 @@
 
 
-# Plano — Remover Quick Actions e Melhorar Hierarquia
+# Plano — Migrar para Supabase Auth + Cadastro de Usuarios + Fundo Estilizado
 
-## Mudancas em `src/components/chat/ChatMessage.tsx`
+## Resumo
 
-1. **Remover QUICK_ACTIONS**: Apagar a constante `QUICK_ACTIONS` (linhas 34-39), a variavel `showQuickActions` (linha 74), e o bloco de renderizacao dos chips (linhas 214-227).
+Migrar a autenticacao de senha hardcoded para Supabase Auth real com email/senha, adicionar pagina de cadastro, pagina de recuperacao de senha, e aplicar um fundo visual estilo "terminal/grid" inspirado no HTML compartilhado nas paginas de auth, home e chat.
 
-2. **Melhorar hierarquia dos metadados**: Os badges de periodo/escopo ficam bem, mas vou refinar o spacing e a separacao visual entre o corpo da resposta e os metadados — adicionar um separador sutil (`border-t border-border/30 pt-2 mt-2`) antes dos badges de metadados para criar uma separacao clara entre conteudo e contexto.
+---
 
-3. **Limpar prop nao usada**: A prop `onFollowUp` continua disponivel na interface mas nao sera mais usada internamente para quick actions. Manter na interface pois pode ser usada por outros componentes no futuro.
+## 1. AuthContext — Reescrever com Supabase Auth
 
-## Arquivo
+**Arquivo:** `src/contexts/AuthContext.tsx`
+
+Substituir completamente:
+- Remover senha hardcoded, localStorage
+- Estado: `session`, `user`, `loading`
+- `onAuthStateChange` listener (antes de `getSession`)
+- Metodos: `signIn(email, password)`, `signUp(email, password)`, `resetPassword(email)`, `signOut()`
+- `resetPassword` usa `redirectTo: window.location.origin + '/reset-password'`
+- Exportar `session`, `user`, `loading`, `signIn`, `signUp`, `resetPassword`, `signOut`
+
+## 2. ProtectedRoute — Adaptar
+
+**Arquivo:** `src/components/auth/ProtectedRoute.tsx`
+
+Trocar `isAuthenticated` por `session !== null`.
+
+## 3. SignInCard — Login + Cadastro + Recuperacao
+
+**Arquivo:** `src/components/ui/travel-connect-signin-1.tsx`
+
+Reformular o formulario mantendo layout visual (DotMap + split card):
+- Estado `view`: `'login' | 'register' | 'reset'`
+- **Login**: email + senha, botao "Entrar", links "Criar conta" e "Esqueci minha senha"
+- **Cadastro**: email + senha + confirmar senha, botao "Criar conta", link "Ja tenho conta"
+- **Recuperacao**: email, botao "Enviar link de recuperacao", link "Voltar"
+- Toasts para feedback (sucesso/erro)
+
+## 4. Pagina ResetPassword
+
+**Novo arquivo:** `src/pages/ResetPassword.tsx`
+
+Pagina publica:
+- Detecta `type=recovery` no hash da URL
+- Formulario: nova senha + confirmacao
+- Chama `supabase.auth.updateUser({ password })`
+- Redireciona para `/` apos sucesso
+- Mesmo estilo visual das outras paginas de auth
+
+## 5. Rota no App.tsx
+
+**Arquivo:** `src/App.tsx`
+
+Adicionar rota publica `/reset-password`.
+
+## 6. AppSidebar — Logout via Supabase
+
+**Arquivo:** `src/components/layout/AppSidebar.tsx`
+
+Trocar `logout` para chamar `signOut` do novo AuthContext.
+
+## 7. Fundo Visual Estilizado (Grid + Gradiente)
+
+**Arquivo:** `src/index.css`
+
+Inspirado no HTML compartilhado pelo usuario, adicionar ao dark mode um fundo com grid sutil estilo terminal:
+- Grid de pontos ou linhas finas com opacidade muito baixa (`0.03-0.05`)
+- Gradiente radial laranja no topo (ja existe, refinar)
+- Efeito de "vignette" nas bordas
+
+Isso se aplica globalmente (body), entao afeta home, chat e todas as paginas autenticadas sem precisar alterar cada componente.
+
+**Arquivo:** `src/pages/Auth.tsx`
+
+Aplicar um fundo mais dramatico na pagina de auth especificamente, com o grid mais visivel e efeito de glow laranja mais forte.
+
+---
+
+## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/chat/ChatMessage.tsx` | Remover QUICK_ACTIONS, remover bloco de chips, adicionar separador visual nos metadados |
+| `src/contexts/AuthContext.tsx` | Reescrever com Supabase Auth |
+| `src/components/auth/ProtectedRoute.tsx` | Adaptar para session |
+| `src/components/ui/travel-connect-signin-1.tsx` | Login + Cadastro + Reset views |
+| `src/pages/ResetPassword.tsx` | Criar pagina de redefinicao de senha |
+| `src/pages/Auth.tsx` | Fundo estilizado auth |
+| `src/App.tsx` | Adicionar rota /reset-password |
+| `src/components/layout/AppSidebar.tsx` | signOut via Supabase |
+| `src/index.css` | Grid/gradiente global para profundidade |
 
