@@ -14,6 +14,44 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_users: {
+        Row: {
+          auth_user_id: string
+          created_at: string
+          created_by: string | null
+          email: string
+          id: string
+          role: string
+          status: string
+        }
+        Insert: {
+          auth_user_id: string
+          created_at?: string
+          created_by?: string | null
+          email: string
+          id?: string
+          role?: string
+          status?: string
+        }
+        Update: {
+          auth_user_id?: string
+          created_at?: string
+          created_by?: string | null
+          email?: string
+          id?: string
+          role?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_users_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       chat_messages: {
         Row: {
           content: string
@@ -1891,6 +1929,7 @@ export type Database = {
         }[]
       }
       get_snapshot_meta: { Args: never; Returns: Json }
+      is_master: { Args: { p_auth_id: string }; Returns: boolean }
       try_parse_jsonb: { Args: { p_text: string }; Returns: Json }
     }
     Enums: {

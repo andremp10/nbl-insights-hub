@@ -2,3 +2,6 @@ project_id = "bcypejzqbcwibvtbbfor"
 
 [functions.nlq-proxy]
 verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
