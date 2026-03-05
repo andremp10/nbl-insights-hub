@@ -1,75 +1,83 @@
 
 
-# Plano — Corrigir Sidebars (Principal + Conversas)
-
-## Diagnostico da Causa Raiz
-
-**Sidebar Principal (AppSidebar):** Usa o componente shadcn `Sidebar` com `collapsible="icon"`. Em mobile, renderiza como um `Sheet` (dialog overlay via Radix). O `Sheet` usa `SheetOverlay` com `fixed inset-0 z-50 bg-black/80` -- este overlay captura todos os cliques quando aberto. O problema de "travar" ocorre porque:
-- Em desktop, o `SidebarTrigger` so aparece no header mobile (`md:hidden`), entao em desktop so funciona via `Ctrl+B` ou o trigger interno da sidebar (que desaparece quando recolhida a icones).
-- Nao ha fallback visivel para reabrir quando colapsada em desktop.
-
-**Sidebar de Conversas (SessionsSidebar):** Usa transicao de `width` (0 a 260px) com `overflow-hidden`. Problemas:
-- Animar `width` causa reflow constante (nao e performatico).
-- O conteudo e desmontado (`{isOpen && ...}`) e remontado a cada toggle, perdendo estado de scroll.
-- O botao de toggle quando fechada e um elemento flutuante que pode ficar atras de outros elementos.
+# Plano de Melhorias — Transicoes, Chat, Home e UX Global
 
 ---
 
-## 1. Sidebar Principal — Simplificar e Garantir Robustez
+## 1. Transicoes entre paginas (tela branca no lazy load)
 
-**Mudancas em `AppLayout.tsx`:**
-- Mostrar `SidebarTrigger` sempre (remover `md:hidden` do header), para que em desktop tambem haja um botao visivel para reabrir.
-- Alternativamente, mover o trigger para fora do header e colocar de forma fixa no canto.
+**Problema:** O `Suspense` com `lazy()` mostra um `PageLoader` (spinner tela cheia com fundo `bg-background`) a cada troca de rota. Isso causa um flash branco/escuro entre paginas.
 
-**Mudancas em `AppSidebar.tsx`:**
-- Quando colapsada (`state === "collapsed"`), mostrar o `SidebarTrigger` dentro da sidebar (ja existe parcialmente com `{!collapsed && <SidebarTrigger>}` — inverter para mostrar quando collapsed tambem).
-- Adicionar `SidebarRail` como handle de borda para arrastar/clicar e expandir (componente ja existe em `sidebar.tsx` mas nao esta sendo usado).
+**Correcao:**
+- Remover o `Suspense` global que envolve todas as rotas.
+- Adicionar `framer-motion` page transitions: envolver cada pagina com um `motion.div` que faz fade-in/fade-out rapido (150ms).
+- Criar um componente `PageTransition` que aplica `AnimatePresence` + `motion.div` com `opacity` e leve `translateY`.
+- Manter `lazy()` mas trocar o fallback do Suspense de spinner tela cheia para um skeleton minimo inline (ou nenhum, ja que as paginas sao leves).
+- Em `App.tsx`: envolver o conteudo de cada `Route` com `<PageTransition>`.
 
-**Arquivos:** `src/components/layout/AppLayout.tsx`, `src/components/layout/AppSidebar.tsx`
-
----
-
-## 2. Sidebar de Conversas — Usar Transform ao Inves de Width
-
-**Reescrever `SessionsSidebar.tsx` para:**
-- Usar `transform: translateX(-100%)` quando fechada ao inves de `width: 0`. Isso evita reflow e permite animacao via GPU.
-- Manter o conteudo sempre montado (remover `{isOpen && ...}`), so esconder via translate. Isso preserva scroll position e evita remontagem.
-- Largura fixa de 260px sempre, visibilidade controlada por translate.
-- Em mobile (< md): usar overlay com backdrop semitransparente que fecha ao clicar fora. Overlay com `pointer-events: none` quando fechado.
-- Botao de toggle: posicionar como parte do fluxo flex, nao flutuante. Sempre visivel independente do estado.
-- Adicionar `ESC` para fechar (event listener no useEffect).
-- Adicionar `will-change: transform` durante animacao.
-
-**Estrutura final:**
-```text
-+------------------+-----+----------------------------+
-| SessionsSidebar  | Tog | Chat content               |
-| (translateX)     | gle |                            |
-|                  | btn |                            |
-+------------------+-----+----------------------------+
-```
-
-O toggle fica sempre no mesmo lugar, o sidebar desliza por baixo/ao lado.
-
-**Arquivo:** `src/components/chat/SessionsSidebar.tsx`
+**Arquivos:** `src/App.tsx`, novo `src/components/layout/PageTransition.tsx`
 
 ---
 
-## 3. Chat.tsx — Ajustar Container
+## 2. Chat — Typewriter so na mensagem nova + formatacao
 
-- Garantir que o wrapper do chat use `overflow-hidden` para que o sidebar de conversas nao cause scroll horizontal.
-- Estrutura: `flex flex-1 min-h-0 overflow-hidden` no container pai.
+**Problema:** O `useTypewriter` roda em TODAS as mensagens do assistente que sao marcadas como "novas" (nao estavam no `initialMsgIdsRef`). Se o usuario troca de sessao e volta, mensagens ja vistas sao re-animadas. Alem disso, o `ReactMarkdown` com `key={displayedText.length}` causa remontagem constante, quebrando a renderizacao de tabelas durante a digitacao.
 
-**Arquivo:** `src/pages/Chat.tsx`
+**Correcoes:**
+- **Typewriter apenas na ultima mensagem do assistente que acabou de chegar.** Adicionar um ref `lastAnimatedIdRef` que guarda o ID da ultima mensagem animada. So animar se `message.id` for diferente do ultimo animado E for a ultima mensagem do array.
+- **Remover o `key` dinamico do ReactMarkdown.** Usar `key="static"` sempre — o componente ja re-renderiza quando `contentToRender` muda.
+- **Velocidade mais rapida:** mudar speed de 12ms para 8ms e chunk maximo de 3 para 5 chars para texto longo parecer mais fluido.
+- **Marcar mensagem como "ja animada" apos conclusao** para evitar re-animacao ao trocar de sessao.
+
+**Arquivos:** `src/pages/Chat.tsx`, `src/components/chat/ChatMessage.tsx`, `src/hooks/useTypewriter.ts`
 
 ---
 
-## 4. Melhorias Visuais
+## 3. Sugestoes do Chat — conteudo relevante + UX fluida
 
-- SessionsSidebar: transicao suave de 200ms em `transform`, sem spring/bounce.
-- Hover states mais claros nos itens de sessao.
-- Backdrop em mobile: `bg-black/40` com fade in/out.
-- Botao toggle: icone `PanelLeftClose` / `PanelLeft` ao inves de chevrons para consistencia com a sidebar principal.
+**Problema:** As sugestoes sao genericas e a experiencia de clique nao e fluida (o texto vai para o input mas nao envia automaticamente).
+
+**Correcoes:**
+- **Sugestoes mais uteis e especificas para grafica:**
+  1. "Qual o faturamento deste mes?"
+  2. "Top 10 clientes por valor de pedidos"
+  3. "Pedidos em producao agora"
+  4. "Comparar receita vs despesas do mes"
+  5. "Quais categorias de despesa mais cresceram?"
+  6. "Pedidos com pagamento pendente"
+- **Ao clicar uma sugestao, enviar diretamente** (nao apenas preencher o input). Mudar o callback `onSuggestionClick` no `ChatEmptyState` para chamar `handleSend` diretamente.
+- **Remover o `ChatSuggestionsPanel` lateral** (painel de sugestoes a direita) que nao esta sendo usado na pagina do Chat e e redundante com o EmptyState.
+
+**Arquivos:** `src/components/chat/ChatEmptyState.tsx`, `src/pages/Chat.tsx`
+
+---
+
+## 4. Home Page — redesenho visual impressionante
+
+**Problema:** A Home atual e funcional mas generica. Precisa impressionar como "porta de entrada" do sistema.
+
+**Redesenho:**
+- **Hero section grande** com saudacao + subtitulo elegante ("Plataforma de gestao inteligente da NBL Grafica").
+- **Barra de busca centralizada** com design premium (glassmorphism sutil, borda com glow laranja no focus).
+- **3 cards de modulo** (Chat IA, Financeiro, Pedidos) com icones grandes, gradientes sutis e descricao clara. Cada um com hover animado (scale + border glow).
+- **KPIs em linha** abaixo dos cards com animacao de contagem (countUp) nos numeros.
+- **Remover as sugestoes de texto** da Home (elas vivem no Chat). Substituir por um CTA "Pergunte ao assistente" que navega ao chat.
+- **Animacoes escalonadas** usando framer-motion stagger para entrada dos elementos.
+
+**Arquivo:** `src/pages/Home.tsx` (reescrever)
+
+---
+
+## 5. Transicao Login → App
+
+**Problema:** Apos login, a transicao e abrupta (redirect sem animacao).
+
+**Correcao:**
+- No `Auth.tsx`, apos login bem-sucedido, adicionar um fade-out antes do redirect.
+- O `PageTransition` criado no item 1 ja vai suavizar a entrada da primeira pagina protegida.
+- Adicionar `animate-fade-in` na `AppLayout` para que o layout inteiro faca fade-in na montagem inicial.
+
+**Arquivos:** `src/pages/Auth.tsx`, `src/components/layout/AppLayout.tsx`
 
 ---
 
@@ -77,8 +85,13 @@ O toggle fica sempre no mesmo lugar, o sidebar desliza por baixo/ao lado.
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/layout/AppLayout.tsx` | Mostrar SidebarTrigger em todas as telas |
-| `src/components/layout/AppSidebar.tsx` | Adicionar SidebarRail + trigger quando collapsed |
-| `src/components/chat/SessionsSidebar.tsx` | Reescrever: translateX, always mounted, ESC, overlay mobile |
-| `src/pages/Chat.tsx` | Adicionar overflow-hidden no container |
+| `src/components/layout/PageTransition.tsx` | Novo componente de transicao entre paginas |
+| `src/App.tsx` | Integrar PageTransition, ajustar Suspense |
+| `src/pages/Chat.tsx` | Typewriter so na ultima msg, sugestao envia direto |
+| `src/components/chat/ChatMessage.tsx` | Remover key dinamico, ajustar animate |
+| `src/hooks/useTypewriter.ts` | Aumentar velocidade, chunk maior |
+| `src/components/chat/ChatEmptyState.tsx` | Sugestoes mais relevantes, envio direto |
+| `src/pages/Home.tsx` | Redesenho visual completo |
+| `src/pages/Auth.tsx` | Fade-out pos-login |
+| `src/components/layout/AppLayout.tsx` | Fade-in na montagem |
 
