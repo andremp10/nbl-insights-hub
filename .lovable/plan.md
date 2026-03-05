@@ -1,54 +1,89 @@
 
 
-# Avaliacao e Plano — Home como Landing Page Fluida
+# Refatoracao — Chat do Assistente NBL (B2B Moderno)
 
-## Problemas Identificados
+Escopo: apenas a pagina de chat e seus componentes. Nenhuma outra pagina e tocada.
 
-Olhando o print e o codigo:
+---
 
-1. **Tudo tem a mesma cara**: Hero, search, modulos, KPIs, atividade — todos sao blocos identicos (bg-card, border, rounded-lg) empilhados com o mesmo spacing. Nao ha ritmo visual.
-2. **Hero e fraco**: Texto puro sem nenhum elemento visual de ancora. Parece um paragrafo solto.
-3. **Secao "MODULOS" parece admin panel**: O label uppercase "MODULOS" + 3 cards identicos com borda colorida no topo e um triste "Acessar →" da cara de template CMS.
-4. **KPIs desconectados**: Aparecem depois dos modulos como uma secao solta, sem relacao visual com nada.
-5. **Sem variacao de densidade**: Tudo tem o mesmo padding, mesmo gap, mesma largura. Landing pages tem secoes com densidades diferentes.
-6. **Falta de CTA claro**: O botao de busca e pequeno e discreto. Nao ha um convite forte para usar o assistente.
+## Estrutura Final
 
-## Solucao — Landing Page com Secoes Fluidas
+```text
+┌─────────────────────────────────────────────────────────┐
+│  HEADER FIXO (compact)                                  │
+│  [≡] Assistente NBL  [●Conectado]    [+Nova] [Exportar] │
+├──────────┬──────────────────────────────────────────────┤
+│ Sessions │  CORPO CENTRAL (max-w-[860px])               │
+│ Sidebar  │                                              │
+│ (colaps) │  Empty: titulo + descricao + grid chips      │
+│          │        + "Modelos rapidos" cards              │
+│          │                                              │
+│          │  Msgs: bolhas user/assistant                  │
+│          │        assistant = card estruturado           │
+│          │                                              │
+│          ├──────────────────────────────────────────────┤
+│          │  COMPOSER                                    │
+│          │  [chips periodo] [chips intencao] [toggle]   │
+│          │  [textarea multilinha]          [Enviar]     │
+│          │  Enter envia · Shift+Enter nova linha        │
+└──────────┴──────────────────────────────────────────────┘
+```
 
-### A) Hero Section com mais presenca
-- Remover a secao como bloco solto → ocupar mais espaco vertical
-- Saudacao `text-3xl md:text-4xl font-bold` com tracking tight
-- Data em badge discreto ou pill (nao texto puro)
-- Subtitulo com `text-base text-muted-foreground` e mais respiro
-- Integrar a barra de busca DENTRO do hero (nao como secao separada), com tamanho maior (`py-4`) e mais destaque
+---
 
-### B) Module Cards com personalidade
-- Remover label "MODULOS" generico
-- Cards maiores com hover mais expressivo: sombra + translate + borda lateral que cresce
-- Cada card com um **gradiente sutil de fundo** unico (nao o gradiente generico — algo como `bg-gradient-to-br from-primary/5 to-transparent`)
-- Icone maior (`w-14 h-14`) com fundo mais presente
-- Preview de dados com mais destaque (badge ou pill colorido)
-- Remover "Acessar →" e substituir por um CTA mais integrado ao card (o card inteiro ja e clicavel)
-- Adicionar uma micro-animacao no icone ao hover (rotate ou scale sutil)
+## Mudancas por Arquivo
 
-### C) KPIs integrados com visual diferente
-- Mover KPIs para uma **faixa visual diferente**: fundo levemente diferente (`bg-muted/30`) ou sem borda (apenas valores)
-- Layout em linha com separadores verticais entre KPIs (ao inves de 4 cards separados)
-- Isso quebra a monotonia de "tudo e card"
+### 1. `src/pages/Chat.tsx` — Header fixo + composer com chips
 
-### D) Atividade recente com mais contexto
-- Adicionar um botao "Ver todos os pedidos →" no header do card
-- Melhorar visual dos items com avatar/iniciais do cliente
+**Header fixo** (novo, acima do corpo):
+- Flex row: icone Bot + "Assistente NBL" `text-base font-semibold`
+- Badge de status: `Conectado` (verde) quando idle, `Consultando...` (amarelo pulse) quando `sending`, `Erro` (vermelho) quando ultimo msg e error
+- Direita: botoes icon-only — "Nova conversa" (Plus), "Exportar" (Download), "Limpar" (Trash2)
+- `border-b border-border bg-background sticky top-0 z-10`
 
-### E) Espacamento e ritmo
-- Hero: `py-12 md:py-20` (mais respiro)
-- Entre hero e modulos: `mt-12`
-- KPIs: sem borda, inline, compactos
-- Atividade: `mt-8`
+**Composer refatorado** (substituir `ChatInputInline`):
+- Barra de chips ACIMA do textarea:
+  - Periodo: `Ultimos 7d`, `Ultimos 30d`, `Este mes` — clicaveis, preenchem prefixo no input
+  - Intencao: `Resumo`, `Comparar`, `Listar` — idem
+  - Toggle: `Curta` / `Detalhada` (visual only, appended ao msg como hint)
+- Textarea multilinha (mesmo comportamento atual)
+- Botao Enviar sempre visivel
 
-## Arquivo
+**Corpo central**: manter `max-w-[860px]` (de 720px atual via max-w-3xl)
+
+### 2. `src/components/chat/ChatEmptyState.tsx` — Redesenho completo
+
+- Manter icone Bot com badge online
+- Titulo: "Assistente NBL" + 2 linhas explicando como perguntar
+- Grid de chips clicaveis (8 exemplos curtos) em 2 colunas sm / 4 colunas md
+- Secao "Modelos rapidos": 3 cards maiores (Resumo Financeiro, Status Pedidos, Top Clientes) — cada um envia uma query pronta ao clicar
+
+### 3. `src/components/chat/ChatMessage.tsx` — Respostas estruturadas
+
+- Manter renderizacao markdown atual (ja funciona bem)
+- Adicionar footer de acoes rapidas: chips "Refinar periodo", "Top 10", "Agrupar por status" — visíveis em toda resposta de assistant (nao user)
+- Copiar: ja existe, manter
+- Erro: manter botao "Tentar novamente" + adicionar texto "Tente reduzir o periodo da consulta"
+
+### 4. `src/components/chat/ThinkingBubble.tsx` — Estados mais claros
+
+- Manter animacao de dots + frases rotativas (ja esta bom)
+- Adicionar badge "Consultando banco..." no header (via status badge no header, nao aqui)
+
+### 5. `src/index.css` — Ajuste de bolhas
+
+- `chat-bubble-assistant`: reduzir border-radius para `12px 12px 12px 4px` (mais sutil, menos "chat messenger")
+
+---
+
+## Arquivos Editados
 
 | Arquivo | Acao |
 |---------|------|
-| `src/pages/Home.tsx` | Redesenho completo: hero impactante, cards expressivos, KPIs inline, fluxo de landing page |
+| `src/pages/Chat.tsx` | Header fixo com status badge, composer com chips de periodo/intencao, max-w-[860px] |
+| `src/components/chat/ChatEmptyState.tsx` | Grid de chips + modelos rapidos cards |
+| `src/components/chat/ChatMessage.tsx` | Footer com chips de acao rapida nas respostas |
+| `src/index.css` | Border-radius mais sutil nas bolhas |
+
+Nenhum arquivo novo. Nenhuma mudanca de hook/backend.
 
