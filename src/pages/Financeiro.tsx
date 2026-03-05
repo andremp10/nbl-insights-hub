@@ -18,12 +18,12 @@ export default function Financeiro() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="flex items-center justify-between px-6 md:px-8 py-4 border-b border-border/50">
+      <div className="flex items-center justify-between px-6 md:px-8 py-4 border-b border-border">
         <h1 className="text-lg font-semibold text-foreground tracking-tight">Financeiro</h1>
         <DateFilterBar />
       </div>
       <div className="p-6 md:p-8 space-y-6">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           <KPICard title="Receita Total" value={formatCurrency(kpis.receita)} subtitle="Entradas pagas no período" icon={<TrendingUp className="h-4 w-4" />} variant="success" isLoading={kpisLoading} />
           <KPICard title="Despesas Totais" value={formatCurrency(kpis.despesas)} subtitle="Saídas pagas no período" icon={<TrendingDown className="h-4 w-4" />} variant="destructive" isLoading={kpisLoading} />
           <KPICard title="Resultado Líquido" value={formatCurrency(kpis.resultado)} subtitle="Receita - Despesas" icon={<DollarSign className="h-4 w-4" />} variant={kpis.resultado >= 0 ? 'success' : 'destructive'} isLoading={kpisLoading} />

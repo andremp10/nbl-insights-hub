@@ -251,7 +251,7 @@ function ChatInputInline({
             onKeyDown={handleKeyDown}
             placeholder="Pergunte algo sobre pedidos, clientes, financeiro..."
             rows={1}
-            className="w-full resize-none rounded-xl border border-border bg-card px-4 py-3 pr-14 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200"
+            className="w-full resize-none rounded-lg border border-border bg-card px-4 py-3 pr-14 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary disabled:cursor-not-allowed disabled:opacity-50 transition-colors duration-150"
             style={{ minHeight: '48px', maxHeight: '120px' }}
             aria-label="Campo de mensagem"
           />
