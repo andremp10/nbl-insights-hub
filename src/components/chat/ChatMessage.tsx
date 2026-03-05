@@ -32,9 +32,10 @@ function isNumericCell(text: string): boolean {
 }
 
 const QUICK_ACTIONS = [
-  { label: 'Refinar período', query: 'Refine o período da última consulta' },
-  { label: 'Top 10', query: 'Mostre o top 10 da última consulta' },
-  { label: 'Agrupar por status', query: 'Agrupe por status os dados da última consulta' },
+  { label: 'Detalhar mais', query: 'Com base na sua última resposta, detalhe mais os dados. Inclua breakdown por categoria ou cliente quando possível' },
+  { label: 'Últimos 7 dias', query: 'Refaça a mesma consulta anterior, mas considerando apenas os últimos 7 dias' },
+  { label: 'Comparar períodos', query: 'Compare os dados da última consulta com o período anterior equivalente e mostre a variação' },
+  { label: 'Exportar tabela', query: 'Mostre os dados da última consulta em formato de tabela completa para que eu possa copiar' },
 ];
 
 interface ChatMessageProps {
