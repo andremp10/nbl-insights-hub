@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useState } from "react";
-import { Eye, EyeOff, ArrowRight, Mail, KeyRound, UserPlus, ArrowLeft } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, Mail, KeyRound, ArrowLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from '@/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-type ViewState = 'login' | 'register' | 'reset';
+type ViewState = 'login' | 'reset';
 
 const DotMap = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -132,21 +132,15 @@ export const SignInCard = () => {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { signIn, resetPassword } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoading) return;
 
-    if (view === 'register' && password !== confirmPassword) {
-      toast.error('As senhas não coincidem');
-      return;
-    }
-
-    if (view !== 'reset' && password.length < 6) {
+    if (view === 'login' && password.length < 6) {
       toast.error('A senha deve ter pelo menos 6 caracteres');
       return;
     }
@@ -161,14 +155,6 @@ export const SignInCard = () => {
         } else {
           toast.success('Bem-vindo ao NBL Insights Hub!');
           navigate('/');
-        }
-      } else if (view === 'register') {
-        const { error } = await signUp(email, password);
-        if (error) {
-          toast.error(error);
-        } else {
-          toast.success('Conta criada! Verifique seu e-mail para confirmar.');
-          setView('login');
         }
       } else if (view === 'reset') {
         const { error } = await resetPassword(email);
@@ -186,13 +172,11 @@ export const SignInCard = () => {
 
   const resetFields = () => {
     setPassword('');
-    setConfirmPassword('');
     setIsPasswordVisible(false);
   };
 
   const viewConfig = {
     login: { title: 'Bem-vindo', subtitle: 'Acesse com seu e-mail e senha', buttonText: 'Entrar', icon: ArrowRight },
-    register: { title: 'Criar Conta', subtitle: 'Preencha os dados para se cadastrar', buttonText: 'Criar Conta', icon: UserPlus },
     reset: { title: 'Recuperar Acesso', subtitle: 'Enviaremos um link de recuperação', buttonText: 'Enviar Link', icon: Mail },
   };
 
@@ -274,8 +258,8 @@ export const SignInCard = () => {
                   </div>
                 </div>
 
-                {/* Password (login + register) */}
-                {view !== 'reset' && (
+                {/* Password (login only) */}
+                {view === 'login' && (
                   <div>
                     <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1">
                       Senha <span className="text-primary">*</span>
@@ -299,28 +283,6 @@ export const SignInCard = () => {
                       >
                         {isPasswordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Confirm Password (register only) */}
-                {view === 'register' && (
-                  <div>
-                    <label htmlFor="confirmPassword" className="block text-sm font-medium text-foreground mb-1">
-                      Confirmar Senha <span className="text-primary">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="confirmPassword"
-                        type={isPasswordVisible ? "text" : "password"}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Repita a senha"
-                        required
-                        minLength={6}
-                        className={cn(inputClass, "pl-9")}
-                      />
-                      <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     </div>
                   </div>
                 )}
@@ -355,22 +317,6 @@ export const SignInCard = () => {
 
               {/* Footer links */}
               <div className="mt-6 text-center space-y-2">
-                {view === 'login' && (
-                  <button
-                    onClick={() => { resetFields(); setView('register'); }}
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Não tem conta? <span className="text-primary font-medium">Criar conta</span>
-                  </button>
-                )}
-                {view === 'register' && (
-                  <button
-                    onClick={() => { resetFields(); setView('login'); }}
-                    className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    Já tem conta? <span className="text-primary font-medium">Entrar</span>
-                  </button>
-                )}
                 {view === 'reset' && (
                   <button
                     onClick={() => { resetFields(); setView('login'); }}
