@@ -1,116 +1,59 @@
 
 
-# Refatoracao Completa — NBL Insights Hub
+# Plano — Restaurar estrutura visual anterior + melhorar design
 
-Plano consolidado: design system + sidebar + 4 paginas + componentes + tema. 11 arquivos editados, nenhum novo.
+## Problema Identificado
 
----
+A refatoracao anterior removeu elementos visuais importantes que existiam nos prints:
 
-## 1. Design System (`src/index.css`)
+1. **Chat/Assistente**: Tinha icone Bot grande com badge "online", 6 sugestoes em grid 2x3 com icones e descricoes. Agora tem apenas texto simples sem icones.
+2. **Home**: Os module tiles estao pequenos e sem destaque. O usuario quer cards GRANDES e proeminentes como "landing page" para as 3 abas.
+3. **Sidebar**: Tinha "Insights Hub" subtitulo e label "MENU" — esses detalhes davam identidade.
+4. **Pedidos/Financeiro**: KPIs estao OK nos prints, mantiveram a estrutura com icones coloridos. Pedidos tinha "Top 10 Clientes" chart.
 
-- Dark tokens mais profundos: background `0 0% 4%` (#0A0A0A), card `0 0% 7%` (#111), border `0 0% 12%` (#1E1E1E)
-- Light tokens com contraste real: background `0 0% 98%` (#FAFAFA), card `0 0% 100%`, border `0 0% 90%` (#E5E5E5)
-- Adicionar `--info: 199 89% 48%` e `--info-foreground: 0 0% 100%` em ambos os temas
-- Radius global: `0.5rem`
-- Remover animacao `fadeSlideUp` (nao usada diretamente)
+## Mudancas
 
-## 2. Sidebar (`AppSidebar.tsx`)
+### 1. Home — Cards grandes como landing page
 
-- Remover gradiente do logo → `bg-primary` solido, sem `shadow-md`
-- Remover subtitulo "Insights Hub"
-- Remover label "Menu"
-- Items: `py-2 px-3`, `text-[13px]`, icons `h-[18px] w-[18px]`
-- Ativo: `bg-primary/12 text-primary font-medium` + barra `w-[3px]` animada (manter)
-- Inativo: `text-muted-foreground hover:bg-muted hover:text-foreground`
-- Footer: ThemeToggle + Logout em linha com separador
+Reorganizar a Home para que os 3 cards de modulo sejam o **elemento principal e mais visivel**:
+- Cards muito maiores (`p-6 md:p-8`) com icone grande, titulo forte, descricao e preview de dados
+- Ocupar grid `md:grid-cols-3` com altura generosa
+- Cada card com cor de destaque unica (borda superior ou lateral grossa)
+- Hover com elevacao sutil
+- Mover KPIs para **abaixo** dos cards grandes (secundarios)
+- Manter barra de busca e chips acima dos cards
+- Manter secao de atividade recente
 
-## 3. Home (`Home.tsx`) — Redesenho completo
+### 2. ChatEmptyState — Restaurar layout anterior com icone e grid de sugestoes
 
-Nova estrutura (de cima para baixo):
+Restaurar:
+- Icone Bot grande centralizado com badge verde "online"
+- Titulo "Assistente NBL Grafica"
+- Subtitulo descritivo
+- 6 sugestoes em grid 2x3 (nao 2x2), cada uma com icone + titulo + descricao curta
+- Sugestoes relevantes ao escopo: faturamento, pedidos, producao, receita vs despesas, categorias de despesa, pagamentos pendentes
 
-**A) Hero compacto**
-- Saudacao `text-2xl font-semibold` (sem emoji no titulo)
-- Data por extenso abaixo: "Quinta-feira, 5 de marco de 2026"
-- Subtitulo: "Consulte pedidos e financeiro em tempo real"
+### 3. Sidebar — Restaurar "Insights Hub" e "MENU"
 
-**B) Barra de busca simplificada**
-- Remover `backdrop-blur`, glow no focus, `rounded-2xl`
-- `bg-card border border-border rounded-lg` simples, `focus:border-primary`
-- Abaixo: 3 chips de sugestao rapida clicaveis ("Faturamento do mes", "Pedidos pendentes", "Top clientes")
+- Adicionar subtitulo "Insights Hub" abaixo de "NBL Grafica" no header
+- Adicionar label "MENU" acima dos itens de menu (como nos prints)
+- Manter o resto do design atual (esta OK)
 
-**C) KPIs (4 cards densos)**
-- Receita mes, Despesas mes (da `vw_dashboard_financeiro` via query existente), Total pedidos, Atrasados
-- Remover `useCountUp` — valor direto
-- Cores nos valores: verde receita, vermelho despesas, azul pedidos, amber atrasados
-- Sem icones decorativos grandes — apenas label + valor
+### 4. Pedidos — Restaurar "Top 10 Clientes"
 
-**D) Atalhos rapidos (3 tiles)**
-- Compactos com borda esquerda colorida (3px)
-- Sem `motion.div whileHover scale`
-- Cada tile mostra preview de dado quando disponivel (ex: "R$ 12k" no financeiro)
+- Re-adicionar `HorizontalBarChart` de "Top 10 Clientes" em grid `md:grid-cols-2` ao lado do DonutChart de status
+- Isso estava nos prints e foi removido indevidamente
 
-**E) Atividade recente**
-- Ultimos 5 pedidos da `vw_dashboard_pedidos` (limit 5, order by data_criacao desc)
-- Mini-tabela: data | cliente | valor | status badge
-- Estado vazio: "Nenhum pedido recente"
+### 5. Financeiro — OK como esta
 
-**Buscar dados financeiros**: adicionar query a `vw_dashboard_financeiro` para receita/despesas do mes (similar ao que `useFinanceiro` ja faz, mas inline na Home com startOfMonth filter)
-
-## 4. Chat (`Chat.tsx`)
-
-- `ChatInputInline`: remover `focus:ring-2 focus:ring-primary/15` → manter so `focus:border-primary`
-- `ChatEmptyState`: reduzir de 6 para 4 sugestoes, remover icones e descricoes secundarias. Chips compactos em 2 colunas. Remover icone Bot grande com badge "online". Titulo `text-lg`.
-
-## 5. Pedidos (`Pedidos.tsx`)
-
-- Remover `HorizontalBarChart` de "Top 10 Clientes" (duplica escopo do chat)
-- Layout: KPIs → OrdersTable (full-width) → DonutChart de status (compacto, abaixo)
-- Mudar grid de graficos de `md:grid-cols-2` para bloco unico full-width
-
-## 6. Financeiro (`Financeiro.tsx`)
-
-- Remover `backdrop-blur-sm` e `bg-card/80` dos graficos (via componentes)
-- Manter estrutura atual (ja adequada): 3 KPIs + Donut + BarChart
-
-## 7. Componentes
-
-### KPICard
-- Remover `motion.div` wrapper
-- Remover `backdrop-blur-sm bg-card/80` → `bg-card border-border`
-- Manter icone pequeno, sem bg colorido exagerado → `bg-muted`
-
-### DonutChart
-- Remover `motion.div` wrapper
-- `bg-card border-border` (sem blur)
-- Empty state melhor: icone + "Nenhum lancamento no periodo. Ajuste o filtro de datas."
-
-### HorizontalBarChart
-- Remover `motion.div` wrapper
-- `bg-card border-border` (sem blur)
-- Cores de eixo tematicas: `hsl(var(--muted-foreground))` ao inves de hardcoded
-- Cursor tooltip: `hsl(var(--muted) / 0.5)`
-- Empty state melhorado
-
-### OrdersTable
-- Empty state: icone + texto explicativo
-
----
+A pagina Financeiro nos prints tem a mesma estrutura atual (3 KPIs + Composicao de Custos + Top Categorias). Nao precisa mudar.
 
 ## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/index.css` | Tokens dark/light, radius, --info |
-| `src/components/layout/AppSidebar.tsx` | Compactar, limpar |
-| `src/pages/Home.tsx` | Redesenho completo com chips, KPIs financeiros, atividade recente |
-| `src/pages/Chat.tsx` | Remover ring glow do input |
-| `src/pages/Pedidos.tsx` | Remover bar chart clientes |
-| `src/pages/Financeiro.tsx` | Nenhuma mudanca direta (correcoes via componentes) |
-| `src/components/chat/ChatEmptyState.tsx` | 4 sugestoes, sem icones, chips compactos |
-| `src/components/dashboard/KPICard.tsx` | Remover motion/blur |
-| `src/components/dashboard/DonutChart.tsx` | Remover motion/blur, empty state |
-| `src/components/dashboard/HorizontalBarChart.tsx` | Remover motion/blur, cores tematicas |
-| `src/components/dashboard/OrdersTable.tsx` | Empty state melhorado |
-
-Nenhum arquivo novo. Nenhuma mudanca de banco.
+| `src/pages/Home.tsx` | Cards de modulo grandes e proeminentes, reordenar layout |
+| `src/components/chat/ChatEmptyState.tsx` | Restaurar icone Bot, 6 sugestoes com icones em grid |
+| `src/components/layout/AppSidebar.tsx` | Adicionar "Insights Hub" e label "MENU" |
+| `src/pages/Pedidos.tsx` | Re-adicionar HorizontalBarChart Top Clientes |
 
