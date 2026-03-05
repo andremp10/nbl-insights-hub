@@ -31,11 +31,11 @@ export default function Pedidos() {
           <KPICard title="Em Produção" value={kpis.emProducao.toString()} subtitle="Pedidos ativos" icon={<Factory className="h-4 w-4" />} variant="info" isLoading={kpisLoading} />
           <KPICard title="Atrasados" value={kpis.atrasados.toString()} subtitle="Necessitam atenção" icon={<AlertTriangle className="h-4 w-4" />} variant={kpis.atrasados > 0 ? 'warning' : 'default'} isLoading={kpisLoading} />
         </div>
-        <OrdersTable />
         <div className="grid gap-4 md:grid-cols-2">
           <DonutChart title="Status dos Pedidos" data={statusChartData} isLoading={statusLoading} />
           <HorizontalBarChart title="Top 10 Clientes" data={clientesChartData} isLoading={clientesLoading} />
         </div>
+        <OrdersTable />
       </div>
     </div>
   );

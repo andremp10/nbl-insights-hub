@@ -7,6 +7,10 @@ export interface PedidoItem {
   pedido_id: string;
   cliente_id: string;
   cliente_nome: string;
+  cliente_email: string | null;
+  cliente_telefone: string | null;
+  cliente_celular: string | null;
+  cliente_tipo: string | null;
   data_criacao: string;
   status_pedido: string;
   qtde_itens: number;
