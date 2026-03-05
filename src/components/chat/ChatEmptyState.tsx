@@ -1,35 +1,35 @@
-import { Bot, TrendingUp, PackageSearch, DollarSign, BarChart3, CreditCard, Wallet, Users, FileText } from 'lucide-react';
+import { Bot, Wallet, PackageSearch, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const CHIP_EXAMPLES = [
-  'Faturamento do mês',
-  'Pedidos em produção',
-  'Top 10 clientes',
-  'Despesas por categoria',
-  'Pedidos atrasados',
-  'Receita vs despesas',
-  'Pagamentos pendentes',
-  'Resultado líquido',
+const STRUCTURED_PROMPTS = [
+  'Qual o faturamento total do mês atual? Compare com o mês anterior e mostre a variação percentual',
+  'Liste os 10 maiores clientes por valor total de pedidos nos últimos 30 dias, em formato de ranking',
+  'Quais pedidos estão atrasados neste momento? Mostre cliente, valor e dias de atraso',
+  'Resumo financeiro do mês atual: receita total, despesas totais e resultado líquido',
+  'Quais as 5 maiores categorias de despesa dos últimos 30 dias? Mostre valor e percentual do total',
+  'Quantos pedidos temos em cada status atualmente? Mostre em formato de resumo',
+  'Compare receita e despesas dos últimos 3 meses, mês a mês',
+  'Quais pagamentos ou contas estão pendentes? Liste por valor e data de vencimento',
 ];
 
 const QUICK_MODELS = [
   {
     icon: Wallet,
     title: 'Resumo Financeiro',
-    description: 'Receitas, despesas e resultado líquido do mês atual',
-    query: '[Este mês] [Resumo] Resumo financeiro completo com receitas, despesas e resultado líquido',
+    description: 'Receitas, despesas e resultado líquido com as maiores categorias de custo',
+    query: 'Gere um resumo financeiro completo do mês atual. Inclua receita total, despesas totais, resultado líquido e as 3 maiores categorias de despesa com valores',
   },
   {
     icon: PackageSearch,
     title: 'Status de Pedidos',
-    description: 'Visão geral dos pedidos e produção atual',
-    query: '[Resumo] Quantos pedidos temos em cada status? Incluir atrasados',
+    description: 'Visão geral dos pedidos por status e alertas de atraso',
+    query: 'Faça um resumo do status atual de todos os pedidos. Quantos estão aprovados, em produção, concluídos e atrasados? Destaque os que precisam de atenção',
   },
   {
     icon: Users,
     title: 'Top Clientes',
-    description: 'Ranking dos clientes que mais compraram',
-    query: '[Este mês] [Listar] Top 10 clientes por valor de pedidos',
+    description: 'Ranking dos clientes com maior volume de compras no mês',
+    query: 'Mostre o ranking dos 10 maiores clientes por valor total de pedidos no mês atual, com nome e valor total de cada um',
   },
 ];
 
@@ -51,21 +51,21 @@ export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Consulte dados financeiros e de pedidos em linguagem natural.
             <br />
-            Escolha um exemplo abaixo ou digite sua pergunta.
+            Escolha uma sugestão abaixo ou digite sua pergunta.
           </p>
         </div>
 
-        {/* Chip grid */}
-        <div className="flex flex-wrap justify-center gap-2">
-          {CHIP_EXAMPLES.map((text) => (
+        {/* Structured prompts grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
+          {STRUCTURED_PROMPTS.map((text) => (
             <button
               key={text}
               onClick={() => onSuggestionClick(text)}
               className={cn(
-                'text-xs px-3 py-1.5 rounded-full border border-border',
+                'text-sm px-3.5 py-3 rounded-xl border border-border text-left',
                 'text-muted-foreground hover:text-foreground',
                 'hover:border-primary/40 hover:bg-primary/5',
-                'transition-all duration-150'
+                'transition-all duration-150 line-clamp-2'
               )}
             >
               {text}
