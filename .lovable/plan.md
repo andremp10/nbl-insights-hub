@@ -1,76 +1,44 @@
 
 
-# Plano — Refatorar Home como Portal B2B Moderno
-
-## Visao Geral
-
-Reescrever `src/pages/Home.tsx` como um portal de entrada limpo e direto. Adicionar um fundo sutil no dark mode via CSS para quebrar o preto puro.
-
-Estrutura final da pagina (ordem vertical):
-
-```text
-┌─────────────────────────────────────────────────┐
-│  HERO INSTITUCIONAL                             │
-│  "Bem-vindo à plataforma de inteligência da NBL"│
-│  Subtítulo 1 linha                              │
-│  [Abrir Assistente]  [Ver Pedidos] [Financeiro] │
-├─────────────────────────────────────────────────┤
-│  3 CARDS COMPACTOS (row)                        │
-│  Assistente | Pedidos | Financeiro              │
-│  1 linha desc + →                               │
-├─────────────────────────────────────────────────┤
-│  PERGUNTE AO ASSISTENTE (compacto)              │
-│  Input + 4 chips de pergunta pronta             │
-├─────────────────────────────────────────────────┤
-│  3 KPIs discretos (row)                         │
-│  Pedidos em aberto | Atrasados | Resultado mês  │
-├─────────────────────────────────────────────────┤
-│  ATIVIDADE RECENTE (5 itens + Ver todos)        │
-└─────────────────────────────────────────────────┘
-```
-
----
+# Plano — Remover "Pergunte ao Assistente" e Refinar Visual
 
 ## Mudancas
 
-### 1. `src/pages/Home.tsx` — Reescrita completa
+### 1. `src/pages/Home.tsx`
 
-**Hero**:
-- Titulo: "Bem-vindo a plataforma de inteligencia da NBL" (sem emoji, sem greeting dinamico)
-- Subtitulo: "Consulte dados operacionais, acompanhe pedidos e visualize o financeiro em um so lugar."
-- CTAs: botao primario "Abrir Assistente" (bg-primary), botoes secundarios "Ver Pedidos" e "Ver Financeiro" (variant outline)
-- Compacto: `pt-10 pb-6` (menos altura que o atual `pt-12 pb-8 / pt-20 pb-12`)
+**Remover secao "Pergunte ao Assistente"** (linhas 193-234):
+- Remover todo o bloco: input, chips de sugestao, label
+- Remover estado `query`, `setQuery`, e funcao `handleQuickQuery`
+- Remover import `MessageSquare`
+- Remover constante `QUICK_SUGGESTIONS`
 
-**3 Cards compactos** (substituir os cards gigantes atuais):
-- Grid 3 colunas, cada card com: icone pequeno (w-9 h-9) + titulo + 1 linha de descricao + ArrowRight
-- Borda esquerda sutil (2px em vez de 4px)
-- Sem preview de KPI nos cards (isso vai pra secao de KPIs propria)
-- Padding reduzido: `p-4` em vez de `p-6 md:p-8`
-- Sem gradientes de hover exagerados
+**Melhorar cards de navegacao**:
+- Aumentar levemente o padding: `p-5` em vez de `p-4`
+- Icone maior: `w-10 h-10` para o container, `w-5 h-5` para o icone
+- Adicionar subtexto mais descritivo
+- Hover mais expressivo: `hover:border-primary/30 hover:shadow-sm`
+- No mobile: stack vertical com `gap-3`
 
-**Bloco "Pergunte ao assistente"** (compacto, nao hero):
-- Label: "Pergunte ao assistente" (text-sm)
-- Input simples com placeholder + botao enviar
-- 4 chips de sugestao estruturados (titulo curto, prompt completo como no chat)
-- Sem ocupar mais que ~120px de altura
+**Ajustar delays de animacao** (sem o bloco do assistente, fechar os gaps de delay).
 
-**3 KPIs** (reduzir de 5 para 3):
-- "Pedidos em aberto" (totalPedidos), "Atrasados" (atrasados), "Resultado do mes" (resultado)
-- Cards pequenos inline, sem grafico, sem ribbon largo
-- Empty state: "Indicadores aparecerao quando houver dados"
+### 2. `src/index.css` — Fundo com mais profundidade
 
-**Atividade recente**: manter como esta, ja esta bom. Limitar a 4 itens.
-
-### 2. `src/index.css` — Fundo sutil no dark mode
-
-Adicionar um gradiente radial muito sutil no body dark para quebrar o preto puro:
+Melhorar o background do dark mode com um gradiente mais rico (sem exagerar):
 ```css
 .dark body {
-  background: hsl(var(--background));
-  background-image: radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.03) 0%, transparent 60%);
+  background-image:
+    radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, hsl(var(--info) / 0.02) 0%, transparent 40%);
 }
 ```
-Isso cria um brilho laranja quase imperceptivel no topo, dando profundidade sem parecer decorativo.
+Dois gradientes sutis: laranja no topo + azul frio no canto inferior direito. Cria profundidade sem parecer decorativo.
+
+Para o light mode, adicionar um gradiente ainda mais sutil:
+```css
+body {
+  background-image: radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.02) 0%, transparent 50%);
+}
+```
 
 ---
 
@@ -78,6 +46,6 @@ Isso cria um brilho laranja quase imperceptivel no topo, dando profundidade sem 
 
 | Arquivo | Acao |
 |---------|------|
-| `src/pages/Home.tsx` | Reescrita: hero institucional com CTAs, cards compactos, input assistente reduzido, 3 KPIs, atividade recente |
-| `src/index.css` | Gradiente radial sutil no dark mode |
+| `src/pages/Home.tsx` | Remover secao "Pergunte ao Assistente", melhorar cards |
+| `src/index.css` | Gradientes de fundo mais ricos em ambos os temas |
 
