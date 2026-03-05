@@ -75,7 +75,7 @@ export function ChatInput({ onSend, sending }: ChatInputProps) {
             aria-label="Campo de mensagem"
           />
 
-          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+          <div className="absolute right-2 bottom-1.5">
             <button
               onClick={handleSubmit}
               disabled={sending || !input.trim()}

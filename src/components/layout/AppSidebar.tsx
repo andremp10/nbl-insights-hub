@@ -1,7 +1,8 @@
-import { Home, DollarSign, ShoppingCart, MessageSquare, LogOut, Printer } from 'lucide-react';
+import { LayoutDashboard, Bot, Wallet, PackageSearch, LogOut, Printer } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import {
   Sidebar,
   SidebarContent,
@@ -19,10 +20,10 @@ import {
 import { cn } from '@/lib/utils';
 
 const menuItems = [
-  { title: 'Home', url: '/', icon: Home },
-  { title: 'Assistente', url: '/chat', icon: MessageSquare },
-  { title: 'Financeiro', url: '/financeiro', icon: DollarSign },
-  { title: 'Pedidos', url: '/pedidos', icon: ShoppingCart },
+  { title: 'Home', url: '/', icon: LayoutDashboard },
+  { title: 'Assistente', url: '/chat', icon: Bot },
+  { title: 'Financeiro', url: '/financeiro', icon: Wallet },
+  { title: 'Pedidos', url: '/pedidos', icon: PackageSearch },
 ];
 
 export function AppSidebar() {
@@ -47,12 +48,12 @@ export function AppSidebar() {
           collapsed ? "flex-col gap-2" : "justify-between"
         )}>
           <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
-              <Printer className="h-4 w-4" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shrink-0 shadow-md">
+              <Printer className="h-5 w-5" />
             </div>
             {!collapsed && (
               <div className="flex flex-col min-w-0">
-                <span className="text-sm font-semibold text-sidebar-foreground tracking-tight truncate">
+                <span className="text-sm font-bold text-sidebar-foreground tracking-tight truncate">
                   NBL Gráfica
                 </span>
                 <span className="text-[10px] text-muted-foreground font-medium">
@@ -66,14 +67,14 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup className={cn(collapsed ? "px-1 py-2" : "px-2 py-3")}>
+        <SidebarGroup className={cn(collapsed ? "px-1 py-2" : "px-2 py-4")}>
           {!collapsed && (
-            <div className="px-3 mb-2 text-[10px] uppercase tracking-widest text-muted-foreground/60 font-medium">
+            <div className="px-3 mb-3 text-[10px] uppercase tracking-widest text-muted-foreground/60 font-semibold">
               Menu
             </div>
           )}
           <SidebarGroupContent>
-            <SidebarMenu className="space-y-0.5">
+            <SidebarMenu className="space-y-1">
               {menuItems.map((item) => {
                 const active = isActive(item.url);
                 return (
@@ -83,21 +84,21 @@ export function AppSidebar() {
                         to={item.url}
                         end={item.url === '/'}
                         className={cn(
-                          'relative flex items-center rounded-lg transition-all duration-150',
-                          collapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2',
+                          'relative flex items-center rounded-lg transition-all duration-200',
+                          collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5',
                           active
-                            ? 'bg-primary/15 text-primary'
-                            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                            ? 'bg-primary/15 text-primary font-medium'
+                            : 'text-sidebar-foreground/70 hover:bg-accent/60 hover:text-sidebar-foreground'
                         )}
                       >
                         {active && !collapsed && (
                           <motion.div
                             layoutId="activeIndicator"
-                            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-full"
+                            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-primary rounded-full"
                             transition={{ type: "spring", stiffness: 300, damping: 30 }}
                           />
                         )}
-                        <item.icon className={cn("h-[18px] w-[18px] shrink-0", active && "text-primary")} />
+                        <item.icon className={cn("h-5 w-5 shrink-0", active && "text-primary")} />
                         {!collapsed && <span className="text-sm">{item.title}</span>}
                       </NavLink>
                     </SidebarMenuButton>
@@ -109,20 +110,26 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className={cn("border-t border-sidebar-border/50", collapsed ? "p-1" : "p-2")}>
+      <SidebarFooter className={cn("border-t border-sidebar-border/50", collapsed ? "p-1.5" : "p-2")}>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={logout}
-              tooltip="Sair"
-              className={cn(
-                'flex items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-150',
-                collapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2'
-              )}
-            >
-              <LogOut className="h-[18px] w-[18px] shrink-0" />
-              {!collapsed && <span className="text-sm">Sair</span>}
-            </SidebarMenuButton>
+            <div className={cn(
+              "flex items-center",
+              collapsed ? "flex-col gap-1" : "gap-1 justify-between"
+            )}>
+              <ThemeToggle />
+              <SidebarMenuButton
+                onClick={logout}
+                tooltip="Sair"
+                className={cn(
+                  'flex items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-200',
+                  collapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
+                )}
+              >
+                <LogOut className="h-5 w-5 shrink-0" />
+                {!collapsed && <span className="text-sm">Sair</span>}
+              </SidebarMenuButton>
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
