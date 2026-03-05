@@ -1883,8 +1883,12 @@ export type Database = {
       }
       vw_dashboard_pedidos: {
         Row: {
+          cliente_celular: string | null
+          cliente_email: string | null
           cliente_id: string | null
           cliente_nome: string | null
+          cliente_telefone: string | null
+          cliente_tipo: string | null
           data_criacao: string | null
           data_prazo_validada: string | null
           dias_em_atraso: number | null
