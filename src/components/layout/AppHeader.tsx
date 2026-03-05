@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
 
 const navItems = [
   { label: 'Home', path: '/' },
@@ -61,7 +62,8 @@ export function AppHeader() {
       </nav>
 
       {/* Right: Avatar + Logout (desktop) / Hamburger (mobile) */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
         <button
           onClick={logout}
           aria-label="Sair"

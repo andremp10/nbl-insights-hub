@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DateFilterProvider } from "@/contexts/DateFilterContext";
+import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageTransition } from "@/components/layout/PageTransition";
@@ -49,17 +50,19 @@ function AnimatedRoutes() {
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <DateFilterProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
-              <AnimatedRoutes />
-            </BrowserRouter>
-          </TooltipProvider>
-        </DateFilterProvider>
-      </AuthProvider>
+      <ThemeProvider defaultTheme="dark" storageKey="nbl-theme">
+        <AuthProvider>
+          <DateFilterProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter>
+                <AnimatedRoutes />
+              </BrowserRouter>
+            </TooltipProvider>
+          </DateFilterProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </ErrorBoundary>
 );
