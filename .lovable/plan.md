@@ -1,51 +1,26 @@
 
 
-# Plano — Remover "Pergunte ao Assistente" e Refinar Visual
+# Plano — Melhorar renderizacao de metadados de periodo nas respostas do agente
 
-## Mudancas
+## Problema
 
-### 1. `src/pages/Home.tsx`
+O agente retorna linhas de metadados como `*Períodos: 01/02/2026 a 29/02/2026 e 01/03/2026 a 31/03/2026 · Escopo: Faturamento (Comercial)*` que renderizam como texto italico simples — visualmente feio e sem hierarquia.
 
-**Remover secao "Pergunte ao Assistente"** (linhas 193-234):
-- Remover todo o bloco: input, chips de sugestao, label
-- Remover estado `query`, `setQuery`, e funcao `handleQuickQuery`
-- Remover import `MessageSquare`
-- Remover constante `QUICK_SUGGESTIONS`
+## Solucao
 
-**Melhorar cards de navegacao**:
-- Aumentar levemente o padding: `p-5` em vez de `p-4`
-- Icone maior: `w-10 h-10` para o container, `w-5 h-5` para o icone
-- Adicionar subtexto mais descritivo
-- Hover mais expressivo: `hover:border-primary/30 hover:shadow-sm`
-- No mobile: stack vertical com `gap-3`
+Interceptar o componente `em` (italico) no ReactMarkdown para detectar linhas de metadados (que contenham "Períodos:", "Escopo:", "Limitação:") e renderiza-las como badges/chips estilizados em vez de italico plano.
 
-**Ajustar delays de animacao** (sem o bloco do assistente, fechar os gaps de delay).
+### Regras de deteccao e estilo
 
-### 2. `src/index.css` — Fundo com mais profundidade
+1. **Periodos/Escopo** (contem "Períodos:" ou "Escopo:"): renderizar como um chip compacto com fundo `bg-muted/50`, borda `border-border/50`, icone de calendario pequeno, texto `text-xs text-muted-foreground` — parece um badge de contexto, nao texto corrido.
 
-Melhorar o background do dark mode com um gradiente mais rico (sem exagerar):
-```css
-.dark body {
-  background-image:
-    radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 100%, hsl(var(--info) / 0.02) 0%, transparent 40%);
-}
-```
-Dois gradientes sutis: laranja no topo + azul frio no canto inferior direito. Cria profundidade sem parecer decorativo.
+2. **Limitacao/Aviso** (contem "Limitação:" ou "Nota:"): renderizar como um alerta sutil inline com fundo `bg-amber-500/10`, borda `border-amber-500/20`, icone de alerta, texto `text-xs text-amber-400`.
 
-Para o light mode, adicionar um gradiente ainda mais sutil:
-```css
-body {
-  background-image: radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.02) 0%, transparent 50%);
-}
-```
+3. **Demais italicos**: manter `<em>` normal.
 
----
-
-## Arquivos
+### Arquivo
 
 | Arquivo | Acao |
 |---------|------|
-| `src/pages/Home.tsx` | Remover secao "Pergunte ao Assistente", melhorar cards |
-| `src/index.css` | Gradientes de fundo mais ricos em ambos os temas |
+| `src/components/chat/ChatMessage.tsx` | Adicionar componente `em` customizado no ReactMarkdown que detecta e estiliza metadados |
 
