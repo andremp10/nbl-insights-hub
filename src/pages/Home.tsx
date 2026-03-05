@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ArrowRight, Bot, TrendingUp, PackageSearch, Package } from 'lucide-react';
+import { MessageSquare, ArrowRight, Bot, Wallet, PackageSearch, Package } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
@@ -65,7 +65,7 @@ const modules = [
   {
     title: 'Financeiro',
     description: 'Receitas, despesas e resultado líquido. Visualize gráficos e composição de custos.',
-    icon: TrendingUp,
+    icon: Wallet,
     route: '/financeiro',
     gradient: 'from-success/8 to-transparent',
     iconBg: 'bg-success/10 text-success',
