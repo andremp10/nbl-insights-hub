@@ -1,38 +1,51 @@
 
 
-# Plano — Corrigir chat do agente (RLS + auth user ID)
+# Plano — Reestruturar aba Pedidos
 
-## Problema raiz
+## Problema 1: Layout — graficos abaixo da tabela
+Atualmente: KPIs > Tabela > Graficos. O usuario quer: KPIs > Graficos > Tabela.
 
-Dois problemas combinados:
+**Solucao:** Inverter a ordem em `src/pages/Pedidos.tsx` — mover o grid dos graficos para antes do `<OrdersTable />`.
 
-1. **RLS policies** nas tabelas `chat_sessions` e `chat_messages` estao configuradas apenas para o role `anon`. Agora que o usuario esta autenticado (role `authenticated`), todas as operacoes de INSERT/SELECT/UPDATE/DELETE sao bloqueadas com erro 403.
+## Problema 2: Nomes dos clientes sao UUIDs truncados
+A view `vw_dashboard_pedidos` gera `cliente_nome` via `COALESCE(pf.nome || pf.sobrenome, pj.razao_social, 'Cliente #' || left(id, 8))`. As tabelas `is_clientes_pf` e `is_clientes_pj` estao **vazias**, entao TODOS os clientes caem no fallback `Cliente #uuid`.
 
-2. **`useChatSessions`** ainda usa um `deviceId` aleatorio do localStorage como `user_id`, em vez do `auth.uid()` do usuario autenticado.
+O dado real disponivel e o `email_log` da tabela `is_clientes` (ex: `graficadivinoespiritosanto@gmail.com`). Esse e o unico identificador legivel.
 
-## Solucao
+**Solucao em duas partes:**
 
-### 1. Migration SQL — Adicionar policies para `authenticated`
+### 2a. Atualizar a view SQL
+Alterar `vw_dashboard_pedidos` para fazer JOIN com `is_clientes` e usar `email_log` como fallback antes do UUID:
 
-Criar novas policies para o role `authenticated` em ambas as tabelas, com escopo por usuario (`auth.uid()`):
+```sql
+COALESCE(
+  NULLIF(TRIM(pf.nome || ' ' || pf.sobrenome), ''),
+  pj.razao_social,
+  c.email_log,               -- << novo fallback
+  'Cliente #' || left(p.cliente_id::text, 8)
+)
+```
 
-- `chat_sessions`: SELECT/INSERT/UPDATE/DELETE onde `user_id = auth.uid()::text`
-- `chat_messages`: SELECT/INSERT/UPDATE/DELETE onde `session_id` pertence a uma sessao do usuario
+Tambem adicionar `c.email_log` e `c.telefone` como colunas extras na view para o modal de detalhes.
 
-### 2. Atualizar `useChatSessions` — Usar `auth.uid()` em vez de `deviceId`
+### 2b. Modal de detalhes do cliente (click no nome)
+Criar `src/components/dashboard/ClienteDetailModal.tsx`:
+- Dialog/Sheet que abre ao clicar no nome do cliente na tabela
+- Busca dados de `is_clientes` pelo `cliente_id`
+- Exibe: email, telefone, celular, tipo (PF/PJ)
+- Lista os pedidos recentes daquele cliente no periodo (ja disponivel nos dados carregados)
 
-- Remover toda a logica de `deviceId` / `DEVICE_ID_KEY`
-- Importar `useAuth` do `AuthContext` para obter o `session.user.id`
-- Usar `session.user.id` como `user_id` em todas as queries e inserts
-
-### 3. Atualizar `useChatMessages` — Sem mudanca necessaria
-
-O hook ja usa `session_id` para filtrar, e a edge function `nlq-proxy` usa `service_role_key`, entao nao e afetado pelo RLS do client.
+### 2c. Atualizar OrdersTable
+- Tornar o nome do cliente clicavel (botao/link com hover)
+- Ao clicar, abrir o modal com detalhes
 
 ## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| Migration SQL | Adicionar RLS policies para role `authenticated` |
-| `src/hooks/useChatSessions.ts` | Trocar `deviceId` por `auth.uid()` |
+| Migration SQL | Recriar `vw_dashboard_pedidos` com `email_log` como fallback e colunas extras |
+| `src/pages/Pedidos.tsx` | Inverter ordem: graficos antes da tabela |
+| `src/components/dashboard/ClienteDetailModal.tsx` | Novo — modal com info do cliente |
+| `src/components/dashboard/OrdersTable.tsx` | Nome clicavel, abrir modal |
+| `src/hooks/usePedidos.ts` | Atualizar interface `PedidoItem` com novos campos |
 
