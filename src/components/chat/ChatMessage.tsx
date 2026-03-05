@@ -2,7 +2,7 @@ import { memo, useMemo, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
-import { AlertTriangle, RotateCcw, Bot, Copy, Check } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Bot, Copy, Check, Calendar, Info } from 'lucide-react';
 import { ThinkingBubble } from './ThinkingBubble';
 import { useTypewriter } from '@/hooks/useTypewriter';
 import ReactMarkdown from 'react-markdown';
@@ -149,6 +149,33 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
                   ul: ({ children, ...props }) => <ul className="my-2 ml-4 list-disc [&>li]:mt-1 marker:text-primary" {...props}>{children}</ul>,
                   ol: ({ children, ...props }) => <ol className="my-2 ml-4 list-decimal [&>li]:mt-1 marker:text-primary" {...props}>{children}</ol>,
                   strong: ({ children, ...props }) => <strong className="font-semibold text-foreground" {...props}>{children}</strong>,
+                  em: ({ children, ...props }) => {
+                    const text = typeof children === 'string' ? children : Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : '';
+                    const isMetadata = /Períodos?:|Escopo:|Período:/i.test(text);
+                    const isWarning = /Limitação:|Nota:|Aviso:/i.test(text);
+                    if (isMetadata) {
+                      const parts = text.split('·').map(s => s.trim()).filter(Boolean);
+                      return (
+                        <span className="flex flex-wrap gap-1.5 my-2">
+                          {parts.map((part, i) => (
+                            <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/50 border border-border/50 text-[11px] text-muted-foreground">
+                              {i === 0 ? <Calendar className="w-3 h-3 shrink-0" /> : <Info className="w-3 h-3 shrink-0" />}
+                              {part}
+                            </span>
+                          ))}
+                        </span>
+                      );
+                    }
+                    if (isWarning) {
+                      return (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 my-1 rounded-md bg-warning/10 border border-warning/20 text-[11px] text-warning">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          {children}
+                        </span>
+                      );
+                    }
+                    return <em {...props}>{children}</em>;
+                  },
                   h1: ({ children, ...props }) => <h1 className="text-lg font-semibold text-foreground mb-2 mt-3 first:mt-0" {...props}>{children}</h1>,
                   h2: ({ children, ...props }) => <h2 className="text-base font-semibold text-foreground mb-2 mt-3 first:mt-0" {...props}>{children}</h2>,
                   h3: ({ children, ...props }) => <h3 className="text-sm font-semibold text-foreground mb-1.5 mt-2 first:mt-0" {...props}>{children}</h3>,
