@@ -1,42 +1,54 @@
 
 
-# Plano — Corrigir Rota Default + Loading Escuro com Animacao
+# Plano — Botão de envio, Tema claro/escuro, Refatoração da Sidebar
 
-## Problemas Identificados
+## 1. Botão de envio desalinhado (ChatInput)
 
-1. **Rota default caindo em financeiro**: O arquivo `src/pages/Index.tsx` contem `<Navigate to="/financeiro" />`, porem ele nao e usado em `App.tsx` (a rota `/` ja aponta para `Home`). O problema real e que o `AuthContext` inicia com `isAuthenticated = false` e so muda para `true` apos o `useEffect` rodar — nesse breve momento, o `ProtectedRoute` redireciona para `/auth`, e apos o login o redirect pode estar indo para `/financeiro` ao inves de `/`. Preciso verificar o fluxo de redirect pos-login no componente `Auth.tsx` e no `SignInCard`.
+O `top-1/2 -translate-y-1/2` não funciona bem com textarea que cresce em altura. O botão precisa ficar fixo no **fundo** do container, não centrado verticalmente.
 
-2. **Tela branca no loading**: O `Suspense fallback={null}` mostra nada enquanto o chunk carrega. Como o `body` e o `#root` nao tem fundo escuro forcado, o resultado e um flash branco. A correcao e dupla: (a) fundo escuro global no HTML/body e (b) fallback com fundo escuro + animacao.
+**Correção:** Trocar `top-1/2 -translate-y-1/2` por `bottom-1.5 right-2` no container do botão. Assim ele fica sempre ancorado no canto inferior direito, alinhado com a última linha de texto.
 
-## Correcoes
+**Arquivo:** `src/components/chat/ChatInput.tsx` (linha 78)
 
-### 1. Fundo escuro no HTML (elimina flash branco)
-- Em `index.html`: adicionar `style="background-color: #09090b"` no `<body>` (cor do dark mode background).
-- Em `src/index.css`: adicionar `html, body, #root { background-color: hsl(var(--background)); }` no dark mode.
+---
 
-### 2. Fallback do Suspense com skeleton animado
-- Trocar `fallback={null}` por um componente `PageSkeleton` que:
-  - Tem fundo `bg-background` (escuro)
-  - Mostra 3-4 blocos skeleton que "constroem" de cima para baixo com `animate-fade-in` escalonado (delay incremental)
-  - Simula o layout da pagina sendo montada
+## 2. Modo claro/escuro não funciona
 
-### 3. Corrigir redirect pos-login
-- Verificar `Auth.tsx` / `SignInCard` — garantir que apos login o redirect va para `/` (Home) e nao para `/financeiro`.
-- Deletar `src/pages/Index.tsx` (nao e usado e contem redirect errado).
-- No `AuthContext`, adicionar um estado `loading` para evitar o flash de redirect para `/auth` antes do localStorage ser lido.
+O `ThemeProvider` e `ThemeToggle` já existem e estão integrados no `App.tsx` e `AppHeader.tsx`. Porém:
+- O `AppLayout.tsx` tem `className="dark"` hardcoded na div raiz — isso força dark mode sempre, ignorando o ThemeProvider.
+- O `ThemeToggle` está no `AppHeader` mas o `AppHeader` **não é usado** no layout atual (o layout usa `AppSidebar` diretamente, sem header).
 
-### 4. Animacao de entrada dos componentes
-- O `PageTransition` ja existe com fade+translateY. Ajustar para que a animacao simule construcao do topo: `initial={{ opacity: 0, y: -12 }}` (vem de cima) ao inves de `y: 6` (vem de baixo).
+**Correções:**
+- Remover `dark` hardcoded do `AppLayout.tsx`.
+- Adicionar o `ThemeToggle` dentro da `AppSidebar` (no footer, ao lado do botão de logout) para que fique acessível.
 
-## Arquivos
+**Arquivos:** `src/components/layout/AppLayout.tsx`, `src/components/layout/AppSidebar.tsx`
 
-| Arquivo | Acao |
+---
+
+## 3. Refatoração visual da Sidebar
+
+A sidebar atual tem ícones pequenos (18px), indicador de ativo sutil e visual genérico.
+
+**Redesenho:**
+- Ícones maiores: `h-5 w-5` (20px).
+- Trocar ícones para mais expressivos: `LayoutDashboard` (Home), `Bot` (Assistente), `Wallet` (Financeiro), `PackageSearch` (Pedidos).
+- Item ativo: fundo `bg-primary/15` com borda esquerda mais grossa (`w-[3px] h-5`) e texto `font-medium`.
+- Hover: `bg-accent/60` com transição suave.
+- Maior espaçamento entre itens (`space-y-1`).
+- Padding maior nos itens (`py-2.5 px-3`).
+- Footer: `ThemeToggle` + botão de logout lado a lado quando expandido.
+- Logo: ícone maior (`h-9 w-9`) com gradiente sutil.
+
+**Arquivo:** `src/components/layout/AppSidebar.tsx`
+
+---
+
+## Resumo de Arquivos
+
+| Arquivo | Ação |
 |---------|------|
-| `index.html` | Adicionar background escuro no body |
-| `src/index.css` | Background escuro global |
-| `src/App.tsx` | Trocar Suspense fallback por PageSkeleton |
-| `src/contexts/AuthContext.tsx` | Adicionar estado `loading` para evitar flash |
-| `src/components/auth/ProtectedRoute.tsx` | Checar `loading` antes de redirecionar |
-| `src/components/layout/PageTransition.tsx` | Ajustar direcao da animacao (topo) |
-| `src/pages/Index.tsx` | Deletar (nao usado) |
+| `src/components/chat/ChatInput.tsx` | Botão ancorado no bottom-right |
+| `src/components/layout/AppLayout.tsx` | Remover classe `dark` hardcoded |
+| `src/components/layout/AppSidebar.tsx` | Redesenho visual completo + ThemeToggle |
 
