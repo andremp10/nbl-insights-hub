@@ -141,7 +141,7 @@ export const SignInCard = () => {
         setIsLoading(false);
         if (success) {
             toast.success('Bem-vindo ao NBL Insights Hub!');
-            navigate('/financeiro');
+            navigate('/');
         } else {
             toast.error('Chave de acesso incorreta');
             setPassword('');
