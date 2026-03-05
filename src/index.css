@@ -165,7 +165,7 @@
   background: hsl(var(--card));
   color: hsl(var(--card-foreground));
   border: 1px solid hsl(var(--border));
-  border-radius: 4px 18px 18px 18px;
+  border-radius: 12px 12px 12px 4px;
 }
 
 .chat-bubble-error {
