@@ -1,107 +1,92 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { MessageSquare, TrendingUp, ShoppingBag, ArrowRight, Users, Bot, Sparkles } from 'lucide-react';
+import { MessageSquare, ArrowRight, Bot, TrendingUp, PackageSearch, TrendingDown, AlertTriangle, Package } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
-function getGreeting(): { text: string; emoji: string } {
+function getGreeting(): string {
   const h = new Date().getHours();
-  if (h >= 5 && h < 12) return { text: 'Bom dia', emoji: '☀️' };
-  if (h >= 12 && h < 18) return { text: 'Boa tarde', emoji: '🌤️' };
-  return { text: 'Boa noite', emoji: '🌙' };
+  if (h >= 5 && h < 12) return 'Bom dia';
+  if (h >= 12 && h < 18) return 'Boa tarde';
+  return 'Boa noite';
 }
 
 function formatCurrency(v: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
 }
 
-// Animated counter hook
-function useCountUp(target: number | null, duration = 1200): number | null {
-  const [value, setValue] = useState<number | null>(null);
-  const rafRef = useRef<number>();
-  const startRef = useRef<number>();
-
-  useEffect(() => {
-    if (target === null) { setValue(null); return; }
-    if (target === 0) { setValue(0); return; }
-
-    const start = performance.now();
-    startRef.current = start;
-
-    const animate = (now: number) => {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
-      setValue(Math.round(target * eased));
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
-    };
-
-    rafRef.current = requestAnimationFrame(animate);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [target, duration]);
-
-  return value;
+function formatCurrencyCompact(v: number): string {
+  if (v >= 1000000) return `R$ ${(v / 1000000).toFixed(1)}M`;
+  if (v >= 1000) return `R$ ${(v / 1000).toFixed(1)}k`;
+  return formatCurrency(v);
 }
 
-interface KpiData {
-  pedidosHoje: number | null;
-  faturamentoMes: number | null;
-  pendentes: number | null;
-  clientesAtivos: number | null;
+interface HomeKpis {
+  receita: number | null;
+  despesas: number | null;
+  totalPedidos: number | null;
+  atrasados: number | null;
 }
 
-const stagger = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
-};
+interface RecentOrder {
+  pedido_id: string;
+  cliente_nome: string | null;
+  data_criacao: string;
+  valor_total: number;
+  status_pedido: string;
+  is_atrasado: boolean;
+}
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' as const } },
-};
+const SUGGESTION_CHIPS = [
+  'Faturamento do mês',
+  'Pedidos pendentes',
+  'Top clientes',
+];
 
 const modules = [
   {
-    title: 'Assistente IA',
-    description: 'Consulte dados em linguagem natural. Pergunte sobre pedidos, clientes e financeiro.',
+    title: 'Assistente',
+    description: 'Consulte dados em linguagem natural',
     icon: Bot,
     route: '/chat',
-    gradient: 'from-primary/20 to-primary/5',
-    iconColor: 'text-primary',
+    borderColor: 'border-l-primary',
+    preview: null as string | null,
   },
   {
     title: 'Financeiro',
-    description: 'Receitas, despesas, DRE e fluxo de caixa com gráficos interativos.',
+    description: 'Receitas, despesas e resultado',
     icon: TrendingUp,
     route: '/financeiro',
-    gradient: 'from-green-500/20 to-green-500/5',
-    iconColor: 'text-green-500',
+    borderColor: 'border-l-success',
+    preview: null as string | null,
   },
   {
     title: 'Pedidos',
-    description: 'Acompanhe status, clientes top e faturamento por período.',
-    icon: ShoppingBag,
+    description: 'Status e acompanhamento',
+    icon: PackageSearch,
     route: '/pedidos',
-    gradient: 'from-blue-500/20 to-blue-500/5',
-    iconColor: 'text-blue-500',
+    borderColor: 'border-l-info',
+    preview: null as string | null,
   },
 ];
 
 export default function Home() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
-  const [kpis, setKpis] = useState<KpiData>({ pedidosHoje: null, faturamentoMes: null, pendentes: null, clientesAtivos: null });
+  const [kpis, setKpis] = useState<HomeKpis>({ receita: null, despesas: null, totalPedidos: null, atrasados: null });
   const [kpisLoading, setKpisLoading] = useState(true);
-  const [inputFocused, setInputFocused] = useState(false);
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
+  const [recentLoading, setRecentLoading] = useState(true);
 
   const greeting = useMemo(getGreeting, []);
-
-  const pedidosAnimated = useCountUp(kpis.pedidosHoje);
-  const faturamentoAnimated = useCountUp(kpis.faturamentoMes);
-  const pendentesAnimated = useCountUp(kpis.pendentes);
-  const clientesAnimated = useCountUp(kpis.clientesAtivos);
+  const dateString = useMemo(() => {
+    return format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
+  }, []);
 
   const handleQuickQuery = (q: string) => {
     if (!q.trim()) return;
@@ -109,146 +94,209 @@ export default function Home() {
     navigate('/chat');
   };
 
+  // Build module previews from KPIs
+  const modulesWithPreview = useMemo(() => {
+    return modules.map(m => {
+      if (m.route === '/financeiro' && kpis.receita !== null) {
+        return { ...m, preview: formatCurrencyCompact(kpis.receita) };
+      }
+      if (m.route === '/pedidos' && kpis.totalPedidos !== null) {
+        return { ...m, preview: `${kpis.totalPedidos} pedidos` };
+      }
+      return m;
+    });
+  }, [kpis]);
+
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    const fetchData = async () => {
       try {
         const today = new Date();
-        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+        const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
 
-        const [resToday, resMonth, resPend, resClients] = await Promise.all([
-          supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).gte('data_criacao', startOfDay),
-          supabase.from('vw_dashboard_pedidos').select('valor_total').gte('data_criacao', startOfMonth),
-          supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).in('status_pedido', ['Aguardando Pagamento', 'Pendente']),
-          supabase.from('vw_dashboard_pedidos').select('cliente_id').gte('data_criacao', thirtyDaysAgo),
+        const [finRes, pedRes, atrasRes, recentRes] = await Promise.all([
+          supabase.rpc('get_financeiro_kpis', { p_data_inicio: startOfMonth, p_data_fim: endOfMonth }),
+          supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).gte('data_criacao', startOfMonth).lte('data_criacao', endOfMonth + 'T23:59:59'),
+          supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).eq('is_atrasado', true).eq('is_finalizado', false),
+          supabase.from('vw_dashboard_pedidos').select('pedido_id, cliente_nome, data_criacao, valor_total, status_pedido, is_atrasado').order('data_criacao', { ascending: false }).limit(5),
         ]);
 
-        const faturamento = (resMonth.data || []).reduce((s, r) => s + (Number(r.valor_total) || 0), 0);
-        const uniqueClients = new Set((resClients.data || []).map(r => r.cliente_id)).size;
-
+        const finRow = Array.isArray(finRes.data) ? finRes.data[0] : finRes.data;
         setKpis({
-          pedidosHoje: resToday.count ?? 0,
-          faturamentoMes: faturamento,
-          pendentes: resPend.count ?? 0,
-          clientesAtivos: uniqueClients,
+          receita: Number(finRow?.receita || 0),
+          despesas: Number(finRow?.despesa || 0),
+          totalPedidos: pedRes.count ?? 0,
+          atrasados: atrasRes.count ?? 0,
         });
-      } catch { /* KPIs são opcionais */ } finally {
+        setRecentOrders((recentRes.data || []) as RecentOrder[]);
+      } catch {
+        // KPIs são opcionais
+      } finally {
         setKpisLoading(false);
+        setRecentLoading(false);
       }
-    }, 300);
-    return () => clearTimeout(timer);
+    };
+    fetchData();
   }, []);
 
   const kpiCards = [
-    { label: 'Pedidos hoje', value: pedidosAnimated, format: (v: number) => v.toString(), icon: ShoppingBag, color: 'text-blue-400' },
-    { label: 'Faturamento mês', value: faturamentoAnimated, format: formatCurrency, icon: TrendingUp, color: 'text-green-400' },
-    { label: 'Pendentes', value: pendentesAnimated, format: (v: number) => v.toString(), icon: Sparkles, color: 'text-amber-400' },
-    { label: 'Clientes ativos', value: clientesAnimated, format: (v: number) => v.toString(), icon: Users, color: 'text-violet-400' },
+    { label: 'Receita do mês', value: kpis.receita, format: formatCurrency, variant: 'text-success' },
+    { label: 'Despesas do mês', value: kpis.despesas, format: formatCurrency, variant: 'text-destructive' },
+    { label: 'Total de pedidos', value: kpis.totalPedidos, format: (v: number) => v.toString(), variant: 'text-info' },
+    { label: 'Atrasados', value: kpis.atrasados, format: (v: number) => v.toString(), variant: 'text-warning' },
   ];
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[900px] mx-auto px-4 md:px-8 py-16 md:py-24">
-        <motion.div variants={stagger} initial="hidden" animate="visible">
+      <div className="max-w-[880px] mx-auto px-4 md:px-8 py-10 md:py-16 space-y-8">
 
-          {/* Hero */}
-          <motion.section variants={fadeUp} className="mb-12 text-center">
-            <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-3 tracking-tight">
-              {greeting.text} {greeting.emoji}
-            </h1>
-            <p className="text-lg text-muted-foreground max-w-md mx-auto leading-relaxed">
-              Plataforma de gestão inteligente da <span className="text-primary font-semibold">NBL Gráfica</span>
-            </p>
-          </motion.section>
+        {/* Hero */}
+        <section>
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">
+            {greeting}
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5 capitalize">{dateString}</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Consulte pedidos e financeiro em tempo real
+          </p>
+        </section>
 
-          {/* Search bar */}
-          <motion.section variants={fadeUp} className="mb-14">
-            <div
-              className={cn(
-                'relative max-w-xl mx-auto rounded-2xl border transition-all duration-300',
-                inputFocused
-                  ? 'border-primary/60 shadow-[0_0_30px_-5px_hsl(var(--primary)/0.25)]'
-                  : 'border-border'
-              )}
-            >
-              <div className="absolute inset-0 rounded-2xl bg-card/80 backdrop-blur-sm pointer-events-none" />
-              <div className="relative flex items-center">
-                <MessageSquare className="absolute left-4 w-5 h-5 text-muted-foreground/50" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onFocus={() => setInputFocused(true)}
-                  onBlur={() => setInputFocused(false)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuickQuery(query); } }}
-                  placeholder="Pergunte algo ao assistente..."
-                  className="w-full bg-transparent py-4 pl-12 pr-14 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none rounded-2xl"
-                />
-                <button
-                  onClick={() => handleQuickQuery(query)}
-                  disabled={!query.trim()}
-                  aria-label="Enviar consulta"
-                  className="absolute right-3 w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 hover:bg-primary/90 transition-all"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
+        {/* Search bar */}
+        <section>
+          <div className="relative rounded-lg border border-border bg-card">
+            <div className="relative flex items-center">
+              <MessageSquare className="absolute left-3.5 w-4 h-4 text-muted-foreground/50" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuickQuery(query); } }}
+                placeholder="Pergunte algo sobre pedidos ou financeiro..."
+                className="w-full bg-transparent py-3 pl-10 pr-12 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none rounded-lg"
+              />
+              <button
+                onClick={() => handleQuickQuery(query)}
+                disabled={!query.trim()}
+                aria-label="Enviar consulta"
+                className="absolute right-2.5 w-8 h-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 hover:bg-primary/90 transition-colors"
+              >
+                <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
-          </motion.section>
+          </div>
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
+            {SUGGESTION_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                onClick={() => handleQuickQuery(chip)}
+                className="px-3 py-1.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 hover:bg-primary/5 transition-all"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+        </section>
 
-          {/* Module cards */}
-          <motion.section variants={fadeUp} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-14">
-            {modules.map((mod) => {
+        {/* KPIs */}
+        <section>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {kpiCards.map((k) => (
+              <div key={k.label} className="bg-card border border-border rounded-lg p-4">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{k.label}</span>
+                {kpisLoading ? (
+                  <Skeleton className="h-7 w-20 mt-1.5" />
+                ) : (
+                  <p className={cn('text-xl font-semibold mt-1 tabular-nums', k.variant)}>
+                    {k.value !== null ? k.format(k.value) : '—'}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Module tiles */}
+        <section>
+          <h2 className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-3">Acesso rápido</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {modulesWithPreview.map((mod) => {
               const Icon = mod.icon;
               return (
-                <motion.div
+                <div
                   key={mod.title}
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  whileTap={{ scale: 0.98 }}
                   onClick={() => navigate(mod.route)}
-                  className="group relative bg-card border border-border rounded-2xl p-6 cursor-pointer overflow-hidden transition-colors duration-200 hover:border-primary/40"
+                  className={cn(
+                    'bg-card border border-border rounded-lg p-4 cursor-pointer border-l-[3px] transition-colors hover:border-primary/40',
+                    mod.borderColor
+                  )}
                 >
-                  <div className={cn('absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-300', mod.gradient)} />
-                  <div className="relative">
-                    <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-muted/50 group-hover:bg-muted transition-colors', mod.iconColor)}>
-                      <Icon className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-base font-semibold text-foreground mb-1.5">{mod.title}</h3>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{mod.description}</p>
+                  <div className="flex items-center gap-2.5 mb-1.5">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-medium text-foreground">{mod.title}</span>
                   </div>
-                </motion.div>
+                  <p className="text-xs text-muted-foreground">{mod.description}</p>
+                  {mod.preview && !kpisLoading && (
+                    <p className="text-xs text-primary font-medium mt-2">{mod.preview}</p>
+                  )}
+                </div>
               );
             })}
-          </motion.section>
+          </div>
+        </section>
 
-          {/* KPIs */}
-          <motion.section variants={fadeUp}>
-            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/50 mb-4 text-center font-medium">
-              Resumo do dia
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {kpiCards.map((k) => {
-                const Icon = k.icon;
-                return (
-                  <div key={k.label} className="bg-card/50 border border-border/50 rounded-xl p-4 text-center">
-                    <div className="flex items-center justify-center gap-1.5 mb-2">
-                      <Icon className={cn('w-3.5 h-3.5', k.color)} />
-                      <span className="text-[10px] uppercase text-muted-foreground/60 tracking-wide">{k.label}</span>
+        {/* Recent Activity */}
+        <section>
+          <Card className="border-border bg-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-foreground">Atividade recente</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {recentLoading ? (
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                </div>
+              ) : recentOrders.length === 0 ? (
+                <div className="py-6 text-center">
+                  <Package className="h-6 w-6 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Nenhum pedido recente</p>
+                </div>
+              ) : (
+                <div className="space-y-0 divide-y divide-border">
+                  {recentOrders.map((order) => (
+                    <div key={order.pedido_id} className="flex items-center justify-between py-2.5 gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-foreground truncate">
+                          {order.cliente_nome || 'Cliente não identificado'}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {format(new Date(order.data_criacao), 'dd/MM/yy', { locale: ptBR })}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-sm font-medium text-foreground tabular-nums">
+                          {formatCurrency(order.valor_total)}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-[10px]',
+                            order.is_atrasado
+                              ? 'bg-destructive/10 text-destructive border-destructive/30'
+                              : order.status_pedido === 'Finalizado'
+                              ? 'bg-success/10 text-success border-success/30'
+                              : 'bg-muted text-muted-foreground border-border'
+                          )}
+                        >
+                          {order.is_atrasado ? 'Atrasado' : order.status_pedido}
+                        </Badge>
+                      </div>
                     </div>
-                    {kpisLoading ? (
-                      <Skeleton className="h-7 w-20 mx-auto" />
-                    ) : (
-                      <p className="text-xl font-bold text-foreground tabular-nums">
-                        {k.value !== null ? k.format(k.value) : '—'}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </motion.section>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
 
-        </motion.div>
       </div>
     </div>
   );

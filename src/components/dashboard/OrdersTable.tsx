@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Package } from 'lucide-react';
 import { usePedidosPaginados } from '@/hooks/usePedidos';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -88,8 +88,10 @@ export function OrdersTable() {
             ))}
           </div>
         ) : pedidos.length === 0 ? (
-          <div className="py-8 text-center">
-            <p className="text-muted-foreground text-sm">Nenhum pedido no período</p>
+          <div className="py-10 text-center">
+            <Package className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-muted-foreground text-sm">Nenhum pedido encontrado no período</p>
+            <p className="text-muted-foreground/60 text-xs mt-1">Ajuste o filtro de datas ou status.</p>
           </div>
         ) : (
           <>
