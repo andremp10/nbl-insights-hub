@@ -1,97 +1,42 @@
 
 
-# Plano de Melhorias — Transicoes, Chat, Home e UX Global
+# Plano — Corrigir Rota Default + Loading Escuro com Animacao
 
----
+## Problemas Identificados
 
-## 1. Transicoes entre paginas (tela branca no lazy load)
+1. **Rota default caindo em financeiro**: O arquivo `src/pages/Index.tsx` contem `<Navigate to="/financeiro" />`, porem ele nao e usado em `App.tsx` (a rota `/` ja aponta para `Home`). O problema real e que o `AuthContext` inicia com `isAuthenticated = false` e so muda para `true` apos o `useEffect` rodar — nesse breve momento, o `ProtectedRoute` redireciona para `/auth`, e apos o login o redirect pode estar indo para `/financeiro` ao inves de `/`. Preciso verificar o fluxo de redirect pos-login no componente `Auth.tsx` e no `SignInCard`.
 
-**Problema:** O `Suspense` com `lazy()` mostra um `PageLoader` (spinner tela cheia com fundo `bg-background`) a cada troca de rota. Isso causa um flash branco/escuro entre paginas.
+2. **Tela branca no loading**: O `Suspense fallback={null}` mostra nada enquanto o chunk carrega. Como o `body` e o `#root` nao tem fundo escuro forcado, o resultado e um flash branco. A correcao e dupla: (a) fundo escuro global no HTML/body e (b) fallback com fundo escuro + animacao.
 
-**Correcao:**
-- Remover o `Suspense` global que envolve todas as rotas.
-- Adicionar `framer-motion` page transitions: envolver cada pagina com um `motion.div` que faz fade-in/fade-out rapido (150ms).
-- Criar um componente `PageTransition` que aplica `AnimatePresence` + `motion.div` com `opacity` e leve `translateY`.
-- Manter `lazy()` mas trocar o fallback do Suspense de spinner tela cheia para um skeleton minimo inline (ou nenhum, ja que as paginas sao leves).
-- Em `App.tsx`: envolver o conteudo de cada `Route` com `<PageTransition>`.
+## Correcoes
 
-**Arquivos:** `src/App.tsx`, novo `src/components/layout/PageTransition.tsx`
+### 1. Fundo escuro no HTML (elimina flash branco)
+- Em `index.html`: adicionar `style="background-color: #09090b"` no `<body>` (cor do dark mode background).
+- Em `src/index.css`: adicionar `html, body, #root { background-color: hsl(var(--background)); }` no dark mode.
 
----
+### 2. Fallback do Suspense com skeleton animado
+- Trocar `fallback={null}` por um componente `PageSkeleton` que:
+  - Tem fundo `bg-background` (escuro)
+  - Mostra 3-4 blocos skeleton que "constroem" de cima para baixo com `animate-fade-in` escalonado (delay incremental)
+  - Simula o layout da pagina sendo montada
 
-## 2. Chat — Typewriter so na mensagem nova + formatacao
+### 3. Corrigir redirect pos-login
+- Verificar `Auth.tsx` / `SignInCard` — garantir que apos login o redirect va para `/` (Home) e nao para `/financeiro`.
+- Deletar `src/pages/Index.tsx` (nao e usado e contem redirect errado).
+- No `AuthContext`, adicionar um estado `loading` para evitar o flash de redirect para `/auth` antes do localStorage ser lido.
 
-**Problema:** O `useTypewriter` roda em TODAS as mensagens do assistente que sao marcadas como "novas" (nao estavam no `initialMsgIdsRef`). Se o usuario troca de sessao e volta, mensagens ja vistas sao re-animadas. Alem disso, o `ReactMarkdown` com `key={displayedText.length}` causa remontagem constante, quebrando a renderizacao de tabelas durante a digitacao.
+### 4. Animacao de entrada dos componentes
+- O `PageTransition` ja existe com fade+translateY. Ajustar para que a animacao simule construcao do topo: `initial={{ opacity: 0, y: -12 }}` (vem de cima) ao inves de `y: 6` (vem de baixo).
 
-**Correcoes:**
-- **Typewriter apenas na ultima mensagem do assistente que acabou de chegar.** Adicionar um ref `lastAnimatedIdRef` que guarda o ID da ultima mensagem animada. So animar se `message.id` for diferente do ultimo animado E for a ultima mensagem do array.
-- **Remover o `key` dinamico do ReactMarkdown.** Usar `key="static"` sempre — o componente ja re-renderiza quando `contentToRender` muda.
-- **Velocidade mais rapida:** mudar speed de 12ms para 8ms e chunk maximo de 3 para 5 chars para texto longo parecer mais fluido.
-- **Marcar mensagem como "ja animada" apos conclusao** para evitar re-animacao ao trocar de sessao.
-
-**Arquivos:** `src/pages/Chat.tsx`, `src/components/chat/ChatMessage.tsx`, `src/hooks/useTypewriter.ts`
-
----
-
-## 3. Sugestoes do Chat — conteudo relevante + UX fluida
-
-**Problema:** As sugestoes sao genericas e a experiencia de clique nao e fluida (o texto vai para o input mas nao envia automaticamente).
-
-**Correcoes:**
-- **Sugestoes mais uteis e especificas para grafica:**
-  1. "Qual o faturamento deste mes?"
-  2. "Top 10 clientes por valor de pedidos"
-  3. "Pedidos em producao agora"
-  4. "Comparar receita vs despesas do mes"
-  5. "Quais categorias de despesa mais cresceram?"
-  6. "Pedidos com pagamento pendente"
-- **Ao clicar uma sugestao, enviar diretamente** (nao apenas preencher o input). Mudar o callback `onSuggestionClick` no `ChatEmptyState` para chamar `handleSend` diretamente.
-- **Remover o `ChatSuggestionsPanel` lateral** (painel de sugestoes a direita) que nao esta sendo usado na pagina do Chat e e redundante com o EmptyState.
-
-**Arquivos:** `src/components/chat/ChatEmptyState.tsx`, `src/pages/Chat.tsx`
-
----
-
-## 4. Home Page — redesenho visual impressionante
-
-**Problema:** A Home atual e funcional mas generica. Precisa impressionar como "porta de entrada" do sistema.
-
-**Redesenho:**
-- **Hero section grande** com saudacao + subtitulo elegante ("Plataforma de gestao inteligente da NBL Grafica").
-- **Barra de busca centralizada** com design premium (glassmorphism sutil, borda com glow laranja no focus).
-- **3 cards de modulo** (Chat IA, Financeiro, Pedidos) com icones grandes, gradientes sutis e descricao clara. Cada um com hover animado (scale + border glow).
-- **KPIs em linha** abaixo dos cards com animacao de contagem (countUp) nos numeros.
-- **Remover as sugestoes de texto** da Home (elas vivem no Chat). Substituir por um CTA "Pergunte ao assistente" que navega ao chat.
-- **Animacoes escalonadas** usando framer-motion stagger para entrada dos elementos.
-
-**Arquivo:** `src/pages/Home.tsx` (reescrever)
-
----
-
-## 5. Transicao Login → App
-
-**Problema:** Apos login, a transicao e abrupta (redirect sem animacao).
-
-**Correcao:**
-- No `Auth.tsx`, apos login bem-sucedido, adicionar um fade-out antes do redirect.
-- O `PageTransition` criado no item 1 ja vai suavizar a entrada da primeira pagina protegida.
-- Adicionar `animate-fade-in` na `AppLayout` para que o layout inteiro faca fade-in na montagem inicial.
-
-**Arquivos:** `src/pages/Auth.tsx`, `src/components/layout/AppLayout.tsx`
-
----
-
-## Resumo de Arquivos
+## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/layout/PageTransition.tsx` | Novo componente de transicao entre paginas |
-| `src/App.tsx` | Integrar PageTransition, ajustar Suspense |
-| `src/pages/Chat.tsx` | Typewriter so na ultima msg, sugestao envia direto |
-| `src/components/chat/ChatMessage.tsx` | Remover key dinamico, ajustar animate |
-| `src/hooks/useTypewriter.ts` | Aumentar velocidade, chunk maior |
-| `src/components/chat/ChatEmptyState.tsx` | Sugestoes mais relevantes, envio direto |
-| `src/pages/Home.tsx` | Redesenho visual completo |
-| `src/pages/Auth.tsx` | Fade-out pos-login |
-| `src/components/layout/AppLayout.tsx` | Fade-in na montagem |
+| `index.html` | Adicionar background escuro no body |
+| `src/index.css` | Background escuro global |
+| `src/App.tsx` | Trocar Suspense fallback por PageSkeleton |
+| `src/contexts/AuthContext.tsx` | Adicionar estado `loading` para evitar flash |
+| `src/components/auth/ProtectedRoute.tsx` | Checar `loading` antes de redirecionar |
+| `src/components/layout/PageTransition.tsx` | Ajustar direcao da animacao (topo) |
+| `src/pages/Index.tsx` | Deletar (nao usado) |
 
