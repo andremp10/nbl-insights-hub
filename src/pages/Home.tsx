@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, TrendingUp, ShoppingBag, ArrowRight, AlertCircle, Users } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { MessageSquare, TrendingUp, ShoppingBag, ArrowRight, Users, Bot, Sparkles } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -12,24 +13,37 @@ function getGreeting(): { text: string; emoji: string } {
   return { text: 'Boa noite', emoji: '🌙' };
 }
 
-function formatDate(): string {
-  return new Intl.DateTimeFormat('pt-BR', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-  }).format(new Date());
-}
-
 function formatCurrency(v: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
 }
 
-const suggestions = [
-  'Quais os 10 clientes com mais pedidos?',
-  'Qual o faturamento do mês atual?',
-  'Pedidos com pagamento pendente',
-  'Produtos mais vendidos este mês',
-  'Total de despesas de janeiro',
-  'Pedidos em produção agora',
-];
+// Animated counter hook
+function useCountUp(target: number | null, duration = 1200): number | null {
+  const [value, setValue] = useState<number | null>(null);
+  const rafRef = useRef<number>();
+  const startRef = useRef<number>();
+
+  useEffect(() => {
+    if (target === null) { setValue(null); return; }
+    if (target === 0) { setValue(0); return; }
+
+    const start = performance.now();
+    startRef.current = start;
+
+    const animate = (now: number) => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+      setValue(Math.round(target * eased));
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+
+  return value;
+}
 
 interface KpiData {
   pedidosHoje: number | null;
@@ -38,14 +52,56 @@ interface KpiData {
   clientesAtivos: number | null;
 }
 
+const stagger = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.05 } },
+};
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' as const } },
+};
+
+const modules = [
+  {
+    title: 'Assistente IA',
+    description: 'Consulte dados em linguagem natural. Pergunte sobre pedidos, clientes e financeiro.',
+    icon: Bot,
+    route: '/chat',
+    gradient: 'from-primary/20 to-primary/5',
+    iconColor: 'text-primary',
+  },
+  {
+    title: 'Financeiro',
+    description: 'Receitas, despesas, DRE e fluxo de caixa com gráficos interativos.',
+    icon: TrendingUp,
+    route: '/financeiro',
+    gradient: 'from-green-500/20 to-green-500/5',
+    iconColor: 'text-green-500',
+  },
+  {
+    title: 'Pedidos',
+    description: 'Acompanhe status, clientes top e faturamento por período.',
+    icon: ShoppingBag,
+    route: '/pedidos',
+    gradient: 'from-blue-500/20 to-blue-500/5',
+    iconColor: 'text-blue-500',
+  },
+];
+
 export default function Home() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [kpis, setKpis] = useState<KpiData>({ pedidosHoje: null, faturamentoMes: null, pendentes: null, clientesAtivos: null });
   const [kpisLoading, setKpisLoading] = useState(true);
+  const [inputFocused, setInputFocused] = useState(false);
 
   const greeting = useMemo(getGreeting, []);
-  const dateStr = useMemo(formatDate, []);
+
+  const pedidosAnimated = useCountUp(kpis.pedidosHoje);
+  const faturamentoAnimated = useCountUp(kpis.faturamentoMes);
+  const pendentesAnimated = useCountUp(kpis.pendentes);
+  const clientesAnimated = useCountUp(kpis.clientesAtivos);
 
   const handleQuickQuery = (q: string) => {
     if (!q.trim()) return;
@@ -85,109 +141,114 @@ export default function Home() {
   }, []);
 
   const kpiCards = [
-    { label: 'Pedidos hoje', value: kpis.pedidosHoje !== null ? kpis.pedidosHoje.toString() : '—', icon: ShoppingBag, color: 'text-chart-3' },
-    { label: 'Faturamento mês', value: kpis.faturamentoMes !== null ? formatCurrency(kpis.faturamentoMes) : '—', icon: TrendingUp, color: 'text-success' },
-    { label: 'Pendentes', value: kpis.pendentes !== null ? kpis.pendentes.toString() : '—', icon: AlertCircle, color: 'text-warning' },
-    { label: 'Clientes ativos', value: kpis.clientesAtivos !== null ? kpis.clientesAtivos.toString() : '—', icon: Users, color: 'text-chart-5' },
+    { label: 'Pedidos hoje', value: pedidosAnimated, format: (v: number) => v.toString(), icon: ShoppingBag, color: 'text-blue-400' },
+    { label: 'Faturamento mês', value: faturamentoAnimated, format: formatCurrency, icon: TrendingUp, color: 'text-green-400' },
+    { label: 'Pendentes', value: pendentesAnimated, format: (v: number) => v.toString(), icon: Sparkles, color: 'text-amber-400' },
+    { label: 'Clientes ativos', value: clientesAnimated, format: (v: number) => v.toString(), icon: Users, color: 'text-violet-400' },
   ];
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-[800px] mx-auto px-4 md:px-6 py-12 md:py-20">
-        {/* Greeting */}
-        <section className="mb-10 animate-fade-slide-up">
-          <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-1">
-            {greeting.text} {greeting.emoji}
-          </h1>
-          <p className="text-sm text-muted-foreground capitalize">{dateStr}</p>
-        </section>
+      <div className="max-w-[900px] mx-auto px-4 md:px-8 py-16 md:py-24">
+        <motion.div variants={stagger} initial="hidden" animate="visible">
 
-        {/* Quick Query — main focus */}
-        <section className="mb-6 animate-fade-slide-up" style={{ animationDelay: '80ms' }}>
-          <p className="text-xs uppercase tracking-widest text-muted-foreground/70 mb-3 font-medium">
-            Assistente de Dados
-          </p>
-          <div className="relative">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuickQuery(query); } }}
-              placeholder="Pergunte algo sobre pedidos, clientes, financeiro..."
-              className="w-full bg-card border border-border rounded-2xl py-4 pl-5 pr-14 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary focus:ring-[3px] focus:ring-primary/12 transition-all"
-            />
-            <button
-              onClick={() => handleQuickQuery(query)}
-              disabled={!query.trim()}
-              aria-label="Enviar consulta"
-              className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-40 hover:bg-primary/90 transition-colors"
+          {/* Hero */}
+          <motion.section variants={fadeUp} className="mb-12 text-center">
+            <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-3 tracking-tight">
+              {greeting.text} {greeting.emoji}
+            </h1>
+            <p className="text-lg text-muted-foreground max-w-md mx-auto leading-relaxed">
+              Plataforma de gestão inteligente da <span className="text-primary font-semibold">NBL Gráfica</span>
+            </p>
+          </motion.section>
+
+          {/* Search bar */}
+          <motion.section variants={fadeUp} className="mb-14">
+            <div
+              className={cn(
+                'relative max-w-xl mx-auto rounded-2xl border transition-all duration-300',
+                inputFocused
+                  ? 'border-primary/60 shadow-[0_0_30px_-5px_hsl(var(--primary)/0.25)]'
+                  : 'border-border'
+              )}
             >
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </section>
-
-        {/* Suggestions */}
-        <section className="mb-12 animate-fade-slide-up" style={{ animationDelay: '160ms' }}>
-          <div className="flex flex-wrap gap-2">
-            {suggestions.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => handleQuickQuery(s)}
-                className="px-3.5 py-1.5 rounded-full text-xs text-muted-foreground bg-secondary border border-border hover:border-primary hover:text-foreground hover:bg-primary/[0.05] transition-all duration-150 cursor-pointer"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Navigation Cards */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-12 animate-fade-slide-up" style={{ animationDelay: '240ms' }}>
-          <div
-            onClick={() => navigate('/financeiro')}
-            className="group bg-card border border-border rounded-2xl p-6 cursor-pointer transition-all duration-200 hover:border-primary/50 hover:-translate-y-0.5"
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-9 h-9 rounded-lg bg-success/10 flex items-center justify-center">
-                <TrendingUp className="w-4 h-4 text-success" />
+              <div className="absolute inset-0 rounded-2xl bg-card/80 backdrop-blur-sm pointer-events-none" />
+              <div className="relative flex items-center">
+                <MessageSquare className="absolute left-4 w-5 h-5 text-muted-foreground/50" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuickQuery(query); } }}
+                  placeholder="Pergunte algo ao assistente..."
+                  className="w-full bg-transparent py-4 pl-12 pr-14 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none rounded-2xl"
+                />
+                <button
+                  onClick={() => handleQuickQuery(query)}
+                  disabled={!query.trim()}
+                  aria-label="Enviar consulta"
+                  className="absolute right-3 w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-30 hover:bg-primary/90 transition-all"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                </button>
               </div>
-              <h3 className="text-sm font-semibold text-foreground">Financeiro</h3>
             </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">Receitas, despesas, DRE e fluxo de caixa</p>
-          </div>
-          <div
-            onClick={() => navigate('/pedidos')}
-            className="group bg-card border border-border rounded-2xl p-6 cursor-pointer transition-all duration-200 hover:border-primary/50 hover:-translate-y-0.5"
-          >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-9 h-9 rounded-lg bg-chart-3/10 flex items-center justify-center">
-                <ShoppingBag className="w-4 h-4 text-chart-3" />
-              </div>
-              <h3 className="text-sm font-semibold text-foreground">Pedidos</h3>
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">Status, clientes top, faturamento por período</p>
-          </div>
-        </section>
+          </motion.section>
 
-        {/* KPIs — subtle */}
-        <section className="animate-fade-slide-up" style={{ animationDelay: '320ms' }}>
-          <p className="text-[10px] uppercase tracking-widest text-muted-foreground/50 mb-3 font-medium">Resumo</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {kpiCards.map((k) => (
-              <div key={k.label} className="bg-secondary/50 border border-border/50 rounded-xl p-4">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <k.icon className={cn('w-3.5 h-3.5', k.color)} />
-                  <span className="text-[10px] uppercase text-muted-foreground/60 tracking-wide">{k.label}</span>
-                </div>
-                {kpisLoading ? (
-                  <Skeleton className="h-6 w-16" />
-                ) : (
-                  <p className="text-lg font-bold text-foreground">{k.value}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
+          {/* Module cards */}
+          <motion.section variants={fadeUp} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-14">
+            {modules.map((mod) => {
+              const Icon = mod.icon;
+              return (
+                <motion.div
+                  key={mod.title}
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => navigate(mod.route)}
+                  className="group relative bg-card border border-border rounded-2xl p-6 cursor-pointer overflow-hidden transition-colors duration-200 hover:border-primary/40"
+                >
+                  <div className={cn('absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-300', mod.gradient)} />
+                  <div className="relative">
+                    <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-muted/50 group-hover:bg-muted transition-colors', mod.iconColor)}>
+                      <Icon className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-base font-semibold text-foreground mb-1.5">{mod.title}</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{mod.description}</p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </motion.section>
+
+          {/* KPIs */}
+          <motion.section variants={fadeUp}>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground/50 mb-4 text-center font-medium">
+              Resumo do dia
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {kpiCards.map((k) => {
+                const Icon = k.icon;
+                return (
+                  <div key={k.label} className="bg-card/50 border border-border/50 rounded-xl p-4 text-center">
+                    <div className="flex items-center justify-center gap-1.5 mb-2">
+                      <Icon className={cn('w-3.5 h-3.5', k.color)} />
+                      <span className="text-[10px] uppercase text-muted-foreground/60 tracking-wide">{k.label}</span>
+                    </div>
+                    {kpisLoading ? (
+                      <Skeleton className="h-7 w-20 mx-auto" />
+                    ) : (
+                      <p className="text-xl font-bold text-foreground tabular-nums">
+                        {k.value !== null ? k.format(k.value) : '—'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </motion.section>
+
+        </motion.div>
       </div>
     </div>
   );

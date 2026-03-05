@@ -2,12 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 
 /**
  * Reveals text progressively, character by character.
- * Skips markdown syntax tokens to keep rendering smooth.
+ * Faster speed (8ms) and larger chunks (up to 5) for fluid feel.
  */
 export function useTypewriter(
   fullText: string,
   enabled: boolean,
-  speed: number = 12,
+  speed: number = 8,
 ): { displayedText: string; isTyping: boolean } {
   const [displayedText, setDisplayedText] = useState(enabled ? '' : fullText);
   const [isTyping, setIsTyping] = useState(enabled && fullText.length > 0);
@@ -32,10 +32,9 @@ export function useTypewriter(
       const elapsed = timestamp - lastTimeRef.current;
 
       if (elapsed >= speed) {
-        // Advance by a chunk (1-3 chars) for more natural feel
         const charsToAdd = Math.min(
           Math.ceil(elapsed / speed),
-          3,
+          5,
           fullText.length - indexRef.current,
         );
         indexRef.current += charsToAdd;
