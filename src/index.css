@@ -124,10 +124,13 @@
     font-feature-settings: "cv11", "ss01", "ss03";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-image: radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.02) 0%, transparent 50%);
   }
 
   .dark body {
-    background-image: radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.03) 0%, transparent 60%);
+    background-image:
+      radial-gradient(ellipse at 50% 0%, hsl(var(--primary) / 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 100%, hsl(var(--info) / 0.02) 0%, transparent 40%);
   }
 }
 
