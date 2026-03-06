@@ -1,10 +1,13 @@
+import { useState, useMemo } from 'react';
 import { Package, DollarSign, Factory, AlertTriangle } from 'lucide-react';
 import { DateFilterBar } from '@/components/layout/DateFilterBar';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { DonutChart } from '@/components/dashboard/DonutChart';
 import { HorizontalBarChart } from '@/components/dashboard/HorizontalBarChart';
 import { OrdersTable } from '@/components/dashboard/OrdersTable';
-import { usePedidosKPIs, useStatusDistribuicao, useTopClientes } from '@/hooks/usePedidos';
+import { ClienteDetailModal } from '@/components/dashboard/ClienteDetailModal';
+import { usePedidosKPIs, useStatusDistribuicao, useTopClientes, usePedidosData } from '@/hooks/usePedidos';
+import type { PedidoItem } from '@/hooks/usePedidos';
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
@@ -14,9 +17,25 @@ export default function Pedidos() {
   const { kpis, isLoading: kpisLoading } = usePedidosKPIs();
   const { statusData, isLoading: statusLoading } = useStatusDistribuicao();
   const { clientes, isLoading: clientesLoading } = useTopClientes();
+  const { data: allItems } = usePedidosData();
+
+  const [chartCliente, setChartCliente] = useState<PedidoItem | null>(null);
 
   const statusChartData = statusData.map(s => ({ name: s.status, value: s.quantidade }));
   const clientesChartData = clientes.slice(0, 10).map(c => ({ name: c.cliente, value: c.valor }));
+
+  const pedidosDoChartCliente = useMemo(() => {
+    if (!chartCliente || !allItems) return [];
+    return allItems.filter(i => i.cliente_id === chartCliente.cliente_id);
+  }, [chartCliente, allItems]);
+
+  const handleBarClick = (clienteNome: string) => {
+    if (!allItems) return;
+    const firstMatch = allItems.find(i => i.cliente_nome === clienteNome);
+    if (firstMatch) {
+      setChartCliente(firstMatch);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -33,10 +52,22 @@ export default function Pedidos() {
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <DonutChart title="Status dos Pedidos" data={statusChartData} isLoading={statusLoading} />
-          <HorizontalBarChart title="Top 10 Clientes" data={clientesChartData} isLoading={clientesLoading} />
+          <HorizontalBarChart
+            title="Top 10 Clientes"
+            data={clientesChartData}
+            isLoading={clientesLoading}
+            onBarClick={handleBarClick}
+          />
         </div>
         <OrdersTable />
       </div>
+
+      <ClienteDetailModal
+        open={!!chartCliente}
+        onOpenChange={(open) => { if (!open) setChartCliente(null); }}
+        cliente={chartCliente}
+        pedidosDoCliente={pedidosDoChartCliente}
+      />
     </div>
   );
 }
