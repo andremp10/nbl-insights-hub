@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Filter, Package } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Package, Eye } from 'lucide-react';
 import { usePedidosPaginados, usePedidosData, type PedidoItem } from '@/hooks/usePedidos';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClienteDetailModal } from './ClienteDetailModal';
+import { PedidoDetailModal } from './PedidoDetailModal';
 import {
   Select,
   SelectContent,
@@ -43,6 +44,7 @@ export function OrdersTable() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedCliente, setSelectedCliente] = useState<PedidoItem | null>(null);
+  const [selectedPedido, setSelectedPedido] = useState<PedidoItem | null>(null);
 
   const { pedidos, totalPages, totalItems, isLoading } = usePedidosPaginados(page, 20, { status: statusFilter });
   const { data: allItems } = usePedidosData();
@@ -52,8 +54,13 @@ export function OrdersTable() {
     return allItems.filter(i => i.cliente_id === selectedCliente.cliente_id);
   }, [selectedCliente, allItems]);
 
-  const handleClienteClick = (item: PedidoItem) => {
+  const handleClienteClick = (e: React.MouseEvent, item: PedidoItem) => {
+    e.stopPropagation();
     setSelectedCliente(item);
+  };
+
+  const handlePedidoClick = (item: PedidoItem) => {
+    setSelectedPedido(item);
   };
 
   return (
@@ -97,11 +104,15 @@ export function OrdersTable() {
               {/* Mobile view */}
               <div className="md:hidden space-y-3">
                 {pedidos.map((item) => (
-                  <div key={item.pedido_id} className="p-3 rounded-lg border border-border bg-secondary/30">
+                  <div
+                    key={item.pedido_id}
+                    onClick={() => handlePedidoClick(item)}
+                    className="p-3 rounded-lg border border-border bg-secondary/30 cursor-pointer hover:bg-secondary/50 transition-colors"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <button
-                          onClick={() => handleClienteClick(item)}
+                          onClick={(e) => handleClienteClick(e, item)}
                           className="text-sm font-medium text-primary hover:underline truncate block text-left"
                         >
                           {item.cliente_nome || 'Cliente não identificado'}
@@ -129,17 +140,22 @@ export function OrdersTable() {
                       <th className="text-center py-3 px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Itens</th>
                       <th className="text-center py-3 px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
                       <th className="text-right py-3 px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Valor</th>
+                      <th className="w-10"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {pedidos.map((item) => (
-                      <tr key={item.pedido_id} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                      <tr
+                        key={item.pedido_id}
+                        onClick={() => handlePedidoClick(item)}
+                        className="border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer group"
+                      >
                         <td className="py-3 px-2 text-sm text-muted-foreground">
                           {format(new Date(item.data_criacao), 'dd/MM/yy', { locale: ptBR })}
                         </td>
                         <td className="py-3 px-2 text-sm max-w-[200px]">
                           <button
-                            onClick={() => handleClienteClick(item)}
+                            onClick={(e) => handleClienteClick(e, item)}
                             className="text-primary hover:underline truncate block text-left max-w-full"
                           >
                             {item.cliente_nome || 'Cliente não identificado'}
@@ -148,6 +164,9 @@ export function OrdersTable() {
                         <td className="py-3 px-2 text-sm text-muted-foreground text-center">{item.qtde_itens}</td>
                         <td className="py-3 px-2 text-center">{getStatusBadge(item.status_pedido, item.is_atrasado)}</td>
                         <td className="py-3 px-2 text-sm font-medium text-right text-foreground">{formatCurrency(item.valor_total)}</td>
+                        <td className="py-3 px-2">
+                          <Eye className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -178,6 +197,12 @@ export function OrdersTable() {
         onOpenChange={(open) => { if (!open) setSelectedCliente(null); }}
         cliente={selectedCliente}
         pedidosDoCliente={pedidosDoCliente}
+      />
+
+      <PedidoDetailModal
+        open={!!selectedPedido}
+        onOpenChange={(open) => { if (!open) setSelectedPedido(null); }}
+        pedido={selectedPedido}
       />
     </>
   );

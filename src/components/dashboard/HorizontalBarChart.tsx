@@ -9,6 +9,7 @@ interface HorizontalBarChartProps {
   isLoading?: boolean;
   maxItems?: number;
   color?: string;
+  onBarClick?: (name: string) => void;
 }
 
 function formatCurrency(value: number): string {
@@ -31,10 +32,17 @@ export function HorizontalBarChart({
   data,
   isLoading,
   maxItems = 10,
-  color = 'hsl(217, 91%, 60%)'
+  color = 'hsl(217, 91%, 60%)',
+  onBarClick,
 }: HorizontalBarChartProps) {
   const displayData = data.slice(0, maxItems);
   const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  const handleBarClick = (data: any) => {
+    if (onBarClick && data?.name) {
+      onBarClick(data.name);
+    }
+  };
 
   return (
     <Card className="border-border bg-card">
@@ -108,6 +116,8 @@ export function HorizontalBarChart({
                   animationBegin={200}
                   animationDuration={1500}
                   animationEasing="ease-out"
+                  onClick={handleBarClick}
+                  style={onBarClick ? { cursor: 'pointer' } : undefined}
                 >
                   {displayData.map((_, index) => (
                     <Cell
