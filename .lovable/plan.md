@@ -1,51 +1,60 @@
 
 
-# Plano — Reestruturar aba Pedidos
+# Plano — Performance e Loading do Financeiro e Pedidos
 
-## Problema 1: Layout — graficos abaixo da tabela
-Atualmente: KPIs > Tabela > Graficos. O usuario quer: KPIs > Graficos > Tabela.
+## Diagnostico
 
-**Solucao:** Inverter a ordem em `src/pages/Pedidos.tsx` — mover o grid dos graficos para antes do `<OrdersTable />`.
+Analisei os dados e a arquitetura. Os numeros:
+- **85.872 pedidos**, **124.056 itens**, **98.197 lancamentos financeiros**
+- Filtro padrao e `all_time` (desde 2019) — carrega TUDO
+- A view `vw_dashboard_pedidos` faz LATERAL subquery com `string_agg` para cada pedido — pesada
+- As RPCs financeiras usam `COALESCE(data_emissao, data_pagto)` que impede uso de indices
+- React Query sem `staleTime` — refaz query a cada navegacao entre abas
+- Supabase tem limite de 1000 rows por query — com `all_time`, so retorna 1000 de 85K (dados incompletos)
 
-## Problema 2: Nomes dos clientes sao UUIDs truncados
-A view `vw_dashboard_pedidos` gera `cliente_nome` via `COALESCE(pf.nome || pf.sobrenome, pj.razao_social, 'Cliente #' || left(id, 8))`. As tabelas `is_clientes_pf` e `is_clientes_pj` estao **vazias**, entao TODOS os clientes caem no fallback `Cliente #uuid`.
+## Solucoes
 
-O dado real disponivel e o `email_log` da tabela `is_clientes` (ex: `graficadivinoespiritosanto@gmail.com`). Esse e o unico identificador legivel.
+### 1. Mudar filtro padrao de `all_time` para `this_month`
+**Arquivo:** `src/contexts/DateFilterContext.tsx`
 
-**Solucao em duas partes:**
+Mudar o preset inicial de `all_time` para `this_month`. Isso reduz a query de 85K rows para ~1-2K rows. Impacto imediato e drastico.
 
-### 2a. Atualizar a view SQL
-Alterar `vw_dashboard_pedidos` para fazer JOIN com `is_clientes` e usar `email_log` como fallback antes do UUID:
+### 2. Adicionar `staleTime` e `placeholderData` no React Query
+**Arquivos:** `src/hooks/useFinanceiro.ts`, `src/hooks/usePedidos.ts`
+
+- `staleTime: 5 * 60 * 1000` (5 min) — evita refetch ao navegar entre abas
+- `placeholderData: keepPreviousData` — ao mudar filtro, mostra dados antigos enquanto carrega os novos (sem tela branca)
+
+### 3. Indice de expressao para financeiro
+**Migracao SQL**
+
+O `COALESCE(data_emissao, data_pagto)` nas RPCs financeiras nao usa nenhum indice. Criar um indice funcional:
 
 ```sql
-COALESCE(
-  NULLIF(TRIM(pf.nome || ' ' || pf.sobrenome), ''),
-  pj.razao_social,
-  c.email_log,               -- << novo fallback
-  'Cliente #' || left(p.cliente_id::text, 8)
-)
+CREATE INDEX idx_fin_lanc_competencia 
+ON is_financeiro_lancamentos (
+  (COALESCE(data_emissao, data_pagto)::date)
+) WHERE status IN (1, 2);
 ```
 
-Tambem adicionar `c.email_log` e `c.telefone` como colunas extras na view para o modal de detalhes.
+Isso acelera as RPCs `get_financeiro_kpis` e `get_financeiro_graficos`.
 
-### 2b. Modal de detalhes do cliente (click no nome)
-Criar `src/components/dashboard/ClienteDetailModal.tsx`:
-- Dialog/Sheet que abre ao clicar no nome do cliente na tabela
-- Busca dados de `is_clientes` pelo `cliente_id`
-- Exibe: email, telefone, celular, tipo (PF/PJ)
-- Lista os pedidos recentes daquele cliente no periodo (ja disponivel nos dados carregados)
+### 4. Indice composto para view de pedidos
+**Migracao SQL**
 
-### 2c. Atualizar OrdersTable
-- Tornar o nome do cliente clicavel (botao/link com hover)
-- Ao clicar, abrir o modal com detalhes
+A view filtra `is_pedidos.created_at` via range. Criar indice composto:
 
-## Arquivos
+```sql
+CREATE INDEX idx_is_pedidos_created_cliente 
+ON is_pedidos (created_at DESC, cliente_id);
+```
+
+## Resumo de arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| Migration SQL | Recriar `vw_dashboard_pedidos` com `email_log` como fallback e colunas extras |
-| `src/pages/Pedidos.tsx` | Inverter ordem: graficos antes da tabela |
-| `src/components/dashboard/ClienteDetailModal.tsx` | Novo — modal com info do cliente |
-| `src/components/dashboard/OrdersTable.tsx` | Nome clicavel, abrir modal |
-| `src/hooks/usePedidos.ts` | Atualizar interface `PedidoItem` com novos campos |
+| `src/contexts/DateFilterContext.tsx` | Mudar preset padrao para `this_month` |
+| `src/hooks/useFinanceiro.ts` | Adicionar staleTime + placeholderData |
+| `src/hooks/usePedidos.ts` | Adicionar staleTime + placeholderData |
+| Migracao SQL | Criar 2 indices (expressao financeiro + composto pedidos) |
 
