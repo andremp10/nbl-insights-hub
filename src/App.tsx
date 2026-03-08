@@ -36,9 +36,17 @@ const ProtectedPage = ({ children }: { children: React.ReactNode }) => (
 
 function AnimatedRoutes() {
   const location = useLocation();
+  
+  const getSkeleton = (path: string) => {
+    if (path === '/') return <HomeSkeleton />;
+    if (path === '/financeiro') return <FinanceiroSkeleton />;
+    if (path === '/pedidos') return <PedidosSkeleton />;
+    return <PageSkeleton />;
+  };
+
   return (
     <AnimatePresence mode="wait">
-      <Suspense fallback={<PageSkeleton />}>
+      <Suspense fallback={getSkeleton(location.pathname)}>
         <Routes location={location} key={location.pathname}>
           <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
           <Route path="/reset-password" element={<PageTransition><ResetPassword /></PageTransition>} />
