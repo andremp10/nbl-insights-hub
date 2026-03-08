@@ -1,51 +1,59 @@
 
 
-# Plano — Reestruturar aba Pedidos
+# Plano — Otimizar performance e fluidez do Chat
 
-## Problema 1: Layout — graficos abaixo da tabela
-Atualmente: KPIs > Tabela > Graficos. O usuario quer: KPIs > Graficos > Tabela.
+## Problemas identificados
 
-**Solucao:** Inverter a ordem em `src/pages/Pedidos.tsx` — mover o grid dos graficos para antes do `<OrdersTable />`.
+### 1. Re-renders excessivos no `Chat.tsx`
+- `ChatComposer` e definido inline no mesmo arquivo, mas nao e memo. Cada mudanca de state em `Chat` (messages, sending, etc.) re-renderiza o composer inteiro.
+- `messages.map()` recria callbacks `onRetry` e `onFollowUp` a cada render — invalida o `memo` do `ChatMessage`.
+- `scrollIntoView` dispara a cada mudanca em `messages` ou `sending`, mesmo sem novos itens.
 
-## Problema 2: Nomes dos clientes sao UUIDs truncados
-A view `vw_dashboard_pedidos` gera `cliente_nome` via `COALESCE(pf.nome || pf.sobrenome, pj.razao_social, 'Cliente #' || left(id, 8))`. As tabelas `is_clientes_pf` e `is_clientes_pj` estao **vazias**, entao TODOS os clientes caem no fallback `Cliente #uuid`.
+### 2. Typewriter causa renders a cada 8ms
+- `useTypewriter` chama `setDisplayedText` ~125x/s. Como `ReactMarkdown` com `remarkGfm` e pesado (parser markdown completo), cada update re-parseia todo o conteudo.
+- Solucao: durante a animacao, renderizar texto puro (sem markdown). So parsear markdown apos finalizar o typewriter.
 
-O dado real disponivel e o `email_log` da tabela `is_clientes` (ex: `graficadivinoespiritosanto@gmail.com`). Esse e o unico identificador legivel.
+### 3. `motion.div` em cada mensagem
+- Cada `ChatMessage` tem `motion.div` com `initial/animate`. Para mensagens historicas (ja carregadas), essa animacao e desnecessaria — cria overhead de layout/paint.
+- Solucao: so usar `motion.div` quando `animate=true`, usar `div` normal caso contrario.
 
-**Solucao em duas partes:**
+### 4. Realtime do `useChatSessions` re-fetcha tudo
+- O channel `chat_sessions_changes` ouve `event: '*'` e chama `fetchSessions()` a cada evento. Qualquer UPDATE (incluindo o trigger de `last_message_at`) causa um SELECT completo.
+- Solucao: usar o payload do evento para atualizar localmente em vez de re-fetchar.
 
-### 2a. Atualizar a view SQL
-Alterar `vw_dashboard_pedidos` para fazer JOIN com `is_clientes` e usar `email_log` como fallback antes do UUID:
+### 5. `usePedidosData()` carregado dentro de `OrdersTable` (importado no Chat via modais)
+- Nao impacta diretamente o chat, mas vale verificar que nao esta sendo importado transitivamente.
 
-```sql
-COALESCE(
-  NULLIF(TRIM(pf.nome || ' ' || pf.sobrenome), ''),
-  pj.razao_social,
-  c.email_log,               -- << novo fallback
-  'Cliente #' || left(p.cliente_id::text, 8)
-)
-```
+## Solucao proposta
 
-Tambem adicionar `c.email_log` e `c.telefone` como colunas extras na view para o modal de detalhes.
+### A. `ChatMessage` — Markdown so apos typewriter
+- Durante `isTyping`, renderizar `contentToRender` como texto puro (com `<pre>` ou `<span>` simples com `whitespace-pre-wrap`)
+- Apos `isTyping=false`, renderizar `ReactMarkdown` normalmente
+- Isso elimina ~125 re-parses/s de markdown
 
-### 2b. Modal de detalhes do cliente (click no nome)
-Criar `src/components/dashboard/ClienteDetailModal.tsx`:
-- Dialog/Sheet que abre ao clicar no nome do cliente na tabela
-- Busca dados de `is_clientes` pelo `cliente_id`
-- Exibe: email, telefone, celular, tipo (PF/PJ)
-- Lista os pedidos recentes daquele cliente no periodo (ja disponivel nos dados carregados)
+### B. `ChatMessage` — Condicional motion vs div
+- Se `animate=false` (mensagens historicas): usar `<div>` simples em vez de `<motion.div>`
+- Manter `motion.div` apenas para mensagens novas
 
-### 2c. Atualizar OrdersTable
-- Tornar o nome do cliente clicavel (botao/link com hover)
-- Ao clicar, abrir o modal com detalhes
+### C. `Chat.tsx` — Estabilizar callbacks
+- Extrair `ChatComposer` para fora e envolver em `memo` (ja esta fora, mas garantir memo)
+- Usar `useCallback` com refs para `onRetry` e `onFollowUp` passados ao map
+- Scroll: usar ref para contar mensagens e so scrollar quando count muda
+
+### D. `useChatSessions` — Update local em vez de re-fetch
+- No handler do Realtime, usar o `payload.new` para atualizar o state localmente (INSERT, UPDATE, DELETE)
+- Manter `fetchSessions` apenas para o load inicial
+
+### E. `useTypewriter` — Chunks maiores
+- Aumentar chunk maximo de 5 para 10-15 caracteres
+- Reduzir frequencia de `setDisplayedText` (agrupar mais chars por frame)
 
 ## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| Migration SQL | Recriar `vw_dashboard_pedidos` com `email_log` como fallback e colunas extras |
-| `src/pages/Pedidos.tsx` | Inverter ordem: graficos antes da tabela |
-| `src/components/dashboard/ClienteDetailModal.tsx` | Novo — modal com info do cliente |
-| `src/components/dashboard/OrdersTable.tsx` | Nome clicavel, abrir modal |
-| `src/hooks/usePedidos.ts` | Atualizar interface `PedidoItem` com novos campos |
+| `src/components/chat/ChatMessage.tsx` | Texto puro durante typing; div condicional |
+| `src/hooks/useTypewriter.ts` | Chunks maiores, menos setState |
+| `src/pages/Chat.tsx` | Estabilizar callbacks, smart scroll |
+| `src/hooks/useChatSessions.ts` | Update local via Realtime payload |
 
