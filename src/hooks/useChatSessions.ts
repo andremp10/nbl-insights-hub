@@ -39,14 +39,50 @@ export function useChatSessions() {
     const sub = supabase
       .channel('chat_sessions_changes')
       .on('postgres_changes', {
-        event: '*',
+        event: 'INSERT',
         schema: 'public',
         table: 'chat_sessions',
-      }, () => fetchSessions())
+      }, (payload) => {
+        const newSession = payload.new as ChatSession;
+        if (newSession.user_id !== userId) return;
+        setSessions(prev => {
+          if (prev.some(s => s.id === newSession.id)) return prev;
+          return [newSession, ...prev];
+        });
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'chat_sessions',
+      }, (payload) => {
+        const updated = payload.new as ChatSession;
+        if (updated.user_id !== userId) return;
+        setSessions(prev => {
+          const idx = prev.findIndex(s => s.id === updated.id);
+          if (idx === -1) return prev;
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...updated };
+          // Re-sort by last_message_at desc
+          next.sort((a, b) => {
+            const aTime = a.last_message_at || a.created_at;
+            const bTime = b.last_message_at || b.created_at;
+            return bTime.localeCompare(aTime);
+          });
+          return next;
+        });
+      })
+      .on('postgres_changes', {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'chat_sessions',
+      }, (payload) => {
+        const deleted = payload.old as { id: string };
+        setSessions(prev => prev.filter(s => s.id !== deleted.id));
+      })
       .subscribe();
 
     return () => { supabase.removeChannel(sub); };
-  }, [fetchSessions]);
+  }, [fetchSessions, userId]);
 
   const createSession = useCallback(async (): Promise<ChatSession | null> => {
     if (!userId) return null;
@@ -69,7 +105,10 @@ export function useChatSessions() {
       }
 
       const session = data as ChatSession;
-      setSessions(prev => [session, ...prev]);
+      setSessions(prev => {
+        if (prev.some(s => s.id === session.id)) return prev;
+        return [session, ...prev];
+      });
       return session;
     } finally {
       creatingRef.current = false;
