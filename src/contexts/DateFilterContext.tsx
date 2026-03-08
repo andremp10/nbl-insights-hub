@@ -39,8 +39,8 @@ function getPresetDates(preset: DatePreset): DateRange {
 }
 
 export function DateFilterProvider({ children }: { children: ReactNode }) {
-  const [preset, setPresetState] = useState<DatePreset>('all_time');
-  const [dateRange, setDateRangeState] = useState<DateRange>(getPresetDates('all_time'));
+  const [preset, setPresetState] = useState<DatePreset>('this_month');
+  const [dateRange, setDateRangeState] = useState<DateRange>(getPresetDates('this_month'));
 
   const setPreset = (newPreset: DatePreset) => {
     setPresetState(newPreset);

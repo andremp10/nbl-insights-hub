@@ -35,6 +35,8 @@ export function useFinanceiroKPIs() {
         resultado: Number(row?.resultado || 0),
       } as FinanceiroKPIs;
     },
+    staleTime: 5 * 60 * 1000, // 5 minutos
+    placeholderData: (previousData) => previousData,
   });
 
   return { kpis: data || { receita: 0, despesas: 0, resultado: 0 }, isLoading, error };
@@ -76,6 +78,8 @@ export function useCategoriasDespesas() {
       }
       return main;
     },
+    staleTime: 5 * 60 * 1000, // 5 minutos
+    placeholderData: (previousData) => previousData,
   });
 
   return { categorias: data || [], isLoading, error };

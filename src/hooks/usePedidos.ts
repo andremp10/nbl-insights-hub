@@ -59,6 +59,8 @@ export function usePedidosData() {
       if (error) throw error;
       return (data || []) as PedidoItem[];
     },
+    staleTime: 5 * 60 * 1000, // 5 minutos
+    placeholderData: (previousData) => previousData,
   });
 }
 
