@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { ArrowUp, Loader2, Bot, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ChatMessage } from '@/components/chat/ChatMessage';
@@ -8,7 +8,6 @@ import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 
 export default function Chat() {
   const { sessions, groupedSessions, createSession, deleteSession, updateSessionTitle, loading: sessionsLoading } = useChatSessions();
@@ -23,6 +22,11 @@ export default function Chat() {
   const pendingAutoTitleRef = useRef<string | null>(null);
   const lastAnimatedIdRef = useRef<string | null>(null);
   const animatedIdsRef = useRef<Set<string>>(new Set());
+  const prevMsgCountRef = useRef(0);
+
+  // Stable callback refs to avoid invalidating ChatMessage memo
+  const retryRef = useRef(retryMessage);
+  retryRef.current = retryMessage;
 
   const ensureSession = useCallback(async (): Promise<string | null> => {
     if (currentSessionId) return currentSessionId;
@@ -47,6 +51,7 @@ export default function Chat() {
     initialMsgIdsRef.current = new Set();
     animatedIdsRef.current = new Set();
     lastAnimatedIdRef.current = null;
+    prevMsgCountRef.current = 0;
   }, [currentSessionId]);
 
   useEffect(() => {
@@ -63,9 +68,14 @@ export default function Chat() {
     updateSessionTitle(currentSessionId, title);
   }, [currentSessionId, updateSessionTitle]);
 
+  // Smart scroll: only scroll when message count changes or sending state changes
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, sending]);
+    const currentCount = messages.length;
+    if (currentCount !== prevMsgCountRef.current || sending) {
+      prevMsgCountRef.current = currentCount;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length, sending]);
 
   useEffect(() => {
     if (!currentSessionId || pendingHandled.current) return;
@@ -121,6 +131,11 @@ export default function Chat() {
   const handleSuggestionClick = useCallback((text: string) => {
     handleSend(text);
   }, [handleSend]);
+
+  // Stable retry handler using ref
+  const handleRetry = useCallback((msgId: string) => {
+    retryRef.current(msgId);
+  }, []);
 
   const hasMessages = messages.length > 0;
 
@@ -194,7 +209,7 @@ export default function Chat() {
                     key={message.id}
                     message={message}
                     animate={shouldAnimate}
-                    onRetry={message.status === 'error' ? () => retryMessage(message.id) : undefined}
+                    onRetry={message.status === 'error' ? () => handleRetry(message.id) : undefined}
                     onFollowUp={handleSuggestionClick}
                   />
                 );
@@ -253,7 +268,7 @@ function HeaderButton({ icon: Icon, label, onClick, disabled }: { icon: React.El
   );
 }
 
-function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
+const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submitRef = useRef(false);
@@ -323,4 +338,4 @@ function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<bo
       </div>
     </div>
   );
-}
+});
