@@ -10,9 +10,13 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageTransition } from "@/components/layout/PageTransition";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { LoadingBar } from "@/components/layout/LoadingBar";
+import { FinanceiroSkeleton } from "@/components/layout/FinanceiroSkeleton";
+import { PedidosSkeleton } from "@/components/layout/PedidosSkeleton";
+import { HomeSkeleton } from "@/components/layout/HomeSkeleton";
+import { PageSkeleton } from "@/components/layout/PageSkeleton";
 import { Suspense, lazy } from "react";
 import { AnimatePresence } from "framer-motion";
-import { PageSkeleton } from "@/components/layout/PageSkeleton";
 
 const Auth = lazy(() => import("./pages/Auth"));
 const Home = lazy(() => import("./pages/Home"));
@@ -32,9 +36,17 @@ const ProtectedPage = ({ children }: { children: React.ReactNode }) => (
 
 function AnimatedRoutes() {
   const location = useLocation();
+  
+  const getSkeleton = (path: string) => {
+    if (path === '/') return <HomeSkeleton />;
+    if (path === '/financeiro') return <FinanceiroSkeleton />;
+    if (path === '/pedidos') return <PedidosSkeleton />;
+    return <PageSkeleton />;
+  };
+
   return (
     <AnimatePresence mode="wait">
-      <Suspense fallback={<PageSkeleton />}>
+      <Suspense fallback={getSkeleton(location.pathname)}>
         <Routes location={location} key={location.pathname}>
           <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
           <Route path="/reset-password" element={<PageTransition><ResetPassword /></PageTransition>} />
@@ -56,6 +68,7 @@ const App = () => (
         <AuthProvider>
           <DateFilterProvider>
             <TooltipProvider>
+              <LoadingBar />
               <Toaster />
               <Sonner />
               <BrowserRouter>

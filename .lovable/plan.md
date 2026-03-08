@@ -1,106 +1,51 @@
 
-# Plano — Progress Bar Global + Lazy Loading Estruturado
 
-## Diagnóstico atual
+# Plano — Reestruturar aba Pedidos
 
-Problemas identificados:
-1. **Tela branca total** durante lazy loading (Suspense só mostra PageSkeleton básico)
-2. **Sem feedback visual de progresso** durante fetches de dados (5-10s de espera em "all_time")
-3. **Skeletons genéricos** — cada aba deveria ter skeleton específico que mimetiza o layout real
-4. **Nenhum indicador de loading progressivo** — não fica claro se está carregando ou travado
+## Problema 1: Layout — graficos abaixo da tabela
+Atualmente: KPIs > Tabela > Graficos. O usuario quer: KPIs > Graficos > Tabela.
 
-## Solução proposta
+**Solucao:** Inverter a ordem em `src/pages/Pedidos.tsx` — mover o grid dos graficos para antes do `<OrdersTable />`.
 
-### 1. Progress Bar Global (topo da tela)
-Implementar barra de progresso **fixa no topo** (estilo YouTube/GitHub):
-- Aparece automaticamente durante queries do React Query
-- Usa hooks `onFetch`, `onSuccess`, `onError` do QueryClient
-- Componente: **`LoadingBar`** (reutilizável)
-- Biblioteca sugerida: implementação custom com `framer-motion` (evita dependência extra)
-- Posição: `fixed top-0 left-0 right-0 z-50 h-0.5`
+## Problema 2: Nomes dos clientes sao UUIDs truncados
+A view `vw_dashboard_pedidos` gera `cliente_nome` via `COALESCE(pf.nome || pf.sobrenome, pj.razao_social, 'Cliente #' || left(id, 8))`. As tabelas `is_clientes_pf` e `is_clientes_pj` estao **vazias**, entao TODOS os clientes caem no fallback `Cliente #uuid`.
 
-### 2. Skeletons específicos por aba
-Criar 3 skeletons dedicados em vez do genérico:
+O dado real disponivel e o `email_log` da tabela `is_clientes` (ex: `graficadivinoespiritosanto@gmail.com`). Esse e o unico identificador legivel.
 
-**A) `FinanceiroSkeleton`** — mimetiza layout real:
-```
-┌─────────────────────────────────────────┐
-│ Financeiro               [DateFilter]  │
-├─────────────────────────────────────────┤
-│ [KPI 3 cards]                           │
-│ [Donut Chart] [Bar Chart]              │
-└─────────────────────────────────────────┘
+**Solucao em duas partes:**
+
+### 2a. Atualizar a view SQL
+Alterar `vw_dashboard_pedidos` para fazer JOIN com `is_clientes` e usar `email_log` como fallback antes do UUID:
+
+```sql
+COALESCE(
+  NULLIF(TRIM(pf.nome || ' ' || pf.sobrenome), ''),
+  pj.razao_social,
+  c.email_log,               -- << novo fallback
+  'Cliente #' || left(p.cliente_id::text, 8)
+)
 ```
 
-**B) `PedidosSkeleton`** — layout 4 KPIs + charts + tabela:
-```
-┌─────────────────────────────────────────┐
-│ Pedidos                  [DateFilter]  │
-├─────────────────────────────────────────┤
-│ [KPI 4 cards]                           │
-│ [Donut Chart] [Bar Chart]              │
-│ [Table skeleton]                        │
-└─────────────────────────────────────────┘
-```
+Tambem adicionar `c.email_log` e `c.telefone` como colunas extras na view para o modal de detalhes.
 
-**C) `HomeSkeleton`** — hero + nav cards + KPIs:
-```
-┌─────────────────────────────────────────┐
-│ [Hero title + subtitle]                 │
-│ [3 nav cards horizontais]               │
-│ [3 KPI mini cards]                      │
-│ [Atividade recente lista]              │
-└─────────────────────────────────────────┘
-```
+### 2b. Modal de detalhes do cliente (click no nome)
+Criar `src/components/dashboard/ClienteDetailModal.tsx`:
+- Dialog/Sheet que abre ao clicar no nome do cliente na tabela
+- Busca dados de `is_clientes` pelo `cliente_id`
+- Exibe: email, telefone, celular, tipo (PF/PJ)
+- Lista os pedidos recentes daquele cliente no periodo (ja disponivel nos dados carregados)
 
-### 3. Integração com React Query
-Modificar `App.tsx` para adicionar listener global:
-```tsx
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      onFetch: () => setProgress(true),
-      onSuccess: () => setProgress(false),
-      onError: () => setProgress(false),
-    },
-  },
-});
-```
-
-### 4. Lazy loading progressivo nos componentes de dados
-Cada aba já usa hooks separados (KPIs, gráficos, tabela).
-**Otimização**: renderizar skeletons individuais enquanto cada hook carrega:
-- KPI skeleton → substituído quando `kpisLoading=false`
-- Chart skeleton → substituído quando `chartLoading=false`
-- Evita "tudo branco → tudo de uma vez"
+### 2c. Atualizar OrdersTable
+- Tornar o nome do cliente clicavel (botao/link com hover)
+- Ao clicar, abrir o modal com detalhes
 
 ## Arquivos
 
-| Arquivo | Ação |
+| Arquivo | Acao |
 |---------|------|
-| `src/components/layout/LoadingBar.tsx` | **Criar** — barra de progresso global animada |
-| `src/components/layout/FinanceiroSkeleton.tsx` | **Criar** — skeleton específico layout Financeiro |
-| `src/components/layout/PedidosSkeleton.tsx` | **Criar** — skeleton específico layout Pedidos |
-| `src/components/layout/HomeSkeleton.tsx` | **Criar** — skeleton específico layout Home |
-| `src/App.tsx` | **Editar** — adicionar LoadingBar + mapear Suspense fallbacks específicos |
-| `src/pages/Financeiro.tsx` | **Editar** — envolver em Suspense com FinanceiroSkeleton |
-| `src/pages/Pedidos.tsx` | **Editar** — envolver em Suspense com PedidosSkeleton |
-| `src/pages/Home.tsx` | **Editar** — envolver em Suspense com HomeSkeleton |
+| Migration SQL | Recriar `vw_dashboard_pedidos` com `email_log` como fallback e colunas extras |
+| `src/pages/Pedidos.tsx` | Inverter ordem: graficos antes da tabela |
+| `src/components/dashboard/ClienteDetailModal.tsx` | Novo — modal com info do cliente |
+| `src/components/dashboard/OrdersTable.tsx` | Nome clicavel, abrir modal |
+| `src/hooks/usePedidos.ts` | Atualizar interface `PedidoItem` com novos campos |
 
-## Detalhes técnicos
-
-**LoadingBar**:
-- State global via Context ou zustand (leve)
-- `motion.div` com `initial={{ scaleX: 0 }}`, `animate={{ scaleX: progress }}`, `transition: spring`
-- Cor: `bg-primary` (laranja NBL)
-- Altura: `h-0.5` ou `h-1`
-
-**Skeletons**:
-- Usar componente `Skeleton` existente
-- Adicionar delays escalonados (`animationDelay`) para efeito cascata
-- Classes dark mode já funcionam
-
-**React Query**:
-- Usar `useIsFetching()` do `@tanstack/react-query` para detectar fetches globais
-- Incrementar/decrementar contador de queries ativas
-- Progress bar visível enquanto `fetchingCount > 0`
