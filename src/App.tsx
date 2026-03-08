@@ -10,9 +10,13 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageTransition } from "@/components/layout/PageTransition";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { LoadingBar } from "@/components/layout/LoadingBar";
+import { FinanceiroSkeleton } from "@/components/layout/FinanceiroSkeleton";
+import { PedidosSkeleton } from "@/components/layout/PedidosSkeleton";
+import { HomeSkeleton } from "@/components/layout/HomeSkeleton";
+import { PageSkeleton } from "@/components/layout/PageSkeleton";
 import { Suspense, lazy } from "react";
 import { AnimatePresence } from "framer-motion";
-import { PageSkeleton } from "@/components/layout/PageSkeleton";
 
 const Auth = lazy(() => import("./pages/Auth"));
 const Home = lazy(() => import("./pages/Home"));
