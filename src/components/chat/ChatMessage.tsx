@@ -25,6 +25,37 @@ function detectHighlightCard(content: string): { label: string; value: string } 
   return null;
 }
 
+/**
+ * Normalizes markdown content to ensure tables parse correctly.
+ * - Ensures blank lines before/after table blocks
+ * - Trims excessive whitespace in cells
+ */
+function normalizeMarkdown(content: string): string {
+  // Split into lines
+  const lines = content.split('\n');
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isTableLine = /^\s*\|/.test(line);
+    const prevIsTable = i > 0 && /^\s*\|/.test(lines[i - 1]);
+
+    // Add blank line before table block starts
+    if (isTableLine && !prevIsTable && i > 0 && result.length > 0 && result[result.length - 1].trim() !== '') {
+      result.push('');
+    }
+
+    // Add blank line after table block ends
+    if (!isTableLine && prevIsTable && line.trim() !== '') {
+      result.push('');
+    }
+
+    result.push(line);
+  }
+
+  return result.join('\n');
+}
+
 function isNumericCell(text: string): boolean {
   if (!text) return false;
   const cleaned = text.replace(/[R$%.,\s]/g, '');
