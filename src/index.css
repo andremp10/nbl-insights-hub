@@ -195,6 +195,22 @@
   border-radius: 4px 18px 18px 18px;
 }
 
+/* ── Chat table polish ── */
+.chat-bubble-assistant .chat-table-wrapper {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  max-height: 420px;
+}
+
+.chat-bubble-assistant table {
+  min-width: 400px;
+}
+
+.chat-bubble-assistant td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Focus visible */
 *:focus-visible {
   outline: 2px solid hsl(var(--primary));
