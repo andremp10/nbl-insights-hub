@@ -220,7 +220,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
           </>
         ) : (
           <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-            {message.content}
+            {normalizeMarkdown(message.content)}
           </ReactMarkdown>
         )}
       </div>
