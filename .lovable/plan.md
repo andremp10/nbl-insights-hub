@@ -1,51 +1,51 @@
 
 
-# Plano — Reestruturar aba Pedidos
+# Plano — Corrigir formatacao de tabelas e conteudo no Chat
 
-## Problema 1: Layout — graficos abaixo da tabela
-Atualmente: KPIs > Tabela > Graficos. O usuario quer: KPIs > Graficos > Tabela.
+## Problema
 
-**Solucao:** Inverter a ordem em `src/pages/Pedidos.tsx` — mover o grid dos graficos para antes do `<OrdersTable />`.
+As tabelas markdown das respostas do assistente estao aparecendo como texto bruto (pipes `|` visiveis) em vez de tabelas HTML formatadas. O `ReactMarkdown` com `remarkGfm` deveria parsear as tabelas, mas nao esta funcionando corretamente.
 
-## Problema 2: Nomes dos clientes sao UUIDs truncados
-A view `vw_dashboard_pedidos` gera `cliente_nome` via `COALESCE(pf.nome || pf.sobrenome, pj.razao_social, 'Cliente #' || left(id, 8))`. As tabelas `is_clientes_pf` e `is_clientes_pj` estao **vazias**, entao TODOS os clientes caem no fallback `Cliente #uuid`.
+Alem disso, tabelas com celulas muito longas (descricoes de produtos) ficam ilegíveis dentro do chat bubble.
 
-O dado real disponivel e o `email_log` da tabela `is_clientes` (ex: `graficadivinoespiritosanto@gmail.com`). Esse e o unico identificador legivel.
+## Causa raiz provavel
 
-**Solucao em duas partes:**
+O `remark-gfm` v4 pode ter problemas de carregamento ESM no bundle. Para garantir robustez, vou adicionar:
 
-### 2a. Atualizar a view SQL
-Alterar `vw_dashboard_pedidos` para fazer JOIN com `is_clientes` e usar `email_log` como fallback antes do UUID:
+1. **Pre-processador de conteudo** que normaliza o markdown antes do parsing (garante linhas em branco antes/depois de tabelas)
+2. **Fallback CSS** para caso as tabelas renderizem dentro de `<p>` tags (texto cru com pipes)
+3. **Melhorias visuais** para tabelas longas (scroll horizontal, truncamento de celulas)
 
-```sql
-COALESCE(
-  NULLIF(TRIM(pf.nome || ' ' || pf.sobrenome), ''),
-  pj.razao_social,
-  c.email_log,               -- << novo fallback
-  'Cliente #' || left(p.cliente_id::text, 8)
-)
-```
+## Alteracoes
 
-Tambem adicionar `c.email_log` e `c.telefone` como colunas extras na view para o modal de detalhes.
+### A. `ChatMessage.tsx` — Pre-processar conteudo markdown
 
-### 2b. Modal de detalhes do cliente (click no nome)
-Criar `src/components/dashboard/ClienteDetailModal.tsx`:
-- Dialog/Sheet que abre ao clicar no nome do cliente na tabela
-- Busca dados de `is_clientes` pelo `cliente_id`
-- Exibe: email, telefone, celular, tipo (PF/PJ)
-- Lista os pedidos recentes daquele cliente no periodo (ja disponivel nos dados carregados)
+Criar funcao `normalizeMarkdown(content)` que:
+- Garante linha em branco antes e depois de blocos de tabela (`| ... |`)
+- Remove espacos extras que possam quebrar parsing de tabela
+- Trunca celulas com mais de 80 caracteres (adiciona `...`)
 
-### 2c. Atualizar OrdersTable
-- Tornar o nome do cliente clicavel (botao/link com hover)
-- Ao clicar, abrir o modal com detalhes
+### B. `ChatMessage.tsx` — Melhorar componentes de tabela
+
+- Adicionar `max-width` e `text-overflow: ellipsis` nas celulas `td`
+- Melhorar contraste visual dos headers
+- Adicionar `overflow-x: auto` com scroll suave no container da tabela
+
+### C. `index.css` — Estilos de fallback e polish
+
+- Adicionar estilos para tabelas dentro de `.chat-bubble-assistant`
+- Garantir que tabelas longas tenham scroll horizontal elegante
+- Melhorar espaçamento entre blocos de conteudo (tabelas, paragrafos, headers)
+
+### D. Verificar import do remarkGfm
+
+- Garantir que o plugin esta sendo passado corretamente
+- Adicionar log de debug temporario para confirmar que o plugin esta ativo
 
 ## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| Migration SQL | Recriar `vw_dashboard_pedidos` com `email_log` como fallback e colunas extras |
-| `src/pages/Pedidos.tsx` | Inverter ordem: graficos antes da tabela |
-| `src/components/dashboard/ClienteDetailModal.tsx` | Novo — modal com info do cliente |
-| `src/components/dashboard/OrdersTable.tsx` | Nome clicavel, abrir modal |
-| `src/hooks/usePedidos.ts` | Atualizar interface `PedidoItem` com novos campos |
+| `src/components/chat/ChatMessage.tsx` | Adicionar `normalizeMarkdown`, melhorar componentes de tabela, truncar celulas longas |
+| `src/index.css` | Estilos de polish para tabelas no chat |
 
