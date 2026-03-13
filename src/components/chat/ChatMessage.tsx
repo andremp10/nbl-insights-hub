@@ -65,27 +65,39 @@ function isNumericCell(text: string): boolean {
 /* ── Markdown components (stable ref — no re-creation) ── */
 const markdownComponents = {
   table: ({ children, ...props }: any) => (
-    <div className="my-3 w-full overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm" {...props}>{children}</table>
+    <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-lg border border-border scrollbar-thin">
+      <table className="w-full text-sm border-collapse" {...props}>{children}</table>
     </div>
   ),
   thead: ({ children, ...props }: any) => (
-    <thead className="bg-primary/10 border-b border-border" {...props}>{children}</thead>
+    <thead className="bg-primary/10 border-b border-border sticky top-0" {...props}>{children}</thead>
   ),
   tbody: ({ children, ...props }: any) => (
-    <tbody className="[&_tr:nth-child(even)]:bg-muted/30 [&_tr:last-child]:border-0" {...props}>{children}</tbody>
+    <tbody className="[&_tr:nth-child(even)]:bg-muted/20 [&_tr:last-child]:border-0" {...props}>{children}</tbody>
   ),
   tr: ({ children, ...props }: any) => (
-    <tr className="border-b border-border/50" {...props}>{children}</tr>
+    <tr className="border-b border-border/40 hover:bg-muted/30 transition-colors" {...props}>{children}</tr>
   ),
   th: ({ children, ...props }: any) => (
-    <th className="h-9 px-3 text-left align-middle font-semibold text-muted-foreground text-xs" {...props}>{children}</th>
+    <th className="h-9 px-3 text-left align-middle font-semibold text-muted-foreground text-[11px] uppercase tracking-wider whitespace-nowrap" {...props}>{children}</th>
   ),
   td: ({ children, ...props }: any) => {
     const text = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : '';
-    const numeric = isNumericCell(String(text));
+    const textStr = String(text);
+    const numeric = isNumericCell(textStr);
+    const truncated = !numeric && textStr.length > 80 ? textStr.slice(0, 77) + '…' : null;
     return (
-      <td className={cn("px-3 py-2 align-middle text-sm", numeric && "text-right font-mono tabular-nums")} {...props}>{children}</td>
+      <td
+        className={cn(
+          "px-3 py-2 align-middle text-sm max-w-[280px]",
+          numeric && "text-right font-mono tabular-nums whitespace-nowrap",
+          !numeric && "truncate"
+        )}
+        title={truncated ? textStr : undefined}
+        {...props}
+      >
+        {truncated || children}
+      </td>
     );
   },
   p: ({ children, ...props }: any) => <p className="mb-2 last:mb-0 leading-relaxed" {...props}>{children}</p>,
