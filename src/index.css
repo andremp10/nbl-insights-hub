@@ -57,34 +57,24 @@
   .dark {
     --background: 0 0% 4%;
     --foreground: 0 0% 96%;
-
     --card: 0 0% 7%;
     --card-foreground: 0 0% 96%;
-
     --popover: 0 0% 7%;
     --popover-foreground: 0 0% 96%;
-
     --primary: 18 82% 51%;
     --primary-foreground: 0 0% 100%;
-
     --secondary: 0 0% 11%;
     --secondary-foreground: 0 0% 96%;
-
     --muted: 0 0% 11%;
     --muted-foreground: 0 0% 50%;
-
     --accent: 0 0% 11%;
     --accent-foreground: 0 0% 96%;
-
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-
     --border: 0 0% 12%;
     --input: 0 0% 12%;
     --ring: 18 82% 51%;
-
     --radius: 0.5rem;
-
     --success: 142 71% 45%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
@@ -173,40 +163,79 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CHAT BUBBLE STYLES
+   CHAT MESSAGE STYLES — Flat / Claude-inspired
 ═══════════════════════════════════════════════════════════════════════════ */
 
-.chat-bubble-user {
+/* User message — subtle pill, right-aligned */
+.chat-msg-user {
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
-  border-radius: 18px 18px 4px 18px;
+  border-radius: 20px 20px 4px 20px;
+  padding: 10px 16px;
 }
 
-.chat-bubble-assistant {
-  background: hsl(var(--card));
-  color: hsl(var(--card-foreground));
-  border: 1px solid hsl(var(--border));
-  border-radius: 12px 12px 12px 4px;
+/* Assistant message — no bubble, clean text */
+.chat-msg-assistant {
+  color: hsl(var(--foreground));
 }
 
-.chat-bubble-error {
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--destructive) / 0.4);
-  border-radius: 4px 18px 18px 18px;
+/* Error state */
+.chat-msg-error {
+  border-left: 2px solid hsl(var(--destructive));
+  padding-left: 12px;
+}
+
+/* Fade-in animation (CSS only, no framer-motion) */
+.chat-msg-fade-in {
+  animation: chatFadeIn 0.2s ease-out both;
+}
+
+.chat-msg-animate {
+  animation: chatSlideIn 0.3s ease-out both;
+}
+
+@keyframes chatFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes chatSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Shimmer bar for thinking state */
+.chat-shimmer-bar {
+  width: 120px;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted-foreground) / 0.15) 0%,
+    hsl(var(--primary) / 0.4) 50%,
+    hsl(var(--muted-foreground) / 0.15) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ── Chat table polish ── */
-.chat-bubble-assistant .chat-table-wrapper {
+.chat-msg-assistant .chat-table-wrapper {
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
   max-height: 420px;
 }
 
-.chat-bubble-assistant table {
+.chat-msg-assistant table {
   min-width: 400px;
 }
 
-.chat-bubble-assistant td {
+.chat-msg-assistant td {
   overflow: hidden;
   text-overflow: ellipsis;
 }

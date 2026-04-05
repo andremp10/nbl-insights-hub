@@ -1,8 +1,7 @@
 import { memo, useMemo, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
-import { AlertTriangle, RotateCcw, Bot, Copy, Check, Calendar, Info } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info } from 'lucide-react';
 import { ThinkingBubble } from './ThinkingBubble';
 import { useTypewriter } from '@/hooks/useTypewriter';
 import ReactMarkdown from 'react-markdown';
@@ -25,34 +24,21 @@ function detectHighlightCard(content: string): { label: string; value: string } 
   return null;
 }
 
-/**
- * Normalizes markdown content to ensure tables parse correctly.
- * - Ensures blank lines before/after table blocks
- * - Trims excessive whitespace in cells
- */
 function normalizeMarkdown(content: string): string {
-  // Split into lines
   const lines = content.split('\n');
   const result: string[] = [];
-
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const isTableLine = /^\s*\|/.test(line);
     const prevIsTable = i > 0 && /^\s*\|/.test(lines[i - 1]);
-
-    // Add blank line before table block starts
     if (isTableLine && !prevIsTable && i > 0 && result.length > 0 && result[result.length - 1].trim() !== '') {
       result.push('');
     }
-
-    // Add blank line after table block ends
     if (!isTableLine && prevIsTable && line.trim() !== '') {
       result.push('');
     }
-
     result.push(line);
   }
-
   return result.join('\n');
 }
 
@@ -62,7 +48,7 @@ function isNumericCell(text: string): boolean {
   return /^\d+$/.test(cleaned);
 }
 
-/* ── Markdown components (stable ref — no re-creation) ── */
+/* ── Markdown components (stable ref) ── */
 const markdownComponents = {
   table: ({ children, ...props }: any) => (
     <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-lg border border-border scrollbar-thin">
@@ -151,7 +137,7 @@ interface ChatMessageProps {
   animate?: boolean;
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollowUp, animate = false }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate = false }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const isPending = message.status === 'pending';
   const isError = message.status === 'error';
@@ -159,7 +145,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
   const [hovered, setHovered] = useState(false);
 
   const shouldAnimate = animate && !isUser && !isPending && !isError;
-  const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 6);
+  const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 4);
 
   const highlightCard = useMemo(() => {
     if (isUser || isPending || isError) return null;
@@ -176,13 +162,6 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
 
   if (isPending && !isUser) return <ThinkingBubble />;
 
-  // Use plain div for historical messages (no animation overhead)
-  const Wrapper = animate ? motion.div : 'div';
-  const wrapperProps = animate
-    ? { initial: { opacity: 0, y: 12 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.3 } }
-    : {};
-
-  // During typewriter, render plain text to avoid reparsing markdown ~125x/s
   const renderContent = () => {
     if (isError) {
       return (
@@ -211,9 +190,8 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
     }
 
     return (
-      <div className={cn('text-sm leading-relaxed break-words', isUser ? 'text-primary-foreground' : '')}>
+      <div className="text-sm leading-relaxed break-words">
         {isTyping ? (
-          // Plain text during animation — no markdown parsing overhead
           <>
             <span className="whitespace-pre-wrap">{displayedText}</span>
             <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
@@ -227,49 +205,46 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollo
     );
   };
 
+  if (isUser) {
+    return (
+      <div className="chat-msg-fade-in flex justify-end">
+        <div className="chat-msg-user max-w-[75%]">
+          <p className="text-sm leading-relaxed">{message.content}</p>
+          <span className="block text-[11px] text-primary-foreground/50 mt-1 text-right">{formatTime(message.created_at)}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <Wrapper
-      {...wrapperProps}
-      className={cn('flex gap-3 w-full', isUser ? 'justify-end pl-12' : 'justify-start pr-12')}
+    <div
+      className={cn('chat-msg-fade-in', animate && 'chat-msg-animate')}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {!isUser && (
-        <div className={cn(
-          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mt-1 transition-all duration-200',
-          isError
-            ? 'bg-destructive/10 border border-destructive/30'
-            : 'bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20'
-        )}>
-          {isError ? <AlertTriangle className="h-4 w-4 text-destructive" /> : <Bot className="h-4 w-4 text-primary" />}
+      {/* Label */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs font-semibold text-foreground/70">Assistente NBL</span>
+        <span className="text-[11px] text-muted-foreground/40">{formatTime(message.created_at)}</span>
+      </div>
+
+      {/* Body */}
+      <div className={cn('chat-msg-assistant', isError && 'chat-msg-error')}>
+        {renderContent()}
+      </div>
+
+      {/* Actions */}
+      {!isError && !isPending && message.content && (
+        <div className={cn('flex items-center gap-2 mt-1 transition-opacity duration-150', hovered ? 'opacity-100' : 'opacity-0')}>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+            aria-label="Copiar mensagem"
+          >
+            {copied ? <><Check className="w-3 h-3 text-success" /><span className="text-success">Copiado</span></> : <><Copy className="w-3 h-3" /><span>Copiar</span></>}
+          </button>
         </div>
       )}
-
-      <div className={cn('flex flex-col', isUser ? 'items-end' : 'items-start', isUser ? 'max-w-[75%]' : 'max-w-[85%]')}>
-        <div className={cn(
-          'px-4 py-3 space-y-3',
-          isUser ? 'chat-bubble-user' : isError ? 'chat-bubble-error' : 'chat-bubble-assistant'
-        )}>
-          {renderContent()}
-        </div>
-
-        {/* Footer: time + copy */}
-        <div className="flex items-center gap-2 mt-1 px-1 flex-wrap">
-          <span className="text-[11px] text-muted-foreground/50">{formatTime(message.created_at)}</span>
-          {!isUser && !isError && !isPending && message.content && (
-            <motion.button
-              initial={{ opacity: 0 }}
-              animate={{ opacity: hovered ? 1 : 0 }}
-              transition={{ duration: 0.15 }}
-              onClick={handleCopy}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-              aria-label="Copiar mensagem"
-            >
-              {copied ? <><Check className="w-3 h-3 text-success" /><span className="text-success">Copiado</span></> : <><Copy className="w-3 h-3" /><span>Copiar</span></>}
-            </motion.button>
-          )}
-        </div>
-      </div>
-    </Wrapper>
+    </div>
   );
 });
