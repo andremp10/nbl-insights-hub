@@ -1,51 +1,66 @@
 
 
-# Plano — Reestruturar aba Pedidos
+# Plano — Otimizacao de Performance Geral
 
-## Problema 1: Layout — graficos abaixo da tabela
-Atualmente: KPIs > Tabela > Graficos. O usuario quer: KPIs > Graficos > Tabela.
+## Problemas identificados
 
-**Solucao:** Inverter a ordem em `src/pages/Pedidos.tsx` — mover o grid dos graficos para antes do `<OrdersTable />`.
+### 1. Requisicao com erro 500 na Home
+A Home faz uma query com `is_finalizado=eq.false` na `vw_dashboard_pedidos` que retorna **500**. Essa coluna pode nao existir na view. Isso bloqueia o KPI de "Atrasados" e gera erro silencioso.
 
-## Problema 2: Nomes dos clientes sao UUIDs truncados
-A view `vw_dashboard_pedidos` gera `cliente_nome` via `COALESCE(pf.nome || pf.sobrenome, pj.razao_social, 'Cliente #' || left(id, 8))`. As tabelas `is_clientes_pf` e `is_clientes_pj` estao **vazias**, entao TODOS os clientes caem no fallback `Cliente #uuid`.
+### 2. Triple fetch de `app_users` no auth
+O `AuthContext` faz `fetchAppUser` tanto no `onAuthStateChange` quanto no `getSession`, resultando em **3 chamadas identicas** de `app_users` a cada load (visivel nos network requests). Deveria fazer apenas 1.
 
-O dado real disponivel e o `email_log` da tabela `is_clientes` (ex: `graficadivinoespiritosanto@gmail.com`). Esse e o unico identificador legivel.
+### 3. Home faz queries diretas sem React Query
+A pagina Home usa `useEffect` + `supabase` direto, sem cache. Toda vez que o usuario navega de volta para Home, todas as 4 queries sao refeitas do zero. Deveria usar React Query com `staleTime` como Financeiro/Pedidos.
 
-**Solucao em duas partes:**
+### 4. Supabase limit de 1000 rows nos Pedidos
+`usePedidosData` faz `select('*')` na `vw_dashboard_pedidos` sem limit. Com ~85K pedidos no historico, mesmo com filtro `this_month`, o Supabase retorna no maximo 1000 rows. Para meses com muitos pedidos, dados ficam incompletos. Para KPIs e charts, o ideal seria usar RPCs server-side (como o financeiro ja faz).
 
-### 2a. Atualizar a view SQL
-Alterar `vw_dashboard_pedidos` para fazer JOIN com `is_clientes` e usar `email_log` como fallback antes do UUID:
+### 5. ProtectedRoute retorna `null` durante loading
+Enquanto auth carrega, `ProtectedRoute` retorna `null` — tela completamente branca. Deveria mostrar o skeleton da pagina.
 
-```sql
-COALESCE(
-  NULLIF(TRIM(pf.nome || ' ' || pf.sobrenome), ''),
-  pj.razao_social,
-  c.email_log,               -- << novo fallback
-  'Cliente #' || left(p.cliente_id::text, 8)
-)
-```
+### 6. Framer Motion em todos os wrappers de mensagem
+No Chat, cada `ChatMessage` usa `motion.div` como wrapper mesmo quando `animate=false`. Ja esta otimizado no codigo atual (usa `'div'` quando nao anima) — OK.
 
-Tambem adicionar `c.email_log` e `c.telefone` como colunas extras na view para o modal de detalhes.
+## Solucoes propostas
 
-### 2b. Modal de detalhes do cliente (click no nome)
-Criar `src/components/dashboard/ClienteDetailModal.tsx`:
-- Dialog/Sheet que abre ao clicar no nome do cliente na tabela
-- Busca dados de `is_clientes` pelo `cliente_id`
-- Exibe: email, telefone, celular, tipo (PF/PJ)
-- Lista os pedidos recentes daquele cliente no periodo (ja disponivel nos dados carregados)
+### A. Corrigir query de atrasados na Home (erro 500)
+**Arquivo:** `src/pages/Home.tsx`
 
-### 2c. Atualizar OrdersTable
-- Tornar o nome do cliente clicavel (botao/link com hover)
-- Ao clicar, abrir o modal com detalhes
+A query `eq('is_finalizado', false)` esta falhando. Remover essa query ou usar uma abordagem diferente:
+- Filtrar atrasados diretamente com `eq('is_atrasado', true)` sem o filtro `is_finalizado`
+- Ou envolver em try/catch individual para nao bloquear os outros KPIs
 
-## Arquivos
+### B. Eliminar fetch duplicado de `app_users`
+**Arquivo:** `src/contexts/AuthContext.tsx`
+
+O `onAuthStateChange` ja dispara com a sessao inicial. Remover o `getSession().then(...)` duplicado e confiar apenas no listener. Isso elimina 2 das 3 chamadas a `app_users`.
+
+### C. Migrar Home para React Query
+**Arquivo:** `src/pages/Home.tsx`
+
+Criar hooks `useHomeKPIs()` e `useRecentOrders()` usando React Query com:
+- `staleTime: 5 * 60 * 1000`
+- `placeholderData: keepPreviousData`
+
+Isso garante cache entre navegacoes e elimina refetches desnecessarios.
+
+### D. Mostrar skeleton no ProtectedRoute durante loading
+**Arquivo:** `src/components/auth/ProtectedRoute.tsx`
+
+Em vez de retornar `null`, retornar o `PageSkeleton` generico para eliminar a tela branca durante verificacao de auth.
+
+### E. Adicionar limite seguro nos Pedidos
+**Arquivo:** `src/hooks/usePedidos.ts`
+
+Adicionar `.limit(1000)` explicito na query de `usePedidosData` para documentar a limitacao. Idealmente, criar uma RPC `get_pedidos_kpis` no servidor (como ja existe para financeiro) para agregar server-side sem transferir 1000 rows.
+
+## Resumo de arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| Migration SQL | Recriar `vw_dashboard_pedidos` com `email_log` como fallback e colunas extras |
-| `src/pages/Pedidos.tsx` | Inverter ordem: graficos antes da tabela |
-| `src/components/dashboard/ClienteDetailModal.tsx` | Novo — modal com info do cliente |
-| `src/components/dashboard/OrdersTable.tsx` | Nome clicavel, abrir modal |
-| `src/hooks/usePedidos.ts` | Atualizar interface `PedidoItem` com novos campos |
+| `src/contexts/AuthContext.tsx` | Eliminar fetch duplicado de app_users |
+| `src/pages/Home.tsx` | Migrar para React Query + corrigir query is_finalizado |
+| `src/components/auth/ProtectedRoute.tsx` | Mostrar skeleton em vez de null durante loading |
+| `src/hooks/usePedidos.ts` | Adicionar limit explicito |
 
