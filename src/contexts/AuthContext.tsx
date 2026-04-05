@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -28,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const fetchedUserIdRef = useRef<string | null>(null);
 
   const fetchAppUser = async (authUserId: string): Promise<AppUser | null> => {
     const { data, error } = await supabase
@@ -40,47 +41,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data as AppUser;
   };
 
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+  const handleSession = async (newSession: Session | null) => {
+    setSession(newSession);
+    setUser(newSession?.user ?? null);
 
-      if (session?.user) {
-        // Use setTimeout to avoid Supabase client deadlock
-        setTimeout(async () => {
-          const appUserData = await fetchAppUser(session.user.id);
-          if (!appUserData || appUserData.status !== 'active') {
-            setAppUser(null);
-            await supabase.auth.signOut();
-            setSession(null);
-            setUser(null);
-          } else {
-            setAppUser(appUserData);
-          }
-          setLoading(false);
-        }, 0);
-      } else {
-        setAppUser(null);
+    if (newSession?.user) {
+      // Skip if we already fetched for this user
+      if (fetchedUserIdRef.current === newSession.user.id) {
         setLoading(false);
+        return;
       }
+      fetchedUserIdRef.current = newSession.user.id;
+
+      const appUserData = await fetchAppUser(newSession.user.id);
+      if (!appUserData || appUserData.status !== 'active') {
+        setAppUser(null);
+        fetchedUserIdRef.current = null;
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+      } else {
+        setAppUser(appUserData);
+      }
+    } else {
+      setAppUser(null);
+      fetchedUserIdRef.current = null;
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleSession(session);
     });
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-
-      if (session?.user) {
-        const appUserData = await fetchAppUser(session.user.id);
-        if (!appUserData || appUserData.status !== 'active') {
-          setAppUser(null);
-          await supabase.auth.signOut();
-          setSession(null);
-          setUser(null);
-        } else {
-          setAppUser(appUserData);
-        }
-      }
-      setLoading(false);
+    // Listen for changes (sign in, sign out, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      handleSession(session);
     });
 
     return () => subscription.unsubscribe();
@@ -89,8 +87,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
-
-    // Role check happens in onAuthStateChange
     return { error: null };
   };
 
@@ -102,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    fetchedUserIdRef.current = null;
     await supabase.auth.signOut();
   };
 
