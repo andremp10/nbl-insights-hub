@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 
 /**
- * Reveals text progressively, character by character.
- * Optimized: larger chunks (up to 12) and batched updates for fluid feel.
+ * Reveals text progressively with larger chunks for fluidity.
  */
 export function useTypewriter(
   fullText: string,
   enabled: boolean,
-  speed: number = 6,
+  speed: number = 4,
 ): { displayedText: string; isTyping: boolean } {
   const [displayedText, setDisplayedText] = useState(enabled ? '' : fullText);
   const [isTyping, setIsTyping] = useState(enabled && fullText.length > 0);
@@ -34,7 +33,7 @@ export function useTypewriter(
       if (elapsed >= speed) {
         const charsToAdd = Math.min(
           Math.ceil(elapsed / speed),
-          12,
+          24,
           fullText.length - indexRef.current,
         );
         indexRef.current += charsToAdd;

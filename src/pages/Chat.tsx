@@ -1,6 +1,5 @@
 import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { ArrowUp, Loader2, Bot, Plus } from 'lucide-react';
-import { motion } from 'framer-motion';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar } from '@/components/chat/SessionsSidebar';
@@ -173,7 +172,7 @@ export default function Chat() {
         loading={sessionsLoading}
       />
 
-      <div className="flex flex-col flex-1 min-w-0 auth-grid-bg">
+      <div className="flex flex-col flex-1 min-w-0">
         {/* ── Header fixo ── */}
         <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-2.5 border-b border-border bg-background sticky top-0 z-10">
           <div className="flex items-center gap-2.5">
@@ -198,7 +197,7 @@ export default function Chat() {
           ) : !hasMessages && !sending ? (
             <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
           ) : (
-            <div className="w-full max-w-[860px] mx-auto px-4 md:px-8 py-8 space-y-6">
+            <div className="w-full max-w-[860px] mx-auto px-4 md:px-8 py-6 space-y-5">
               {messages.map((message) => {
                 const shouldAnimate = message.id === animateId;
                 if (!shouldAnimate && lastAnimatedIdRef.current === message.id && message.status === 'complete') {
@@ -320,20 +319,19 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             style={{ minHeight: '40px', maxHeight: '120px' }}
             aria-label="Campo de mensagem"
           />
-          <motion.button
+          <button
             onClick={handleSubmit}
             disabled={!canSend}
             aria-label="Enviar mensagem"
-            whileTap={canSend ? { scale: 0.92 } : {}}
             className={cn(
-              'absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200',
+              'absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 active:scale-95',
               canSend
                 ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
                 : 'bg-muted-foreground/20 text-muted-foreground cursor-not-allowed'
             )}
           >
             {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
-          </motion.button>
+          </button>
         </div>
       </div>
     </div>
