@@ -125,6 +125,7 @@ export type Database = {
           celular: string | null
           created_at: string
           email_log: string
+          erp_id: number | null
           id: string
           ip: string | null
           logotipo: string | null
@@ -145,6 +146,7 @@ export type Database = {
           celular?: string | null
           created_at?: string
           email_log: string
+          erp_id?: number | null
           id?: string
           ip?: string | null
           logotipo?: string | null
@@ -165,6 +167,7 @@ export type Database = {
           celular?: string | null
           created_at?: string
           email_log?: string
+          erp_id?: number | null
           id?: string
           ip?: string | null
           logotipo?: string | null
@@ -537,6 +540,7 @@ export type Database = {
           complemento: string | null
           cpf: string | null
           demissao: string | null
+          erp_id: number | null
           estado: string | null
           id: string
           logradouro: string | null
@@ -563,6 +567,7 @@ export type Database = {
           complemento?: string | null
           cpf?: string | null
           demissao?: string | null
+          erp_id?: number | null
           estado?: string | null
           id?: string
           logradouro?: string | null
@@ -589,6 +594,7 @@ export type Database = {
           complemento?: string | null
           cpf?: string | null
           demissao?: string | null
+          erp_id?: number | null
           estado?: string | null
           id?: string
           logradouro?: string | null
@@ -623,6 +629,7 @@ export type Database = {
           data_emissao: string | null
           data_pagto: string | null
           descricao: string | null
+          erp_id: number | null
           fornecedor_id: string | null
           funcionario_id: string | null
           id: string
@@ -652,6 +659,7 @@ export type Database = {
           data_emissao?: string | null
           data_pagto?: string | null
           descricao?: string | null
+          erp_id?: number | null
           fornecedor_id?: string | null
           funcionario_id?: string | null
           id?: string
@@ -681,6 +689,7 @@ export type Database = {
           data_emissao?: string | null
           data_pagto?: string | null
           descricao?: string | null
+          erp_id?: number | null
           fornecedor_id?: string | null
           funcionario_id?: string | null
           id?: string
@@ -832,6 +841,7 @@ export type Database = {
           desconto: number
           desconto_uso: number
           devolucao_completa: boolean
+          erp_id: number | null
           frete_balcao_id: string | null
           frete_endereco_id: string | null
           frete_rastreio: string | null
@@ -857,6 +867,7 @@ export type Database = {
           desconto?: number
           desconto_uso?: number
           devolucao_completa?: boolean
+          erp_id?: number | null
           frete_balcao_id?: string | null
           frete_endereco_id?: string | null
           frete_rastreio?: string | null
@@ -882,6 +893,7 @@ export type Database = {
           desconto?: number
           desconto_uso?: number
           devolucao_completa?: boolean
+          erp_id?: number | null
           frete_balcao_id?: string | null
           frete_endereco_id?: string | null
           frete_rastreio?: string | null
@@ -1032,6 +1044,7 @@ export type Database = {
       is_pedidos_historico: {
         Row: {
           created_at: string
+          erp_id: number | null
           id: string
           item_id: string | null
           obs: string | null
@@ -1041,6 +1054,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          erp_id?: number | null
           id?: string
           item_id?: string | null
           obs?: string | null
@@ -1050,6 +1064,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          erp_id?: number | null
           id?: string
           item_id?: string | null
           obs?: string | null
@@ -1108,6 +1123,7 @@ export type Database = {
           created_at: string
           data_modificado: string | null
           descricao: string | null
+          erp_id: number | null
           formato: string | null
           formato_detalhes: string | null
           ftp: string | null
@@ -1142,6 +1158,7 @@ export type Database = {
           created_at?: string
           data_modificado?: string | null
           descricao?: string | null
+          erp_id?: number | null
           formato?: string | null
           formato_detalhes?: string | null
           ftp?: string | null
@@ -1176,6 +1193,7 @@ export type Database = {
           created_at?: string
           data_modificado?: string | null
           descricao?: string | null
+          erp_id?: number | null
           formato?: string | null
           formato_detalhes?: string | null
           ftp?: string | null
@@ -1307,6 +1325,7 @@ export type Database = {
           cliente_id: string
           condicao: string | null
           created_at: string
+          erp_id: number | null
           forma: string
           id: string
           link: string | null
@@ -1331,6 +1350,7 @@ export type Database = {
           cliente_id: string
           condicao?: string | null
           created_at?: string
+          erp_id?: number | null
           forma: string
           id?: string
           link?: string | null
@@ -1355,6 +1375,7 @@ export type Database = {
           cliente_id?: string
           condicao?: string | null
           created_at?: string
+          erp_id?: number | null
           forma?: string
           id?: string
           link?: string | null
@@ -1441,6 +1462,7 @@ export type Database = {
           descricao_curta: string | null
           descricao_html: string | null
           entrega: string | null
+          erp_id: number | null
           estoque_condicao: string | null
           estoque_controlar: boolean
           estoque_qtde: number
@@ -1487,6 +1509,7 @@ export type Database = {
           descricao_curta?: string | null
           descricao_html?: string | null
           entrega?: string | null
+          erp_id?: number | null
           estoque_condicao?: string | null
           estoque_controlar?: boolean
           estoque_qtde?: number
@@ -1533,6 +1556,7 @@ export type Database = {
           descricao_curta?: string | null
           descricao_html?: string | null
           entrega?: string | null
+          erp_id?: number | null
           estoque_condicao?: string | null
           estoque_controlar?: boolean
           estoque_qtde?: number
@@ -1828,6 +1852,24 @@ export type Database = {
           },
         ]
       }
+      n8n_chat_histories: {
+        Row: {
+          id: number
+          message: Json
+          session_id: string
+        }
+        Insert: {
+          id?: number
+          message: Json
+          session_id: string
+        }
+        Update: {
+          id?: number
+          message?: Json
+          session_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       v_pedidos_entregas: {
@@ -1909,6 +1951,23 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      vw_schema_llm_guide: {
+        Row: {
+          approx_rows: number | null
+          column_comment: string | null
+          column_name: unknown
+          data_type: string | null
+          default_value: string | null
+          fk_references_column: unknown
+          fk_references_table: unknown
+          is_primary_key: boolean | null
+          nullable: string | null
+          ordinal_position: number | null
+          table_comment: string | null
+          table_name: unknown
+        }
+        Relationships: []
       }
     }
     Functions: {
