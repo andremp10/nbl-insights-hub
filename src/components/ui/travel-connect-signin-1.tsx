@@ -107,15 +107,32 @@ const DotMap = () => {
       });
     }
 
-    function animate() {
+    let lastFrame = 0;
+    const frameBudget = 1000 / 15; // ~15 FPS
+    let stopped = false;
+
+    function animate(timestamp: number) {
+      if (stopped) return;
+      if (timestamp - lastFrame < frameBudget) {
+        animationFrameId = requestAnimationFrame(animate);
+        return;
+      }
+      lastFrame = timestamp;
       drawDots();
       drawRoutes();
       const currentTime = (Date.now() - startTime) / 1000;
       if (currentTime > 15) startTime = Date.now();
       animationFrameId = requestAnimationFrame(animate);
     }
-    animate();
-    return () => cancelAnimationFrame(animationFrameId);
+    animationFrameId = requestAnimationFrame(animate);
+
+    // Stop after 20s — routes complete, dots are static
+    const stopTimer = setTimeout(() => { stopped = true; }, 20000);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      clearTimeout(stopTimer);
+    };
   }, [dimensions]);
 
   return (

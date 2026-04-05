@@ -16,7 +16,6 @@ import { PedidosSkeleton } from "@/components/layout/PedidosSkeleton";
 import { HomeSkeleton } from "@/components/layout/HomeSkeleton";
 import { PageSkeleton } from "@/components/layout/PageSkeleton";
 import { Suspense, lazy } from "react";
-import { AnimatePresence } from "framer-motion";
 
 const Auth = lazy(() => import("./pages/Auth"));
 const Home = lazy(() => import("./pages/Home"));
@@ -26,7 +25,14 @@ const Pedidos = lazy(() => import("./pages/Pedidos"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 2 * 60 * 1000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const ProtectedPage = ({ children }: { children: React.ReactNode }) => (
   <ProtectedRoute>
@@ -45,19 +51,17 @@ function AnimatedRoutes() {
   };
 
   return (
-    <AnimatePresence mode="wait">
-      <Suspense fallback={getSkeleton(location.pathname)}>
-        <Routes location={location} key={location.pathname}>
-          <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
-          <Route path="/reset-password" element={<PageTransition><ResetPassword /></PageTransition>} />
-          <Route path="/" element={<ProtectedPage><PageTransition><Home /></PageTransition></ProtectedPage>} />
-          <Route path="/chat" element={<ProtectedPage><PageTransition><Chat /></PageTransition></ProtectedPage>} />
-          <Route path="/financeiro" element={<ProtectedPage><PageTransition><Financeiro /></PageTransition></ProtectedPage>} />
-          <Route path="/pedidos" element={<ProtectedPage><PageTransition><Pedidos /></PageTransition></ProtectedPage>} />
-          <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
-        </Routes>
-      </Suspense>
-    </AnimatePresence>
+    <Suspense fallback={getSkeleton(location.pathname)}>
+      <Routes location={location}>
+        <Route path="/auth" element={<PageTransition><Auth /></PageTransition>} />
+        <Route path="/reset-password" element={<PageTransition><ResetPassword /></PageTransition>} />
+        <Route path="/" element={<ProtectedPage><PageTransition><Home /></PageTransition></ProtectedPage>} />
+        <Route path="/chat" element={<ProtectedPage><PageTransition><Chat /></PageTransition></ProtectedPage>} />
+        <Route path="/financeiro" element={<ProtectedPage><PageTransition><Financeiro /></PageTransition></ProtectedPage>} />
+        <Route path="/pedidos" element={<ProtectedPage><PageTransition><Pedidos /></PageTransition></ProtectedPage>} />
+        <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
+      </Routes>
+    </Suspense>
   );
 }
 
