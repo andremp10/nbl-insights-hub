@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { motion } from 'framer-motion';
 import { useHomeKPIs, useRecentOrders } from '@/hooks/useHomeData';
 
 function formatCurrency(v: number): string {
@@ -65,12 +64,7 @@ export default function Home() {
       <div className="max-w-4xl mx-auto px-4 md:px-8">
 
         {/* ── Hero Institucional ── */}
-        <motion.section
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35 }}
-          className="pt-10 pb-6 md:pt-16 md:pb-8"
-        >
+        <section className="pt-10 pb-6 md:pt-16 md:pb-8 animate-page-in">
           <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight leading-tight">
             Bem-vindo à plataforma de inteligência da NBL
           </h1>
@@ -91,14 +85,10 @@ export default function Home() {
               Ver Financeiro
             </Button>
           </div>
-        </motion.section>
+        </section>
 
         {/* ── Cards de Navegação ── */}
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.08 }}
-        >
+        <section className="animate-page-in" style={{ animationDelay: '50ms' }}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {NAV_CARDS.map((card) => {
               const Icon = card.icon;
@@ -125,15 +115,10 @@ export default function Home() {
               );
             })}
           </div>
-        </motion.section>
+        </section>
 
         {/* ── KPIs Discretos ── */}
-        <motion.section
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.35, delay: 0.14 }}
-          className="mt-8"
-        >
+        <section className="mt-8 animate-page-in" style={{ animationDelay: '100ms' }}>
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">
             Indicadores do mês
           </p>
@@ -165,15 +150,10 @@ export default function Home() {
               </p>
             </div>
           )}
-        </motion.section>
+        </section>
 
         {/* ── Atividade Recente ── */}
-        <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.2 }}
-          className="mt-8 pb-12"
-        >
+        <section className="mt-8 pb-12 animate-page-in" style={{ animationDelay: '150ms' }}>
           <div className="rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between px-5 pt-4 pb-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -236,7 +216,7 @@ export default function Home() {
               )}
             </div>
           </div>
-        </motion.section>
+        </section>
 
       </div>
     </div>

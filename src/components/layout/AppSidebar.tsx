@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { LayoutDashboard, Bot, Wallet, PackageSearch, LogOut, Printer, UserPlus } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { CreateUserModal } from '@/components/admin/CreateUserModal';
@@ -93,10 +92,8 @@ export function AppSidebar() {
                           )}
                         >
                           {active && !collapsed && (
-                            <motion.div
-                              layoutId="activeIndicator"
-                              className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-full"
-                              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                            <div
+                              className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-full transition-all duration-200"
                             />
                           )}
                           <item.icon className={cn("h-[18px] w-[18px] shrink-0", active && "text-primary")} />
