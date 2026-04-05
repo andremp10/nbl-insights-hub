@@ -54,7 +54,8 @@ export function usePedidosData() {
         .select('*')
         .gte('data_criacao', fromDate)
         .lte('data_criacao', toDate + 'T23:59:59')
-        .order('data_criacao', { ascending: false });
+        .order('data_criacao', { ascending: false })
+        .limit(1000);
 
       if (error) throw error;
       return (data || []) as PedidoItem[];

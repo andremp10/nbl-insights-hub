@@ -1,14 +1,13 @@
-import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Bot, Wallet, PackageSearch, Package, TrendingUp, AlertTriangle, ShoppingBag } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { motion } from 'framer-motion';
+import { useHomeKPIs, useRecentOrders } from '@/hooks/useHomeData';
 
 function formatCurrency(v: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
@@ -16,21 +15,6 @@ function formatCurrency(v: number): string {
 
 function getInitials(name: string): string {
   return name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-}
-
-interface HomeKpis {
-  totalPedidos: number | null;
-  atrasados: number | null;
-  resultado: number | null;
-}
-
-interface RecentOrder {
-  pedido_id: string;
-  cliente_nome: string | null;
-  data_criacao: string;
-  valor_total: number;
-  status_pedido: string;
-  is_atrasado: boolean;
 }
 
 const NAV_CARDS = [
@@ -65,49 +49,13 @@ const NAV_CARDS = [
 
 export default function Home() {
   const navigate = useNavigate();
-  const [kpis, setKpis] = useState<HomeKpis>({ totalPedidos: null, atrasados: null, resultado: null });
-  const [kpisLoading, setKpisLoading] = useState(true);
-  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
-  const [recentLoading, setRecentLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const today = new Date();
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-
-        const [finRes, pedRes, atrasRes, recentRes] = await Promise.all([
-          supabase.rpc('get_financeiro_kpis', { p_data_inicio: startOfMonth, p_data_fim: endOfMonth }),
-          supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).gte('data_criacao', startOfMonth).lte('data_criacao', endOfMonth + 'T23:59:59'),
-          supabase.from('vw_dashboard_pedidos').select('pedido_id', { count: 'exact', head: true }).eq('is_atrasado', true).eq('is_finalizado', false),
-          supabase.from('vw_dashboard_pedidos').select('pedido_id, cliente_nome, data_criacao, valor_total, status_pedido, is_atrasado').order('data_criacao', { ascending: false }).limit(4),
-        ]);
-
-        const finRow = Array.isArray(finRes.data) ? finRes.data[0] : finRes.data;
-        const receita = Number(finRow?.receita || 0);
-        const despesa = Number(finRow?.despesa || 0);
-
-        setKpis({
-          totalPedidos: pedRes.count ?? 0,
-          atrasados: atrasRes.count ?? 0,
-          resultado: receita - despesa,
-        });
-        setRecentOrders((recentRes.data || []) as RecentOrder[]);
-      } catch {
-        // KPIs são opcionais na home
-      } finally {
-        setKpisLoading(false);
-        setRecentLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+  const { data: kpis, isLoading: kpisLoading } = useHomeKPIs();
+  const { data: recentOrders = [], isLoading: recentLoading } = useRecentOrders();
 
   const kpiItems = [
-    { label: 'Pedidos em aberto', value: kpis.totalPedidos, format: (v: number) => v.toString(), icon: ShoppingBag, color: 'text-info' },
-    { label: 'Atrasados', value: kpis.atrasados, format: (v: number) => v.toString(), icon: AlertTriangle, color: 'text-warning' },
-    { label: 'Resultado do mês', value: kpis.resultado, format: formatCurrency, icon: TrendingUp, color: kpis.resultado !== null && kpis.resultado >= 0 ? 'text-success' : 'text-destructive' },
+    { label: 'Pedidos em aberto', value: kpis?.totalPedidos ?? null, format: (v: number) => v.toString(), icon: ShoppingBag, color: 'text-info' },
+    { label: 'Atrasados', value: kpis?.atrasados ?? null, format: (v: number) => v.toString(), icon: AlertTriangle, color: 'text-warning' },
+    { label: 'Resultado do mês', value: kpis?.resultado ?? null, format: formatCurrency, icon: TrendingUp, color: kpis && kpis.resultado >= 0 ? 'text-success' : 'text-destructive' },
   ];
 
   const hasKpiData = kpiItems.some(k => k.value !== null && k.value !== 0) || kpisLoading;
