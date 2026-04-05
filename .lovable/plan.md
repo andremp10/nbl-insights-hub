@@ -1,66 +1,88 @@
 
 
-# Plano — Otimizacao de Performance Geral
+# Plano — Chat Profissional (Inspirado no Claude/ChatGPT)
 
-## Problemas identificados
+## Problemas Identificados
 
-### 1. Requisicao com erro 500 na Home
-A Home faz uma query com `is_finalizado=eq.false` na `vw_dashboard_pedidos` que retorna **500**. Essa coluna pode nao existir na view. Isso bloqueia o KPI de "Atrasados" e gera erro silencioso.
+### Performance
+1. **Framer Motion em todas as mensagens**: Cada `ChatMessage` usa `motion.div` com animacoes de entrada (`opacity`, `y`), causando re-renders constantes — visivel no session replay com centenas de mutacoes de `transform` por segundo
+2. **Typewriter + RAF**: O hook `useTypewriter` dispara `setDisplayedText` a cada ~6ms, forcando re-render do componente inteiro incluindo markdown components e icones
+3. **`markdownComponents` objeto recriado**: Apesar de estar fora do componente, cada `ChatMessage` monta um novo JSX tree com muitos componentes customizados
 
-### 2. Triple fetch de `app_users` no auth
-O `AuthContext` faz `fetchAppUser` tanto no `onAuthStateChange` quanto no `getSession`, resultando em **3 chamadas identicas** de `app_users` a cada load (visivel nos network requests). Deveria fazer apenas 1.
+### Visual/UX (vs Claude/ChatGPT)
+1. **Bolhas pesadas**: Bubbles com bordas arredondadas exageradas (18px) e fundo laranja forte parecem WhatsApp, nao um agente profissional
+2. **Avatar redundante**: Bot icon em cada mensagem ocupa espaco e nao agrega — Claude e ChatGPT nao usam avatares por mensagem
+3. **Espacamento excessivo**: `space-y-6` entre mensagens cria gaps desnecessarios
+4. **ThinkingBubble basico**: Dots animados com frases rotativas parecem amadores vs o streaming progressivo do Claude
+5. **Sem separacao visual clara**: User e assistant messages muito parecidas em peso visual
+6. **Fundo grid no chat**: O `auth-grid-bg` no corpo do chat adiciona ruido visual
 
-### 3. Home faz queries diretas sem React Query
-A pagina Home usa `useEffect` + `supabase` direto, sem cache. Toda vez que o usuario navega de volta para Home, todas as 4 queries sao refeitas do zero. Deveria usar React Query com `staleTime` como Financeiro/Pedidos.
+## Solucao Proposta
 
-### 4. Supabase limit de 1000 rows nos Pedidos
-`usePedidosData` faz `select('*')` na `vw_dashboard_pedidos` sem limit. Com ~85K pedidos no historico, mesmo com filtro `this_month`, o Supabase retorna no maximo 1000 rows. Para meses com muitos pedidos, dados ficam incompletos. Para KPIs e charts, o ideal seria usar RPCs server-side (como o financeiro ja faz).
+### A. Layout Claude-style (sem bolhas)
 
-### 5. ProtectedRoute retorna `null` durante loading
-Enquanto auth carrega, `ProtectedRoute` retorna `null` — tela completamente branca. Deveria mostrar o skeleton da pagina.
+Substituir o modelo de "bolhas de chat" por layout limpo:
 
-### 6. Framer Motion em todos os wrappers de mensagem
-No Chat, cada `ChatMessage` usa `motion.div` como wrapper mesmo quando `animate=false`. Ja esta otimizado no codigo atual (usa `'div'` quando nao anima) — OK.
+```text
+┌──────────────────────────────────────────┐
+│  Você                                     │
+│  Qual o faturamento do mês?              │
+│                                           │
+│  ─────────────────────────────────────── │
+│                                           │
+│  Assistente NBL                           │
+│  O faturamento total do mês de abril...  │
+│  | Categoria | Valor |                   │
+│  | Insumos   | R$ 12.000 |              │
+│                                           │
+│  _Período: 01/04 a 05/04_               │
+└──────────────────────────────────────────┘
+```
 
-## Solucoes propostas
+- **User messages**: Label "Voce" + texto simples, sem fundo colorido
+- **Assistant messages**: Label "Assistente NBL" + texto fluido, sem borda/bubble
+- **Separador sutil** entre mensagens (border-b fino ou espacamento)
+- **Sem avatares** por mensagem (limpo como Claude)
 
-### A. Corrigir query de atrasados na Home (erro 500)
-**Arquivo:** `src/pages/Home.tsx`
+### B. Otimizacao de Performance
 
-A query `eq('is_finalizado', false)` esta falhando. Remover essa query ou usar uma abordagem diferente:
-- Filtrar atrasados diretamente com `eq('is_atrasado', true)` sem o filtro `is_finalizado`
-- Ou envolver em try/catch individual para nao bloquear os outros KPIs
+1. **Remover framer-motion do ChatMessage**: Usar CSS `@keyframes` para fade-in leve (apenas na ultima mensagem), eliminando o overhead do motion runtime
+2. **Typewriter mais eficiente**: Aumentar chunk size para 20+ chars e reduzir re-renders usando `useRef` + DOM manipulation direta em vez de `setState`
+3. **Lazy markdown parsing**: So parsear markdown apos typewriter completar (ja faz isso, manter)
+4. **Remover motion.div do Wrapper**: Usar `<div>` com classe CSS condicional
 
-### B. Eliminar fetch duplicado de `app_users`
-**Arquivo:** `src/contexts/AuthContext.tsx`
+### C. ThinkingBubble Profissional
 
-O `onAuthStateChange` ja dispara com a sessao inicial. Remover o `getSession().then(...)` duplicado e confiar apenas no listener. Isso elimina 2 das 3 chamadas a `app_users`.
+Substituir os dots por um indicador estilo Claude:
+- Barra horizontal animada (shimmer) com texto "Analisando..."
+- Sem rotacao de frases (distrai)
+- Animacao CSS pura (sem framer-motion)
 
-### C. Migrar Home para React Query
-**Arquivo:** `src/pages/Home.tsx`
+### D. Composer Refinado
 
-Criar hooks `useHomeKPIs()` e `useRecentOrders()` usando React Query com:
-- `staleTime: 5 * 60 * 1000`
-- `placeholderData: keepPreviousData`
+- Remover `motion.button` do botao de envio (usar CSS transitions)
+- Manter o design pill atual que ja esta bom
 
-Isso garante cache entre navegacoes e elimina refetches desnecessarios.
+### E. CSS Clean-up
 
-### D. Mostrar skeleton no ProtectedRoute durante loading
-**Arquivo:** `src/components/auth/ProtectedRoute.tsx`
+- Remover `.chat-bubble-user`, `.chat-bubble-assistant`, `.chat-bubble-error`
+- Adicionar classes novas para o layout flat
+- Remover `auth-grid-bg` do corpo do chat (fundo limpo)
 
-Em vez de retornar `null`, retornar o `PageSkeleton` generico para eliminar a tela branca durante verificacao de auth.
-
-### E. Adicionar limite seguro nos Pedidos
-**Arquivo:** `src/hooks/usePedidos.ts`
-
-Adicionar `.limit(1000)` explicito na query de `usePedidosData` para documentar a limitacao. Idealmente, criar uma RPC `get_pedidos_kpis` no servidor (como ja existe para financeiro) para agregar server-side sem transferir 1000 rows.
-
-## Resumo de arquivos
+## Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/contexts/AuthContext.tsx` | Eliminar fetch duplicado de app_users |
-| `src/pages/Home.tsx` | Migrar para React Query + corrigir query is_finalizado |
-| `src/components/auth/ProtectedRoute.tsx` | Mostrar skeleton em vez de null durante loading |
-| `src/hooks/usePedidos.ts` | Adicionar limit explicito |
+| `src/components/chat/ChatMessage.tsx` | Reescrever — layout flat sem bolhas, remover framer-motion, labels "Voce"/"Assistente NBL" |
+| `src/components/chat/ThinkingBubble.tsx` | Reescrever — shimmer bar CSS-only, sem rotacao de frases |
+| `src/pages/Chat.tsx` | Remover `auth-grid-bg`, ajustar espacamento (`space-y-1`), simplificar animation logic |
+| `src/index.css` | Remover bubble styles, adicionar classes flat para mensagens, animacao CSS fade-in |
+| `src/hooks/useTypewriter.ts` | Aumentar chunk size, otimizar para menos re-renders |
+
+## Resultado Esperado
+
+- Chat visualmente limpo e profissional como Claude/ChatGPT
+- Menos overhead de animacao (CSS puro vs framer-motion)
+- Typewriter mais fluido com menos re-renders
+- Thinking state elegante e nao distrativo
 
