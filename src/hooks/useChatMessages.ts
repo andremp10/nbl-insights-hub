@@ -188,6 +188,9 @@ export function useChatMessages(sessionId: string | null) {
               break;
             }
 
+            // Ignore keepalive pings
+            if (parsed.type === 'ping') continue;
+
             // Handle typed events from proxy
             if (parsed.type === 'step' && parsed.step) {
               setMessages(prev => prev.map(m =>
