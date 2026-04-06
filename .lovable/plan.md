@@ -1,92 +1,87 @@
 
 
-# Plano — Streaming Inteligente com Indicadores de Etapas do Agente
+# Plano — Filtragem Robusta do Stream + UX de Steps Aprimorada
 
-## Problema Atual
+## Problema
 
-O proxy (`nlq-proxy`) tenta filtrar os chunks do n8n usando uma heuristica de "agentBlockCount >= 2", mas isso e fragil e esta vazando conteudo interno do agente (logs de tool calls, thinking, etc.) para o usuario. Alem disso, enquanto o agente esta processando (chamando tools, consultando banco, etc.), o usuario ve apenas uma barra de shimmer estatica sem informacao do que esta acontecendo.
+O texto "Calling agente_consulta with input: {...}" está vazando para o usuário porque a lógica `inFinalAgentBlock` no proxy não filtra conteúdo intermediário do agente (tool calls, thinking, JSON de input). Além disso, os indicadores de steps são básicos e não mostram tempo decorrido.
 
-## Solucao: SSE com Eventos Tipados
+## Mudanças
 
-### Mudanca na Edge Function (`nlq-proxy/index.ts`)
+### 1. Edge Function (`supabase/functions/nlq-proxy/index.ts`)
 
-Em vez de tentar adivinhar qual bloco e "o final", o proxy vai categorizar cada chunk do n8n em eventos tipados:
-
-```text
-n8n stream chunk → parse JSON → classificar:
-  - type: "begin" com nodeName → emitir SSE: { type: "step", step: "Consultando banco de dados..." }
-  - type: "item" com conteudo de tool → emitir SSE: { type: "step", step: "Analisando resultados..." }
-  - type: "item" com texto final do agente → emitir SSE: { type: "token", token: "..." }
-  - type: "end" → nao emitir nada
-```
-
-O proxy vai:
-1. Mapear `nodeName` para labels amigaveis (ex: "Supabase Tool" → "Consultando dados...", "agente_negocio" → "Elaborando resposta...")
-2. Emitir eventos `{ type: "step", step: "..." }` para etapas intermediarias — o frontend mostra como indicador visual
-3. Emitir eventos `{ type: "token", token: "..." }` apenas para o texto final da resposta — o frontend renderiza progressivamente
-4. Continuar acumulando o texto final para salvar no banco ao final
-
-Regra de filtragem melhorada: tokens de texto so sao emitidos quando o proxy detecta o **ultimo bloco `begin` de `agente_negocio`** (o que gera a resposta final). Todos os blocos anteriores (tool calls, sub-agentes) geram apenas eventos de `step`.
-
-### Mudanca no Frontend
-
-#### 1. `useChatMessages.ts` — Novo campo `steps` no estado
-
-Adicionar ao tipo `ChatMessage` um campo opcional `steps: string[]` e processar os novos eventos SSE:
+**Filtragem de conteúdo intermediário**: Antes de emitir qualquer token, verificar se o conteúdo é "lixo interno" do agente:
 
 ```typescript
-// Ao receber { type: "step", step: "..." }
-→ Atualizar a mensagem otimista do assistente adicionando o step ao array
-
-// Ao receber { type: "token", token: "..." }
-→ Mesmo comportamento atual (acumular conteudo)
+function isInternalAgentNoise(text: string): boolean {
+  const t = text.trim();
+  if (/^Calling \w+ with input:/i.test(t)) return true;
+  if (/^```json\s*\{/.test(t)) return true;      // JSON blocks from tool calls
+  if (/^\{"Prompt_|^\{"tool_/i.test(t)) return true; // raw tool payloads
+  if (/^Thought:|^Action:|^Observation:/i.test(t)) return true; // ReAct traces
+  if (t.startsWith('{') && t.includes('"Batch_Size"')) return true;
+  return false;
+}
 ```
 
-#### 2. `ChatMessage.tsx` — Renderizar steps durante streaming
+Aplicar este filtro em TODOS os tokens antes de emitir — mesmo dentro do "final agent block". Isso é mais robusto do que confiar apenas na contagem de blocos.
 
-Quando `status === 'streaming'` e `content` ainda esta vazio mas `steps` tem itens, mostrar os passos do agente com um visual tipo Lovable:
+**Mapeamento expandido de nodes para steps**: Adicionar `agente_consulta` e outros sub-agentes como steps amigáveis:
+
+| nodeName | Label |
+|---|---|
+| `agente_consulta` | "Consultando dados de pedidos..." |
+| `agente_financeiro` | "Consultando dados financeiros..." |
+| Contém `supabase` ou `tool` | "Acessando banco de dados..." |
+| `agente_negocio` (1o begin) | "Analisando sua pergunta..." |
+| `agente_negocio` (2o+ begin) | "Elaborando resposta..." |
+| Qualquer outro | "Processando..." |
+
+**Emit step para sub-agentes**: Quando detectar "Calling agente_consulta" no conteúdo (filtrado do output), emitir um step adicional como "Consultando dados de pedidos...".
+
+### 2. Frontend — `useChatMessages.ts`
+
+- Adicionar campo `startedAt: number` na mensagem otimista do assistente (timestamp de quando começou o streaming)
+- Já tem `steps` — sem mudança estrutural necessária
+
+### 3. Frontend — `AgentSteps.tsx` (redesign completo)
+
+Novo componente com:
+
+- **Timer em tempo real**: Exibir "12s" ao lado do step atual, atualizado a cada segundo via `useEffect` + `setInterval`
+- **Visual melhorado**:
+  - Steps concluídos: ícone check verde, texto com opacidade reduzida (sem line-through que polui)
+  - Step atual: dot pulsante laranja (primary), texto normal, timer ao lado
+  - Animação de entrada suave para cada novo step (`animate-in`)
+- **Suporte a esperas longas**: Se o timer do step atual passar de 30s, mostrar texto extra sutil: "Isso pode levar alguns instantes..."
+- **Tempo total**: Ao completar, mostrar tempo total de processamento: "Concluído em 45s"
 
 ```text
-┌──────────────────────────────────────┐
-│ ✦ Consultando banco de dados...    ✓ │
-│ ✦ Analisando resultados...         ✓ │
-│ ● Elaborando resposta...           ⟳ │  ← step atual (animado)
-└──────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│  ✓  Analisando sua pergunta...            2s   │
+│  ✓  Consultando dados de pedidos...       8s   │
+│  ●  Elaborando resposta...               14s   │  ← pulsante
+│     Isso pode levar alguns instantes...        │  ← só aparece se > 30s
+└────────────────────────────────────────────────┘
 ```
 
-- Steps concluidos: checkmark verde, texto em opacidade reduzida
-- Step atual (ultimo): indicador pulsante, texto normal
-- Quando tokens comecam a chegar, os steps colapsam com animacao e o texto da resposta aparece progressivamente
+### 4. Frontend — `ChatMessage.tsx`
 
-#### 3. `ThinkingBubble.tsx` — Substituido pelo novo componente de steps
+- Passar `startedAt` para `AgentSteps`
+- Manter steps visíveis mesmo quando content começa a chegar (durante streaming), colapsando só quando `status === 'complete'`
+- Mostrar "Concluído em Xs" após finalizar
 
-O ThinkingBubble atual sera substituido pela visualizacao de steps dentro do proprio `ChatMessage`. Nao sera mais necessario como componente separado.
+### 5. Timeout e resiliência (`useChatMessages.ts`)
 
-### Mapeamento de Nodes para Labels
-
-| nodeName (n8n) | Label exibido |
-|---|---|
-| `Supabase Tool` / contendo "tool" | "Consultando banco de dados..." |
-| `agente_negocio` (primeiro begin) | "Processando sua pergunta..." |
-| `agente_negocio` (segundo begin) | "Elaborando resposta..." |
-| Qualquer outro node | "Processando..." |
+- Aumentar `STREAM_TIMEOUT_MS` de 2min para 5min (consultas complexas podem demorar)
+- Adicionar keepalive no edge function: emitir `data: {"type":"ping"}\n\n` a cada 15s se nenhum evento foi enviado (evita timeout de proxy/CDN)
 
 ## Arquivos Modificados
 
-| Arquivo | Mudanca |
+| Arquivo | Mudança |
 |---|---|
-| `supabase/functions/nlq-proxy/index.ts` | Emitir eventos SSE tipados (`step` e `token`) em vez de so `token` |
-| `src/hooks/useChatMessages.ts` | Processar eventos `step`, adicionar campo `steps` ao estado |
-| `src/components/chat/ChatMessage.tsx` | Renderizar steps durante streaming com visual de progresso |
-| `src/components/chat/ThinkingBubble.tsx` | Refatorar para aceitar array de steps (ou remover) |
-
-## Resultado Esperado
-
-O usuario vera em tempo real:
-1. "Consultando banco de dados..." (com check ao concluir)
-2. "Analisando resultados..." (com check ao concluir)
-3. "Elaborando resposta..." (pulsante)
-4. Texto da resposta aparecendo token a token
-
-Igual ao comportamento do Lovable ao processar uma tarefa.
+| `supabase/functions/nlq-proxy/index.ts` | Filtro `isInternalAgentNoise`, mapeamento expandido de nodes, keepalive ping |
+| `src/hooks/useChatMessages.ts` | Campo `startedAt`, timeout 5min, ignorar eventos `ping` |
+| `src/components/chat/AgentSteps.tsx` | Redesign com timer, visual melhorado, msg de espera longa |
+| `src/components/chat/ChatMessage.tsx` | Passar `startedAt`, manter steps durante streaming, tempo total |
 
