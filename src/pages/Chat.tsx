@@ -49,14 +49,12 @@ export default function Chat() {
     updateSessionTitle(currentSessionId, title);
   }, [currentSessionId, updateSessionTitle]);
 
-  // Smart scroll: only scroll when message count changes or sending state changes
+  // Auto-scroll on new messages or during streaming
+  const lastMsgContent = messages.length > 0 ? messages[messages.length - 1].content : '';
+  const lastMsgStatus = messages.length > 0 ? messages[messages.length - 1].status : '';
   useEffect(() => {
-    const currentCount = messages.length;
-    if (currentCount !== prevMsgCountRef.current || sending) {
-      prevMsgCountRef.current = currentCount;
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages.length, sending]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, lastMsgContent, lastMsgStatus, sending]);
 
   useEffect(() => {
     if (!currentSessionId || pendingHandled.current) return;
@@ -127,18 +125,6 @@ export default function Chat() {
       ? 'error'
       : 'idle';
 
-  const lastAssistantMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-  const animateId = lastAssistantMsg &&
-    lastAssistantMsg.role === 'assistant' &&
-    lastAssistantMsg.status === 'complete' &&
-    !initialMsgIdsRef.current.has(lastAssistantMsg.id) &&
-    !animatedIdsRef.current.has(lastAssistantMsg.id)
-    ? lastAssistantMsg.id
-    : null;
-
-  if (animateId && animateId !== lastAnimatedIdRef.current) {
-    lastAnimatedIdRef.current = animateId;
-  }
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
