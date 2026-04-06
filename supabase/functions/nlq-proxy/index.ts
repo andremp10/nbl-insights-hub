@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const N8N_WEBHOOK_URL = 'https://n8n-nbl-golfine.up.railway.app/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
+const N8N_WEBHOOK_URL = 'https://chez-n8n-webhook.jsf0kc.easypanel.host/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
