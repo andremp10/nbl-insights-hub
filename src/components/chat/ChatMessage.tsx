@@ -133,7 +133,6 @@ interface ChatMessageProps {
   message: ChatMessageType;
   onRetry?: () => void;
   onFollowUp?: (text: string) => void;
-  animate?: boolean;
 }
 
 export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatMessageProps) {
@@ -157,7 +156,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     });
   }, [message.content]);
 
-  if (isPending && !isUser) return <ThinkingBubble />;
+  if (isPending && !isUser && !isStreaming) return <ThinkingBubble />;
 
   const renderContent = () => {
     if (isError) {
@@ -211,7 +210,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
 
   return (
     <div
-      className={cn('chat-msg-fade-in', animate && 'chat-msg-animate')}
+      className="chat-msg-fade-in"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
