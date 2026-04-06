@@ -147,6 +147,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   const hasContent = !!message.content;
   const showSteps = !isUser && (isStreaming || isPending) && hasSteps;
   const showThinking = !isUser && (isStreaming || isPending) && !hasSteps && !hasContent;
+  const startedAt = message.startedAt;
 
   const highlightCard = useMemo(() => {
     if (isUser || isPending || isError) return null;
@@ -204,7 +205,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       <div className="space-y-3">
         {/* Agent steps indicator */}
         {showSteps && (
-          <AgentSteps steps={message.steps!} isComplete={hasContent} />
+          <AgentSteps steps={message.steps!} isComplete={hasContent} startedAt={startedAt} />
         )}
 
         {/* Main content */}
