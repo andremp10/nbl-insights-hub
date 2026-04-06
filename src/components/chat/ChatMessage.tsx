@@ -13,16 +13,6 @@ function formatTime(timestamp: string): string {
   } catch { return ''; }
 }
 
-function detectHighlightCard(content: string): { label: string; value: string } | null {
-  const trimmed = content.trim();
-  if (trimmed.includes('\n') || trimmed.includes('|') || trimmed.includes('- ') || trimmed.length > 120) return null;
-  const colonMatch = trimmed.match(/^(.+?):\s*(R?\$?\s*[\d.,]+(?:\s*%)?)\s*$/);
-  if (colonMatch) return { label: colonMatch[1].trim(), value: colonMatch[2].trim() };
-  const currencyOnly = trimmed.match(/^R?\$\s*[\d.,]+$/);
-  if (currencyOnly) return { label: 'Resultado', value: trimmed };
-  return null;
-}
-
 function normalizeMarkdown(content: string): string {
   const lines = content.split('\n');
   const result: string[] = [];
@@ -47,21 +37,21 @@ function isNumericCell(text: string): boolean {
   return /^\d+$/.test(cleaned);
 }
 
-/* ── Markdown components (stable ref) ── */
+/* ── Markdown components ── */
 const markdownComponents = {
   table: ({ children, ...props }: any) => (
-    <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-lg border border-border scrollbar-thin">
+    <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-lg border border-border/60 scrollbar-thin">
       <table className="w-full text-sm border-collapse" {...props}>{children}</table>
     </div>
   ),
   thead: ({ children, ...props }: any) => (
-    <thead className="bg-primary/10 border-b border-border sticky top-0" {...props}>{children}</thead>
+    <thead className="bg-primary/8 border-b border-border/60 sticky top-0" {...props}>{children}</thead>
   ),
   tbody: ({ children, ...props }: any) => (
-    <tbody className="[&_tr:nth-child(even)]:bg-muted/20 [&_tr:last-child]:border-0" {...props}>{children}</tbody>
+    <tbody className="[&_tr:nth-child(even)]:bg-muted/15 [&_tr:last-child]:border-0" {...props}>{children}</tbody>
   ),
   tr: ({ children, ...props }: any) => (
-    <tr className="border-b border-border/40 hover:bg-muted/30 transition-colors" {...props}>{children}</tr>
+    <tr className="border-b border-border/30 hover:bg-muted/20 transition-colors" {...props}>{children}</tr>
   ),
   th: ({ children, ...props }: any) => (
     <th className="h-9 px-3 text-left align-middle font-semibold text-muted-foreground text-[11px] uppercase tracking-wider whitespace-nowrap" {...props}>{children}</th>
@@ -85,9 +75,9 @@ const markdownComponents = {
       </td>
     );
   },
-  p: ({ children, ...props }: any) => <p className="mb-2 last:mb-0 leading-relaxed" {...props}>{children}</p>,
-  ul: ({ children, ...props }: any) => <ul className="my-2 ml-4 list-disc [&>li]:mt-1 marker:text-primary" {...props}>{children}</ul>,
-  ol: ({ children, ...props }: any) => <ol className="my-2 ml-4 list-decimal [&>li]:mt-1 marker:text-primary" {...props}>{children}</ol>,
+  p: ({ children, ...props }: any) => <p className="mb-2.5 last:mb-0 leading-relaxed" {...props}>{children}</p>,
+  ul: ({ children, ...props }: any) => <ul className="my-2 ml-4 list-disc [&>li]:mt-1 marker:text-primary/60" {...props}>{children}</ul>,
+  ol: ({ children, ...props }: any) => <ol className="my-2 ml-4 list-decimal [&>li]:mt-1 marker:text-primary/60" {...props}>{children}</ol>,
   strong: ({ children, ...props }: any) => <strong className="font-semibold text-foreground" {...props}>{children}</strong>,
   em: ({ children, ...props }: any) => {
     const text = typeof children === 'string' ? children : Array.isArray(children) ? children.map((c: any) => typeof c === 'string' ? c : '').join('') : '';
@@ -96,10 +86,10 @@ const markdownComponents = {
     if (isMetadata) {
       const parts = text.split('·').map((s: string) => s.trim()).filter(Boolean);
       return (
-        <span className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border/30">
+        <span className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border/20">
           {parts.map((part: string, i: number) => (
-            <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/50 border border-border/50 text-[11px] text-muted-foreground">
-              {i === 0 ? <Calendar className="w-3 h-3 shrink-0" /> : <Info className="w-3 h-3 shrink-0" />}
+            <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/40 border border-border/30 text-[11px] text-muted-foreground">
+              {i === 0 ? <Calendar className="w-3 h-3 shrink-0 text-primary/60" /> : <Info className="w-3 h-3 shrink-0 text-primary/60" />}
               {part}
             </span>
           ))}
@@ -116,7 +106,7 @@ const markdownComponents = {
     }
     return <em {...props}>{children}</em>;
   },
-  h1: ({ children, ...props }: any) => <h1 className="text-lg font-semibold text-foreground mb-2 mt-3 first:mt-0" {...props}>{children}</h1>,
+  h1: ({ children, ...props }: any) => <h1 className="text-lg font-semibold text-foreground mb-2 mt-4 first:mt-0" {...props}>{children}</h1>,
   h2: ({ children, ...props }: any) => <h2 className="text-base font-semibold text-foreground mb-2 mt-3 first:mt-0" {...props}>{children}</h2>,
   h3: ({ children, ...props }: any) => <h3 className="text-sm font-semibold text-foreground mb-1.5 mt-2 first:mt-0" {...props}>{children}</h3>,
   code: ({ className, children, ...props }: any) => {
@@ -140,19 +130,15 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   const isPending = message.status === 'pending';
   const isStreaming = message.status === 'streaming';
   const isError = message.status === 'error';
+  const isComplete = message.status === 'complete';
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const hasSteps = !!(message.steps && message.steps.length > 0);
   const hasContent = !!message.content;
-  const showSteps = !isUser && (isStreaming || isPending) && hasSteps;
+  const showSteps = !isUser && hasSteps && !isComplete;
   const showThinking = !isUser && (isStreaming || isPending) && !hasSteps && !hasContent;
   const startedAt = message.startedAt;
-
-  const highlightCard = useMemo(() => {
-    if (isUser || isPending || isError) return null;
-    return detectHighlightCard(message.content);
-  }, [message.content, isUser, isPending, isError]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content).then(() => {
@@ -165,9 +151,9 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   if (isUser) {
     return (
       <div className="chat-msg-fade-in flex justify-end">
-        <div className="chat-msg-user max-w-[75%]">
+        <div className="chat-msg-user max-w-[80%] md:max-w-[70%]">
           <p className="text-sm leading-relaxed">{message.content}</p>
-          <span className="block text-[11px] text-primary-foreground/50 mt-1 text-right">{formatTime(message.created_at)}</span>
+          <span className="block text-[10px] text-primary-foreground/40 mt-1.5 text-right select-none">{formatTime(message.created_at)}</span>
         </div>
       </div>
     );
@@ -176,13 +162,13 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   const renderContent = () => {
     if (isError) {
       return (
-        <div className="space-y-2">
+        <div className="space-y-2.5 py-1">
           <p className="text-sm text-destructive/90">
             {message.error_detail || message.content || 'Não foi possível processar sua consulta.'}
           </p>
-          <p className="text-xs text-muted-foreground">Tente reduzir o período da consulta.</p>
+          <p className="text-xs text-muted-foreground/60">Tente reduzir o período ou reformular a pergunta.</p>
           {onRetry && (
-            <button onClick={onRetry} className="flex items-center gap-1.5 text-xs text-destructive hover:text-destructive/80 transition-colors">
+            <button onClick={onRetry} className="inline-flex items-center gap-1.5 text-xs text-destructive hover:text-destructive/80 transition-colors mt-1">
               <RotateCcw className="w-3 h-3" />
               Tentar novamente
             </button>
@@ -191,42 +177,32 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       );
     }
 
-    // Show thinking shimmer when no steps and no content yet
     if (showThinking) {
       return (
-        <div className="flex items-center gap-3 py-2">
+        <div className="flex items-center gap-3 py-3">
           <div className="chat-shimmer-bar" />
-          <span className="text-xs text-muted-foreground/60 whitespace-nowrap">Analisando…</span>
+          <span className="text-xs text-muted-foreground/50 whitespace-nowrap">Analisando…</span>
         </div>
       );
     }
 
     return (
       <div className="space-y-3">
-        {/* Agent steps indicator */}
         {showSteps && (
-          <AgentSteps steps={message.steps!} isComplete={hasContent} startedAt={startedAt} />
+          <div className="py-1">
+            <AgentSteps steps={message.steps!} isComplete={hasContent} startedAt={startedAt} />
+          </div>
         )}
 
-        {/* Main content */}
         {hasContent && (
-          <>
-            {highlightCard ? (
-              <div className="text-center py-2">
-                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">{highlightCard.label}</p>
-                <p className="text-2xl font-bold text-primary">{highlightCard.value}</p>
-              </div>
-            ) : (
-              <div className="text-sm leading-relaxed break-words">
-                <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-                  {normalizeMarkdown(message.content)}
-                </ReactMarkdown>
-                {isStreaming && (
-                  <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
-                )}
-              </div>
+          <div className="text-sm leading-relaxed break-words prose-chat">
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+              {normalizeMarkdown(message.content)}
+            </ReactMarkdown>
+            {isStreaming && (
+              <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
             )}
-          </>
+          </div>
         )}
       </div>
     );
@@ -234,27 +210,30 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
 
   return (
     <div
-      className="chat-msg-fade-in"
+      className="chat-msg-fade-in group"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {/* Label */}
       <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-xs font-semibold text-foreground/70">Assistente NBL</span>
-        <span className="text-[11px] text-muted-foreground/40">{formatTime(message.created_at)}</span>
+        <div className="w-5 h-5 rounded-md bg-primary/10 flex items-center justify-center">
+          <span className="text-[10px] font-bold text-primary">N</span>
+        </div>
+        <span className="text-xs font-medium text-foreground/60">Assistente NBL</span>
+        <span className="text-[10px] text-muted-foreground/30 select-none">{formatTime(message.created_at)}</span>
       </div>
 
       {/* Body */}
-      <div className={cn('chat-msg-assistant', isError && 'chat-msg-error')}>
+      <div className={cn('pl-7', isError && 'border-l-2 border-destructive/40 pl-5 ml-2')}>
         {renderContent()}
       </div>
 
       {/* Actions */}
-      {!isError && !isPending && !isStreaming && message.content && (
-        <div className={cn('flex items-center gap-2 mt-1 transition-opacity duration-150', hovered ? 'opacity-100' : 'opacity-0')}>
+      {isComplete && message.content && (
+        <div className={cn('pl-7 flex items-center gap-2 mt-1.5 transition-opacity duration-200', hovered ? 'opacity-100' : 'opacity-0')}>
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+            className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
             aria-label="Copiar mensagem"
           >
             {copied ? <><Check className="w-3 h-3 text-success" /><span className="text-success">Copiado</span></> : <><Copy className="w-3 h-3" /><span>Copiar</span></>}
