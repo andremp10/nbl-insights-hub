@@ -1,88 +1,92 @@
 
 
-# Plano — Isolamento de Sessoes por Usuario no Chat
+# Plano — Streaming Inteligente com Indicadores de Etapas do Agente
 
-## Problemas Identificados
+## Problema Atual
 
-### 1. Edge Function sem validacao de usuario (CRITICO)
-A `nlq-proxy` usa `SERVICE_ROLE_KEY` (bypassa RLS) e **nao valida quem esta chamando**. Qualquer usuario autenticado pode enviar mensagens para qualquer `session_id`, incluindo sessoes de outros usuarios.
+O proxy (`nlq-proxy`) tenta filtrar os chunks do n8n usando uma heuristica de "agentBlockCount >= 2", mas isso e fragil e esta vazando conteudo interno do agente (logs de tool calls, thinking, etc.) para o usuario. Alem disso, enquanto o agente esta processando (chamando tools, consultando banco, etc.), o usuario ve apenas uma barra de shimmer estatica sem informacao do que esta acontecendo.
 
-### 2. Realtime sem filtragem por usuario
-O canal Realtime em `useChatMessages` escuta `session_id=eq.${sessionId}` — o RLS do Supabase protege no SELECT, mas o canal nao filtra por `user_id`. Na pratica, o RLS ja impede que o usuario veja mensagens de sessoes que nao sao dele, entao isso funciona corretamente.
+## Solucao: SSE com Eventos Tipados
 
-### 3. Sessoes: OK
-O `useChatSessions` ja filtra por `user_id = auth.uid()` tanto no fetch quanto no Realtime. RLS tambem protege. Isso esta correto.
+### Mudanca na Edge Function (`nlq-proxy/index.ts`)
 
-### 4. Deduplicacao sem escopo de usuario
-A checagem de idempotencia na Edge Function busca por `session_id + content + janela de 10s`, mas como usa `SERVICE_ROLE_KEY`, poderia teoricamente colidir entre usuarios com o mesmo conteudo na mesma sessao (improvavel, mas incorreto).
-
-## Solucao
-
-### Arquivo: `supabase/functions/nlq-proxy/index.ts`
-
-Adicionar validacao JWT no inicio da funcao:
-
-1. Extrair o token do header `Authorization`
-2. Usar `supabase.auth.getUser(token)` para obter o `user_id`
-3. Verificar que o `session_id` enviado pertence ao usuario autenticado (query em `chat_sessions` onde `id = session_id AND user_id = auth_user_id`)
-4. Se nao pertencer, retornar 403
-
-Isso garante que:
-- Usuario A nao pode enviar mensagens na sessao do Usuario B
-- As mensagens inseridas via `SERVICE_ROLE_KEY` sao sempre para sessoes validas do usuario
+Em vez de tentar adivinhar qual bloco e "o final", o proxy vai categorizar cada chunk do n8n em eventos tipados:
 
 ```text
-Fluxo corrigido:
-
-Frontend (com JWT) ──POST──▶ nlq-proxy
-                                │
-                                ├─ Valida JWT → obtem user_id
-                                ├─ Verifica session_id pertence ao user_id
-                                ├─ Insere user msg
-                                ├─ Chama n8n (stream)
-                                └─ Insere assistant msg ao final
+n8n stream chunk → parse JSON → classificar:
+  - type: "begin" com nodeName → emitir SSE: { type: "step", step: "Consultando banco de dados..." }
+  - type: "item" com conteudo de tool → emitir SSE: { type: "step", step: "Analisando resultados..." }
+  - type: "item" com texto final do agente → emitir SSE: { type: "token", token: "..." }
+  - type: "end" → nao emitir nada
 ```
 
-### Mudancas especificas
+O proxy vai:
+1. Mapear `nodeName` para labels amigaveis (ex: "Supabase Tool" → "Consultando dados...", "agente_negocio" → "Elaborando resposta...")
+2. Emitir eventos `{ type: "step", step: "..." }` para etapas intermediarias — o frontend mostra como indicador visual
+3. Emitir eventos `{ type: "token", token: "..." }` apenas para o texto final da resposta — o frontend renderiza progressivamente
+4. Continuar acumulando o texto final para salvar no banco ao final
 
-**`supabase/functions/nlq-proxy/index.ts`** — Adicionar ~15 linhas no inicio:
+Regra de filtragem melhorada: tokens de texto so sao emitidos quando o proxy detecta o **ultimo bloco `begin` de `agente_negocio`** (o que gera a resposta final). Todos os blocos anteriores (tool calls, sub-agentes) geram apenas eventos de `step`.
+
+### Mudanca no Frontend
+
+#### 1. `useChatMessages.ts` — Novo campo `steps` no estado
+
+Adicionar ao tipo `ChatMessage` um campo opcional `steps: string[]` e processar os novos eventos SSE:
 
 ```typescript
-// Apos o parse do body:
-const authHeader = req.headers.get('Authorization');
-if (!authHeader?.startsWith('Bearer ')) {
-  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
-}
+// Ao receber { type: "step", step: "..." }
+→ Atualizar a mensagem otimista do assistente adicionando o step ao array
 
-const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  global: { headers: { Authorization: authHeader } }
-});
-const { data: claims, error: claimsErr } = await userClient.auth.getUser();
-if (claimsErr || !claims.user) {
-  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
-}
-
-const userId = claims.user.id;
-
-// Verificar ownership da sessao
-const { data: sessionOwner } = await supabase
-  .from('chat_sessions')
-  .select('user_id')
-  .eq('id', session_id)
-  .single();
-
-if (!sessionOwner || sessionOwner.user_id !== userId) {
-  return new Response(JSON.stringify({ error: 'Sessao nao pertence ao usuario' }), { status: 403, headers: corsHeaders });
-}
+// Ao receber { type: "token", token: "..." }
+→ Mesmo comportamento atual (acumular conteudo)
 ```
 
-Nenhuma mudanca no frontend — ele ja envia o token JWT no header `Authorization`.
+#### 2. `ChatMessage.tsx` — Renderizar steps durante streaming
 
-## Resumo
+Quando `status === 'streaming'` e `content` ainda esta vazio mas `steps` tem itens, mostrar os passos do agente com um visual tipo Lovable:
 
-| Arquivo | Acao |
-|---------|------|
-| `supabase/functions/nlq-proxy/index.ts` | Adicionar validacao JWT + verificacao de ownership da sessao |
+```text
+┌──────────────────────────────────────┐
+│ ✦ Consultando banco de dados...    ✓ │
+│ ✦ Analisando resultados...         ✓ │
+│ ● Elaborando resposta...           ⟳ │  ← step atual (animado)
+└──────────────────────────────────────┘
+```
 
-Apenas 1 arquivo modificado. O restante do fluxo (sessoes, Realtime, frontend) ja esta correto para multi-usuario.
+- Steps concluidos: checkmark verde, texto em opacidade reduzida
+- Step atual (ultimo): indicador pulsante, texto normal
+- Quando tokens comecam a chegar, os steps colapsam com animacao e o texto da resposta aparece progressivamente
+
+#### 3. `ThinkingBubble.tsx` — Substituido pelo novo componente de steps
+
+O ThinkingBubble atual sera substituido pela visualizacao de steps dentro do proprio `ChatMessage`. Nao sera mais necessario como componente separado.
+
+### Mapeamento de Nodes para Labels
+
+| nodeName (n8n) | Label exibido |
+|---|---|
+| `Supabase Tool` / contendo "tool" | "Consultando banco de dados..." |
+| `agente_negocio` (primeiro begin) | "Processando sua pergunta..." |
+| `agente_negocio` (segundo begin) | "Elaborando resposta..." |
+| Qualquer outro node | "Processando..." |
+
+## Arquivos Modificados
+
+| Arquivo | Mudanca |
+|---|---|
+| `supabase/functions/nlq-proxy/index.ts` | Emitir eventos SSE tipados (`step` e `token`) em vez de so `token` |
+| `src/hooks/useChatMessages.ts` | Processar eventos `step`, adicionar campo `steps` ao estado |
+| `src/components/chat/ChatMessage.tsx` | Renderizar steps durante streaming com visual de progresso |
+| `src/components/chat/ThinkingBubble.tsx` | Refatorar para aceitar array de steps (ou remover) |
+
+## Resultado Esperado
+
+O usuario vera em tempo real:
+1. "Consultando banco de dados..." (com check ao concluir)
+2. "Analisando resultados..." (com check ao concluir)
+3. "Elaborando resposta..." (pulsante)
+4. Texto da resposta aparecendo token a token
+
+Igual ao comportamento do Lovable ao processar uma tarefa.
 
