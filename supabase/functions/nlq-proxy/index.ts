@@ -11,63 +11,58 @@ const corsHeaders = {
 };
 
 const KEEPALIVE_INTERVAL_MS = 10_000;
-const TOKEN_BATCH_SIZE = 80;
+const FINAL_TOKEN_BATCH_SIZE = 120;
 const N8N_FETCH_TIMEOUT_MS = 360_000;
 
-// ── Nodes whose content is internal noise and should NOT be streamed ──
-const NOISE_NODE_PATTERNS = [
+// ════════════════════════════════════════════════════════════════
+// NODE CLASSIFICATION
+// ════════════════════════════════════════════════════════════════
+
+// Nodes that generate steps but whose content is NEVER shown
+const INTERNAL_NODES = [
   'webhook', 'respond to webhook', 'tool', 'supabase', 'execute',
   'http request', 'code', 'set', 'switch', 'if', 'merge', 'split',
-  'function', 'item lists', 'no operation',
+  'function', 'item lists', 'no operation', 'mcp_client', 'mcp client',
+  'chat_historico', 'chat historico',
 ];
 
-function isNoiseNode(nodeName: string): boolean {
-  if (!nodeName) return false;
+// Sub-agent nodes: their content is accumulated as CANDIDATE but never streamed live
+const SUB_AGENT_NODES = ['agente_consulta', 'agente_financeiro'];
+
+// The final answer node — only this node's content is a real candidate
+const FINAL_AGENT_NODE = 'agente_negocio';
+
+function classifyNode(nodeName: string): 'internal' | 'sub_agent' | 'final_agent' | 'step_only' {
+  if (!nodeName) return 'internal';
   const lower = nodeName.toLowerCase();
-  // Agent nodes produce real content
-  if (lower.includes('agente')) return false;
-  return NOISE_NODE_PATTERNS.some(p => lower.includes(p));
+  if (lower.includes(FINAL_AGENT_NODE)) return 'final_agent';
+  if (SUB_AGENT_NODES.some(n => lower.includes(n))) return 'sub_agent';
+  if (INTERNAL_NODES.some(n => lower.includes(n))) return 'internal';
+  if (lower.includes('agente')) return 'final_agent'; // unknown agent → treat as final
+  return 'step_only';
 }
 
-// ── Step detection ──
+// ════════════════════════════════════════════════════════════════
+// STEP LABELS (only from begin/end events, never from content)
+// ════════════════════════════════════════════════════════════════
+
 function nodeToStepLabel(nodeName: string, agentBeginCount: number): string | null {
   const lower = nodeName.toLowerCase();
   if (lower.includes('agente_consulta')) return 'Consultando dados de pedidos...';
   if (lower.includes('agente_financeiro')) return 'Consultando dados financeiros...';
-  if (lower.includes('supabase') || lower.includes('tool')) return 'Acessando banco de dados...';
+  if (lower.includes('supabase') || lower.includes('tool') || lower.includes('mcp')) return 'Acessando banco de dados...';
   if (lower.includes('agente_negocio') || lower.includes('agente')) {
     return agentBeginCount <= 1 ? 'Analisando sua pergunta...' : 'Elaborando resposta...';
   }
-  if (lower.includes('respond to webhook')) return null; // skip
-  return 'Processando...';
+  if (lower.includes('respond to webhook') || lower.includes('webhook')) return null;
+  return null; // Don't emit generic "Processando..." for unknown nodes
 }
 
-function detectStepsInText(text: string): string[] {
-  const matches: string[] = [];
-  if (/to=multi_tool_use/i.test(text)) matches.push('Analisando sua pergunta...');
-  if (/Calling agente_consulta/i.test(text)) matches.push('Consultando dados de pedidos...');
-  if (/Calling agente_financeiro/i.test(text)) matches.push('Consultando dados financeiros...');
-  if (/Calling\s+\w+/i.test(text) && matches.length === 0) matches.push('Consultando dados...');
-  if (/functions\.chat_historico/i.test(text)) matches.push('Verificando histórico...');
-  if (/[📊📋🧠💡✅]/.test(text)) matches.push('Processando resultados...');
-  return matches;
-}
+// ════════════════════════════════════════════════════════════════
+// EXTRACT {"output":"..."} FROM BUFFER (primary extraction)
+// ════════════════════════════════════════════════════════════════
 
-// ── Check if text content is internal agent noise (ReAct traces, tool calls) ──
-function isNoiseContent(text: string): boolean {
-  const t = text.trim();
-  if (!t) return true;
-  if (/^Calling \w+ with input:/i.test(t)) return true;
-  if (/^```json\s*\{/.test(t)) return true;
-  if (/^\{"Prompt_|^\{"tool_/i.test(t)) return true;
-  if (/^Thought:|^Action:|^Observation:/i.test(t)) return true;
-  if (t.startsWith('{') && (t.includes('"Batch_Size"') || t.includes('"action_input"'))) return true;
-  if (/^to=multi_tool_use/i.test(t)) return true;
-  return false;
-}
-
-// ── Extract {"output":"..."} from buffer ──
-function extractFinalOutput(fullBuffer: string): string | null {
+export function extractFinalOutput(fullBuffer: string): string | null {
   const lastBrace = fullBuffer.lastIndexOf('{"output"');
   if (lastBrace === -1) return null;
   const substr = fullBuffer.substring(lastBrace);
@@ -84,6 +79,98 @@ function extractFinalOutput(fullBuffer: string): string | null {
   }
   return null;
 }
+
+// ════════════════════════════════════════════════════════════════
+// FALLBACK SANITIZER — clean accumulated content for safe display
+// ════════════════════════════════════════════════════════════════
+
+// Patterns that indicate internal noise in accumulated content
+const NOISE_MARKERS = [
+  /^Calling \w+ with input:/im,
+  /^Calling \w+ with \{/im,
+  /^```json\s*\{/m,
+  /^\{"Prompt_/m,
+  /^\{"tool_/m,
+  /^Thought:/m,
+  /^Action:/m,
+  /^Observation:/m,
+  /^to=multi_tool_use/m,
+  /^\{"Batch_Size"/m,
+  /^\{"action_input"/m,
+  /^SELECT\s+/im,
+  /^FROM\s+public\./im,
+  /^WITH\s+\w+\s+AS\s*\(/im,
+];
+
+// Markers that indicate the START of a real response
+const RESPONSE_START_PATTERNS = [
+  /^_Períodos?:/m,
+  /^\*\*Resumo\*\*/m,
+  /^#{1,3}\s+/m,
+  /^📊/m,
+  /^📋/m,
+  /^\|[^|]+\|/m, // markdown table
+  /^>\s+/m, // blockquote
+  /^Em\s+\w+\s+de\s+\d{4}/m, // "Em março de 2026"
+  /^No\s+período/m,
+  /^Resumo/m,
+];
+
+export function sanitizeFallbackContent(raw: string): string | null {
+  if (!raw || raw.trim().length < 20) return null;
+
+  let text = raw;
+
+  // Try to find the start of a real response by looking for response markers
+  let bestStart = -1;
+  for (const pattern of RESPONSE_START_PATTERNS) {
+    const match = text.match(pattern);
+    if (match && match.index !== undefined) {
+      if (bestStart === -1 || match.index < bestStart) {
+        bestStart = match.index;
+      }
+    }
+  }
+
+  if (bestStart > 0) {
+    text = text.substring(bestStart);
+  }
+
+  // Check if the remaining text still contains noise markers
+  const hasNoise = NOISE_MARKERS.some(p => p.test(text));
+  if (hasNoise) {
+    // Try harder: find the LAST occurrence of a response start pattern
+    let lastGoodStart = -1;
+    for (const pattern of RESPONSE_START_PATTERNS) {
+      let m;
+      const globalPattern = new RegExp(pattern.source, pattern.flags.includes('m') ? 'gm' : 'g');
+      while ((m = globalPattern.exec(raw)) !== null) {
+        if (m.index > lastGoodStart) lastGoodStart = m.index;
+      }
+    }
+    if (lastGoodStart > 0) {
+      text = raw.substring(lastGoodStart);
+      // Re-check
+      const stillNoisy = NOISE_MARKERS.some(p => p.test(text));
+      if (stillNoisy) return null; // Too noisy, reject
+    } else {
+      return null; // No clean response found
+    }
+  }
+
+  // Final safety: if the text is mostly JSON objects, reject it
+  const jsonLikeLines = text.split('\n').filter(l => l.trim().startsWith('{') || l.trim().startsWith('"type"'));
+  if (jsonLikeLines.length > text.split('\n').length * 0.3) {
+    return null;
+  }
+
+  const cleaned = text.trim();
+  return cleaned.length > 20 ? cleaned : null;
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAIN SERVER
+// ════════════════════════════════════════════════════════════════
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -179,7 +266,7 @@ Deno.serve(async (req) => {
     const context = (history || []).reverse();
 
     // ════════════════════════════════════════════════════════════════
-    // SSE STREAM
+    // SSE STREAM — STEPS ONLY DURING PROCESSING, CONTENT AT END
     // ════════════════════════════════════════════════════════════════
     const encoder = new TextEncoder();
 
@@ -189,13 +276,9 @@ Deno.serve(async (req) => {
         let agentBeginCount = 0;
         let lastEventTime = Date.now();
 
-        // Accumulated content from type:"item" tokens
-        let streamedContent = '';
-        let tokenBatch = '';
-        let tokensStreamedLive = false;
-
-        // Track which node is currently "active" for content filtering
-        let activeNodeName = '';
+        // Content accumulators (NEVER sent to frontend during processing)
+        let finalAgentContent = '';
+        let subAgentContent = '';
 
         function emitSSE(data: Record<string, unknown>) {
           try {
@@ -211,14 +294,6 @@ Deno.serve(async (req) => {
           emitSSE({ type: 'step', step: label });
         }
 
-        function flushTokenBatch() {
-          if (tokenBatch.length > 0) {
-            emitSSE({ type: 'token', token: tokenBatch });
-            tokensStreamedLive = true;
-            tokenBatch = '';
-          }
-        }
-
         // ── Send user_message_id and first step ──
         emitSSE({ user_message_id: userMsg.id });
         emitStep('Analisando sua pergunta...');
@@ -230,25 +305,21 @@ Deno.serve(async (req) => {
           }
         }, KEEPALIVE_INTERVAL_MS);
 
-        // Helper to finalize
+        // ── Finalize: deliver content to frontend and DB ──
         async function finalize(content: string, status: 'complete' | 'error', errorDetail?: string) {
           clearInterval(keepaliveTimer);
 
           if (status === 'complete' && content) {
             emitStep('Elaborando resposta final...');
 
-            if (!tokensStreamedLive) {
-              // Tokens were NOT streamed live (e.g. output came from {"output":"..."})
-              // Simulate streaming of clean content
-              for (let i = 0; i < content.length; i += TOKEN_BATCH_SIZE) {
-                const chunk = content.substring(i, i + TOKEN_BATCH_SIZE);
-                emitSSE({ type: 'token', token: chunk });
-                if (i + TOKEN_BATCH_SIZE < content.length) {
-                  await new Promise(r => setTimeout(r, 10));
-                }
+            // Stream the final content to frontend in batches
+            for (let i = 0; i < content.length; i += FINAL_TOKEN_BATCH_SIZE) {
+              const chunk = content.substring(i, i + FINAL_TOKEN_BATCH_SIZE);
+              emitSSE({ type: 'token', token: chunk });
+              if (i + FINAL_TOKEN_BATCH_SIZE < content.length) {
+                await new Promise(r => setTimeout(r, 10));
               }
             }
-            // else: tokens already streamed live, no need to re-emit
 
             await supabase
               .from('chat_messages')
@@ -317,14 +388,10 @@ Deno.serve(async (req) => {
           }
 
           // ══════════════════════════════════════════════════════════
-          // PROCESS N8N STREAMING RESPONSE
-          // Key insight: n8n sends newline-delimited JSON objects:
-          //   {"type":"begin","metadata":{"nodeName":"agente_negocio",...}}
-          //   {"type":"item","content":"R","metadata":{"nodeName":"agente_consulta",...}}
-          //   {"type":"end","metadata":{"nodeName":"agente_consulta",...}}
-          //
-          // We accumulate "content" from "item" events from agent nodes,
-          // stream them live as SSE tokens, and use as final response.
+          // PROCESS N8N STREAM
+          // Key change: NO tokens are sent to the frontend during processing.
+          // Only "step" events are emitted. Content is accumulated silently.
+          // The final answer is delivered ONLY in finalize().
           // ══════════════════════════════════════════════════════════
           emitStep('Consultando dados...');
 
@@ -333,11 +400,6 @@ Deno.serve(async (req) => {
           let fullBuffer = '';
           let lineBuffer = '';
           let chunkIndex = 0;
-
-          // Track the LAST agent node that emitted content — this is the "final answer" node
-          let lastContentNodeName = '';
-          // Per-node content accumulators to pick the right one at the end
-          const nodeContents = new Map<string, string>();
 
           while (true) {
             const { done, value } = await reader.read();
@@ -348,7 +410,7 @@ Deno.serve(async (req) => {
             fullBuffer += chunk;
             lastEventTime = Date.now();
 
-            if (chunkIndex <= 5) {
+            if (chunkIndex <= 3) {
               console.log(`[nlq-proxy] chunk#${chunkIndex} (${chunk.length}b): ${chunk.substring(0, 200)}`);
             }
 
@@ -362,53 +424,30 @@ Deno.serve(async (req) => {
               if (!trimmed) continue;
 
               let obj: any;
-              try { obj = JSON.parse(trimmed); } catch {
-                // Not JSON — detect steps from raw text
-                const steps = detectStepsInText(trimmed);
-                for (const s of steps) emitStep(s);
-                continue;
-              }
+              try { obj = JSON.parse(trimmed); } catch { continue; }
 
               const nodeName = obj.metadata?.nodeName || '';
+              const nodeClass = classifyNode(nodeName);
 
               if (obj.type === 'begin') {
-                activeNodeName = nodeName;
                 if (nodeName.toLowerCase().includes('agente')) agentBeginCount++;
                 const label = nodeToStepLabel(nodeName, agentBeginCount);
                 if (label) emitStep(label);
 
               } else if (obj.type === 'item' && obj.content !== undefined) {
                 const content = String(obj.content);
-                const sourceNode = nodeName || activeNodeName;
-
-                // Skip noise nodes (webhook, tools, etc.)
-                if (isNoiseNode(sourceNode)) continue;
-                // Skip empty content
                 if (!content) continue;
 
-                // Accumulate per-node
-                const nodeKey = sourceNode.toLowerCase();
-                const existing = nodeContents.get(nodeKey) || '';
-                nodeContents.set(nodeKey, existing + content);
-                lastContentNodeName = nodeKey;
-
-                // Also accumulate globally
-                streamedContent += content;
-
-                // Batch tokens for live SSE emission
-                tokenBatch += content;
-                if (tokenBatch.length >= TOKEN_BATCH_SIZE) {
-                  flushTokenBatch();
+                // Accumulate silently based on node class
+                if (nodeClass === 'final_agent') {
+                  finalAgentContent += content;
+                } else if (nodeClass === 'sub_agent') {
+                  subAgentContent += content;
                 }
-
-                // Detect steps in accumulated content
-                const steps = detectStepsInText(content);
-                for (const s of steps) emitStep(s);
+                // internal and step_only nodes: content is discarded
 
               } else if (obj.type === 'end') {
-                // Flush any remaining token batch when a node ends
-                flushTokenBatch();
-
+                // Nothing to flush — no live tokens
               } else if (obj.output && typeof obj.output === 'string') {
                 emitStep('Processando resultados...');
               }
@@ -420,47 +459,57 @@ Deno.serve(async (req) => {
             try {
               const obj = JSON.parse(lineBuffer.trim());
               if (obj.type === 'item' && obj.content) {
-                const sourceNode = (obj.metadata?.nodeName || activeNodeName).toLowerCase();
-                if (!isNoiseNode(sourceNode)) {
-                  streamedContent += String(obj.content);
-                  tokenBatch += String(obj.content);
+                const nodeClass = classifyNode(obj.metadata?.nodeName || '');
+                if (nodeClass === 'final_agent') {
+                  finalAgentContent += String(obj.content);
+                } else if (nodeClass === 'sub_agent') {
+                  subAgentContent += String(obj.content);
                 }
               }
-            } catch {
-              // Not JSON, ignore
-            }
+            } catch { /* ignore */ }
           }
 
-          // Flush final token batch
-          flushTokenBatch();
+          // ── SELECT FINAL CONTENT ──
+          console.log(`[nlq-proxy] Stream done. ${fullBuffer.length}b, ${chunkIndex} chunks`);
+          console.log(`[nlq-proxy] finalAgentContent: ${finalAgentContent.length} chars, subAgentContent: ${subAgentContent.length} chars`);
 
-          // ── Extract final content ──
-          console.log(`[nlq-proxy] Stream done. ${fullBuffer.length}b, ${chunkIndex} chunks, streamedContent: ${streamedContent.length} chars`);
-
-          // Strategy:
-          // 1. Try extracting {"output":"..."} from full buffer (canonical)
-          // 2. Fallback to streamedContent (accumulated from type:"item" events)
+          // Priority 1: Extract {"output":"..."} from full buffer
           let finalContent = extractFinalOutput(fullBuffer);
 
           if (finalContent) {
-            console.log(`[nlq-proxy] Using {"output":"..."} extraction: ${finalContent.length} chars`);
-            // If we streamed tokens live but the output JSON differs, we need to
-            // send the correct content. The DB will have the right content either way.
-            // For the frontend: if tokens were already streamed, the content shown
-            // may differ slightly from output JSON. We accept this trade-off for
-            // real-time streaming. The DB always gets the canonical output.
-          } else if (streamedContent.length > 10) {
-            console.log(`[nlq-proxy] No {"output":"..."} found. Using streamedContent: ${streamedContent.length} chars`);
-            // Check if the streamed content contains noise that slipped through
-            // If the content is mostly the final agent's output, use it
-            finalContent = streamedContent;
+            console.log(`[nlq-proxy] Using {"output":"..."}: ${finalContent.length} chars`);
           } else {
-            console.warn('[nlq-proxy] No content extracted at all');
-            finalContent = 'Desculpe, não consegui processar sua solicitação. Tente novamente.';
+            // Priority 2: Use final agent node content (sanitized)
+            if (finalAgentContent.length > 20) {
+              const sanitized = sanitizeFallbackContent(finalAgentContent);
+              if (sanitized) {
+                console.log(`[nlq-proxy] Using sanitized finalAgentContent: ${sanitized.length} chars`);
+                finalContent = sanitized;
+              }
+            }
+
+            // Priority 3: Use sub-agent content as last resort (sanitized)
+            if (!finalContent && subAgentContent.length > 20) {
+              const sanitized = sanitizeFallbackContent(subAgentContent);
+              if (sanitized) {
+                console.log(`[nlq-proxy] Using sanitized subAgentContent: ${sanitized.length} chars`);
+                finalContent = sanitized;
+              }
+            }
+
+            // Priority 4: controlled error
+            if (!finalContent) {
+              console.warn('[nlq-proxy] No safe content found — returning controlled error');
+              finalContent = '';
+            }
           }
 
-          console.log(`[nlq-proxy] Final content: ${finalContent.length} chars`);
-          await finalize(finalContent, 'complete');
+          if (finalContent) {
+            console.log(`[nlq-proxy] Final content: ${finalContent.length} chars`);
+            await finalize(finalContent, 'complete');
+          } else {
+            await finalize('', 'error', 'Não foi possível processar a resposta do agente. Tente reformular a pergunta.');
+          }
 
         } catch (err) {
           console.error('[nlq-proxy] Stream processing error:', err);
