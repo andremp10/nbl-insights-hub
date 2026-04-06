@@ -89,12 +89,6 @@ export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedA
         );
       })}
 
-      {showLongWait && (
-        <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/35 animate-in fade-in duration-500">
-          <Clock className="w-3 h-3 shrink-0" />
-          <span>Isso pode levar alguns instantes...</span>
-        </div>
-      )}
 
       {isComplete && startedAt && totalElapsed > 2000 && (
         <div className="flex items-center gap-2 pt-1 border-t border-border/20 mt-1 text-[10px] text-muted-foreground/35">
