@@ -126,9 +126,9 @@ Deno.test("extractFinalOutput — returns null when no output", () => {
   assertEquals(extractFinalOutput(buffer), null);
 });
 
-Deno.test("extractFinalOutput — handles escaped quotes", () => {
-  const buffer = '{"output":"Valor: R\\$ 100,00"}';
-  assertEquals(extractFinalOutput(buffer), "Valor: R$ 100,00");
+Deno.test("extractFinalOutput — handles escaped content", () => {
+  const buffer = '{"output":"Valor: R$ 100,00\\nLinha 2"}';
+  assertEquals(extractFinalOutput(buffer), "Valor: R$ 100,00\nLinha 2");
 });
 
 Deno.test("extractFinalOutput — picks last output in buffer", () => {
