@@ -15,7 +15,6 @@ export default function Chat() {
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingHandled = useRef(false);
-  const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
 
@@ -30,10 +29,6 @@ export default function Chat() {
     return null;
   }, [currentSessionId, createSession]);
 
-  // Reset on session change
-  useEffect(() => {
-    prevMsgCountRef.current = 0;
-  }, [currentSessionId]);
 
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
