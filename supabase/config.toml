@@ -2,6 +2,7 @@ project_id = "bcypejzqbcwibvtbbfor"
 
 [functions.nlq-proxy]
 verify_jwt = false
+wall_clock_timeout = 400
 
 [functions.create-user]
 verify_jwt = false
