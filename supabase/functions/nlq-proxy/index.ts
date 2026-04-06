@@ -22,10 +22,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
     const { message, session_id } = await req.json();
@@ -33,6 +30,42 @@ Deno.serve(async (req) => {
     if (!session_id) throw new Error('session_id obrigatório');
 
     const trimmedMessage = message.trim();
+
+    // AUTH: Validate JWT and session ownership
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: userData, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !userData?.user) {
+      console.error('[nlq-proxy] Auth error:', authError?.message);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const userId = userData.user.id;
+
+    // Verify session belongs to the authenticated user
+    const { data: sessionOwner, error: sessionError } = await supabase
+      .from('chat_sessions')
+      .select('user_id')
+      .eq('id', session_id)
+      .single();
+
+    if (sessionError || !sessionOwner || sessionOwner.user_id !== userId) {
+      console.error('[nlq-proxy] Session ownership check failed for user', userId, 'session', session_id);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Sessão não pertence ao usuário' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // IDEMPOTENCY: Check for duplicate message in last 10 seconds
     const windowStart = new Date(Date.now() - 10000).toISOString();
