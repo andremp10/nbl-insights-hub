@@ -120,6 +120,60 @@ export type Database = {
         }
         Relationships: []
       }
+      etl_error_logs: {
+        Row: {
+          created_at: string
+          details: Json
+          error_class: string | null
+          event_type: string
+          id: string
+          legacy_id: string | null
+          message: string
+          phase: string | null
+          probable_constraint: string | null
+          run_id: string
+          script_name: string
+          severity: string
+          step_name: string | null
+          table_name: string | null
+          traceback: string | null
+        }
+        Insert: {
+          created_at?: string
+          details?: Json
+          error_class?: string | null
+          event_type: string
+          id?: string
+          legacy_id?: string | null
+          message: string
+          phase?: string | null
+          probable_constraint?: string | null
+          run_id: string
+          script_name: string
+          severity?: string
+          step_name?: string | null
+          table_name?: string | null
+          traceback?: string | null
+        }
+        Update: {
+          created_at?: string
+          details?: Json
+          error_class?: string | null
+          event_type?: string
+          id?: string
+          legacy_id?: string | null
+          message?: string
+          phase?: string | null
+          probable_constraint?: string | null
+          run_id?: string
+          script_name?: string
+          severity?: string
+          step_name?: string | null
+          table_name?: string | null
+          traceback?: string | null
+        }
+        Relationships: []
+      }
       is_clientes: {
         Row: {
           celular: string | null
