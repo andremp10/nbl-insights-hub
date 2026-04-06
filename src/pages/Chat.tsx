@@ -14,14 +14,9 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const initialMsgIdsRef = useRef<Set<string>>(new Set());
-  const hasSetInitialRef = useRef(false);
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
-  const lastAnimatedIdRef = useRef<string | null>(null);
-  const animatedIdsRef = useRef<Set<string>>(new Set());
-  const prevMsgCountRef = useRef(0);
 
   // Stable callback refs to avoid invalidating ChatMessage memo
   const retryRef = useRef(retryMessage);
@@ -34,24 +29,6 @@ export default function Chat() {
     return null;
   }, [currentSessionId, createSession]);
 
-  // Track initial message IDs to avoid animating history
-  useEffect(() => {
-    if (!messagesLoading && messages.length > 0 && !hasSetInitialRef.current) {
-      hasSetInitialRef.current = true;
-      initialMsgIdsRef.current = new Set(messages.map(m => m.id));
-    }
-    if (currentSessionId && hasSetInitialRef.current === false && !messagesLoading && messages.length === 0) {
-      hasSetInitialRef.current = true;
-    }
-  }, [messages, messagesLoading, currentSessionId]);
-
-  useEffect(() => {
-    hasSetInitialRef.current = false;
-    initialMsgIdsRef.current = new Set();
-    animatedIdsRef.current = new Set();
-    lastAnimatedIdRef.current = null;
-    prevMsgCountRef.current = 0;
-  }, [currentSessionId]);
 
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
@@ -67,14 +44,12 @@ export default function Chat() {
     updateSessionTitle(currentSessionId, title);
   }, [currentSessionId, updateSessionTitle]);
 
-  // Smart scroll: only scroll when message count changes or sending state changes
+  // Auto-scroll on new messages or during streaming
+  const lastMsgContent = messages.length > 0 ? messages[messages.length - 1].content : '';
+  const lastMsgStatus = messages.length > 0 ? messages[messages.length - 1].status : '';
   useEffect(() => {
-    const currentCount = messages.length;
-    if (currentCount !== prevMsgCountRef.current || sending) {
-      prevMsgCountRef.current = currentCount;
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages.length, sending]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, lastMsgContent, lastMsgStatus, sending]);
 
   useEffect(() => {
     if (!currentSessionId || pendingHandled.current) return;
@@ -145,18 +120,6 @@ export default function Chat() {
       ? 'error'
       : 'idle';
 
-  const lastAssistantMsg = messages.length > 0 ? messages[messages.length - 1] : null;
-  const animateId = lastAssistantMsg &&
-    lastAssistantMsg.role === 'assistant' &&
-    lastAssistantMsg.status === 'complete' &&
-    !initialMsgIdsRef.current.has(lastAssistantMsg.id) &&
-    !animatedIdsRef.current.has(lastAssistantMsg.id)
-    ? lastAssistantMsg.id
-    : null;
-
-  if (animateId && animateId !== lastAnimatedIdRef.current) {
-    lastAnimatedIdRef.current = animateId;
-  }
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -198,21 +161,14 @@ export default function Chat() {
             <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
           ) : (
             <div className="w-full max-w-[860px] mx-auto px-4 md:px-8 py-6 space-y-5">
-              {messages.map((message) => {
-                const shouldAnimate = message.id === animateId;
-                if (!shouldAnimate && lastAnimatedIdRef.current === message.id && message.status === 'complete') {
-                  animatedIdsRef.current.add(message.id);
-                }
-                return (
+              {messages.map((message) => (
                   <ChatMessage
                     key={message.id}
                     message={message}
-                    animate={shouldAnimate}
                     onRetry={message.status === 'error' ? () => handleRetry(message.id) : undefined}
                     onFollowUp={handleSuggestionClick}
                   />
-                );
-              })}
+              ))}
               <div ref={messagesEndRef} className="h-1" />
             </div>
           )}

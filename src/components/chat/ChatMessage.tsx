@@ -3,7 +3,6 @@ import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
 import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info } from 'lucide-react';
 import { ThinkingBubble } from './ThinkingBubble';
-import { useTypewriter } from '@/hooks/useTypewriter';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
@@ -134,18 +133,15 @@ interface ChatMessageProps {
   message: ChatMessageType;
   onRetry?: () => void;
   onFollowUp?: (text: string) => void;
-  animate?: boolean;
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate = false }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const isPending = message.status === 'pending';
+  const isStreaming = message.status === 'streaming';
   const isError = message.status === 'error';
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
-
-  const shouldAnimate = animate && !isUser && !isPending && !isError;
-  const { displayedText, isTyping } = useTypewriter(message.content, shouldAnimate, 4);
 
   const highlightCard = useMemo(() => {
     if (isUser || isPending || isError) return null;
@@ -160,7 +156,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
     });
   }, [message.content]);
 
-  if (isPending && !isUser) return <ThinkingBubble />;
+  if (isPending && !isUser && !isStreaming) return <ThinkingBubble />;
 
   const renderContent = () => {
     if (isError) {
@@ -191,15 +187,11 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
 
     return (
       <div className="text-sm leading-relaxed break-words">
-        {isTyping ? (
-          <>
-            <span className="whitespace-pre-wrap">{displayedText}</span>
-            <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
-          </>
-        ) : (
-          <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-            {normalizeMarkdown(message.content)}
-          </ReactMarkdown>
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+          {normalizeMarkdown(message.content)}
+        </ReactMarkdown>
+        {isStreaming && (
+          <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
         )}
       </div>
     );
@@ -218,7 +210,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry, animate
 
   return (
     <div
-      className={cn('chat-msg-fade-in', animate && 'chat-msg-animate')}
+      className="chat-msg-fade-in"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
