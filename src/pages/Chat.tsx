@@ -14,14 +14,10 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const initialMsgIdsRef = useRef<Set<string>>(new Set());
-  const hasSetInitialRef = useRef(false);
+  const prevMsgCountRef = useRef(0);
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
-  const lastAnimatedIdRef = useRef<string | null>(null);
-  const animatedIdsRef = useRef<Set<string>>(new Set());
-  const prevMsgCountRef = useRef(0);
 
   // Stable callback refs to avoid invalidating ChatMessage memo
   const retryRef = useRef(retryMessage);
@@ -34,22 +30,8 @@ export default function Chat() {
     return null;
   }, [currentSessionId, createSession]);
 
-  // Track initial message IDs to avoid animating history
+  // Reset on session change
   useEffect(() => {
-    if (!messagesLoading && messages.length > 0 && !hasSetInitialRef.current) {
-      hasSetInitialRef.current = true;
-      initialMsgIdsRef.current = new Set(messages.map(m => m.id));
-    }
-    if (currentSessionId && hasSetInitialRef.current === false && !messagesLoading && messages.length === 0) {
-      hasSetInitialRef.current = true;
-    }
-  }, [messages, messagesLoading, currentSessionId]);
-
-  useEffect(() => {
-    hasSetInitialRef.current = false;
-    initialMsgIdsRef.current = new Set();
-    animatedIdsRef.current = new Set();
-    lastAnimatedIdRef.current = null;
     prevMsgCountRef.current = 0;
   }, [currentSessionId]);
 
