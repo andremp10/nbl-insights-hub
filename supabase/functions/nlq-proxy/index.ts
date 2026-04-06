@@ -10,46 +10,89 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-// ── Noise filter: skip internal agent traces ──
-function isInternalAgentNoise(text: string): boolean {
-  const t = text.trim();
-  if (!t) return true;
-  if (/^Calling \w+ with input:/i.test(t)) return true;
-  if (/^```json\s*\{/.test(t)) return true;
-  if (/^\{"Prompt_|^\{"tool_/i.test(t)) return true;
-  if (/^Thought:|^Action:|^Observation:/i.test(t)) return true;
-  if (t.startsWith('{') && (t.includes('"Batch_Size"') || t.includes('"action_input"'))) return true;
-  // Skip raw JSON payloads that look like tool inputs/outputs
-  if (/^\{[\s\S]*\}$/.test(t) && t.length < 500) {
-    try { JSON.parse(t); return true; } catch { /* not JSON, continue */ }
-  }
-  return false;
-}
-
-// ── Map n8n node names to user-friendly step labels ──
-function nodeToStepLabel(nodeName: string, agentBeginCount: number): string {
-  const lower = nodeName.toLowerCase();
-  if (lower.includes('agente_consulta')) return 'Consultando dados de pedidos...';
-  if (lower.includes('agente_financeiro')) return 'Consultando dados financeiros...';
-  if (lower.includes('supabase') || lower.includes('tool')) return 'Acessando banco de dados...';
-  if (lower.includes('agente_negocio') || lower.includes('agente')) {
-    return agentBeginCount <= 1 ? 'Analisando sua pergunta...' : 'Elaborando resposta...';
-  }
-  return 'Processando...';
-}
-
-// ── Extract step from content like "Calling agente_consulta with input:" ──
-function extractCallingStep(content: string): string | null {
-  const match = content.trim().match(/^Calling (\w+) with input:/i);
-  if (!match) return null;
-  const name = match[1].toLowerCase();
-  if (name.includes('consulta')) return 'Consultando dados de pedidos...';
-  if (name.includes('financeiro')) return 'Consultando dados financeiros...';
-  if (name.includes('supabase') || name.includes('tool')) return 'Acessando banco de dados...';
-  return `Processando ${match[1]}...`;
-}
-
 const KEEPALIVE_INTERVAL_MS = 15_000;
+const SIMULATED_CHUNK_SIZE = 80;
+const SIMULATED_CHUNK_DELAY_MS = 15;
+
+// ── Step detection patterns ──
+interface StepPattern {
+  regex: RegExp;
+  label: string;
+  skip?: boolean; // true = detect but don't emit a step
+}
+
+const STEP_PATTERNS: StepPattern[] = [
+  { regex: /to=multi_tool_use/i, label: 'Analisando sua pergunta...' },
+  { regex: /Calling agente_consulta/i, label: 'Consultando dados de pedidos...' },
+  { regex: /Calling agente_financeiro/i, label: 'Consultando dados financeiros...' },
+  { regex: /Calling\s+\w+/i, label: 'Consultando dados...' },
+  { regex: /functions\.chat_historico/i, label: 'Verificando histórico...' },
+  { regex: /functions\.Think/i, label: '', skip: true },
+];
+
+// ── Detect steps in a new text chunk ──
+function detectSteps(newText: string): string[] {
+  const detected: string[] = [];
+  for (const pattern of STEP_PATTERNS) {
+    if (pattern.regex.test(newText)) {
+      if (!pattern.skip && pattern.label) {
+        detected.push(pattern.label);
+      }
+    }
+  }
+  return detected;
+}
+
+// ── Extract final output from {"output":"..."} JSON wrapper ──
+function extractFinalOutput(fullBuffer: string): string | null {
+  // Look for the LAST occurrence of {"output":"..."}
+  // The n8n "Respond to Webhook" node wraps the final answer in this format
+  const lastBrace = fullBuffer.lastIndexOf('{"output"');
+  if (lastBrace === -1) return null;
+
+  const substr = fullBuffer.substring(lastBrace);
+  try {
+    const parsed = JSON.parse(substr);
+    if (typeof parsed.output === 'string' && parsed.output.trim()) {
+      return parsed.output.trim();
+    }
+  } catch {
+    // The JSON might be split across chunks or malformed — try a regex fallback
+    const match = substr.match(/\{"output"\s*:\s*"([\s\S]+)"\s*\}$/);
+    if (match) {
+      try {
+        // Unescape JSON string
+        return JSON.parse(`"${match[1]}"`);
+      } catch { /* ignore */ }
+    }
+  }
+  return null;
+}
+
+// ── Fallback: extract last meaningful text block when no {"output":...} found ──
+function extractFallbackResponse(fullBuffer: string): string {
+  // Remove known noise patterns
+  let cleaned = fullBuffer;
+
+  // Remove "Calling X with input: {...}" blocks
+  cleaned = cleaned.replace(/Calling\s+\w+\s+with\s+input:\s*\{[^}]*\}/gi, '');
+  // Remove "to=multi_tool_use..." lines
+  cleaned = cleaned.replace(/to=multi_tool_use[^\n]*/gi, '');
+  // Remove raw JSON objects that look like tool payloads
+  cleaned = cleaned.replace(/\{"(Prompt_|tool_|Batch_)[^}]*\}/gi, '');
+  // Remove ReAct traces
+  cleaned = cleaned.replace(/^(Thought|Action|Observation):[^\n]*/gim, '');
+  // Remove code block JSON
+  cleaned = cleaned.replace(/```json[\s\S]*?```/g, '');
+
+  // Take the last substantial block of text (likely the final answer)
+  const blocks = cleaned.split(/\n{2,}/).map(b => b.trim()).filter(b => b.length > 20);
+  if (blocks.length > 0) {
+    return blocks[blocks.length - 1];
+  }
+
+  return cleaned.trim();
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -133,7 +176,7 @@ Deno.serve(async (req) => {
 
     if (userMsgError) throw userMsgError;
 
-    // Context
+    // Context (last 10 messages)
     const { data: history } = await supabase
       .from('chat_messages')
       .select('role, content')
@@ -171,10 +214,14 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Non-streaming fallback
+    // Non-streaming fallback (no body)
     if (!n8nResponse.body) {
       const text = await n8nResponse.text();
-      const content = text.trim();
+      let content = text.trim();
+      // Try to extract from {"output":"..."}
+      const extracted = extractFinalOutput(content);
+      if (extracted) content = extracted;
+
       await supabase
         .from('chat_messages')
         .insert({ session_id, role: 'assistant', content, status: 'complete' });
@@ -188,147 +235,99 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Streaming response ──
+    // ── Streaming: raw text-based parsing ──
     const reader = n8nResponse.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
-    let n8nBuffer = '';
-    let streamedContent = '';
-    let finalOutput: string | null = null;
-    let agentBlockCount = 0;
-    let inFinalAgentBlock = false;
-    let currentNodeName = '';
-    const emittedSteps = new Set<string>();
-
-    function emitSSE(controller: ReadableStreamDefaultController, data: Record<string, unknown>) {
-      controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-    }
-
-    function emitStep(controller: ReadableStreamDefaultController, label: string) {
-      if (emittedSteps.has(label)) return;
-      emittedSteps.add(label);
-      emitSSE(controller, { type: 'step', step: label });
-    }
 
     const stream = new ReadableStream({
       async start(controller) {
-        emitSSE(controller, { user_message_id: userMsg.id });
+        let fullBuffer = '';
+        const emittedSteps = new Set<string>();
 
-        // Keepalive: send ping every 15s if no other event was sent
+        function emitSSE(data: Record<string, unknown>) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        }
+
+        function emitStep(label: string) {
+          if (emittedSteps.has(label)) return;
+          emittedSteps.add(label);
+          emitSSE({ type: 'step', step: label });
+        }
+
+        // Send user_message_id immediately
+        emitSSE({ user_message_id: userMsg.id });
+
+        // Emit initial step
+        emitStep('Analisando sua pergunta...');
+
+        // Keepalive timer
         let lastEventTime = Date.now();
         const keepaliveTimer = setInterval(() => {
           if (Date.now() - lastEventTime >= KEEPALIVE_INTERVAL_MS) {
             try {
-              emitSSE(controller, { type: 'ping' });
+              emitSSE({ type: 'ping' });
               lastEventTime = Date.now();
             } catch { /* stream closed */ }
           }
         }, KEEPALIVE_INTERVAL_MS);
 
-        const trackEvent = () => { lastEventTime = Date.now(); };
-
         try {
+          // Read all chunks from n8n, accumulating and detecting steps
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            n8nBuffer += decoder.decode(value, { stream: true });
-            const lines = n8nBuffer.split('\n');
-            n8nBuffer = lines.pop() || '';
+            const chunk = decoder.decode(value, { stream: true });
+            fullBuffer += chunk;
+            lastEventTime = Date.now();
 
-            for (const line of lines) {
-              const trimmedLine = line.trim();
-              if (!trimmedLine) continue;
+            // Detect steps in the new chunk
+            const steps = detectSteps(chunk);
+            for (const step of steps) {
+              emitStep(step);
+            }
 
-              let obj: any;
-              try { obj = JSON.parse(trimmedLine); } catch { continue; }
-
-              if (obj.type === 'begin') {
-                currentNodeName = obj.metadata?.nodeName || '';
-                if (currentNodeName === 'agente_negocio') {
-                  agentBlockCount++;
-                  if (agentBlockCount >= 2) inFinalAgentBlock = true;
-                }
-                const stepLabel = nodeToStepLabel(currentNodeName, agentBlockCount);
-                emitStep(controller, stepLabel);
-                trackEvent();
-                continue;
-              }
-
-              if (obj.type === 'end') {
-                if (currentNodeName === 'agente_negocio' && inFinalAgentBlock) {
-                  inFinalAgentBlock = false;
-                }
-                continue;
-              }
-
-              if (obj.type === 'item') {
-                const content = obj.content;
-                if (typeof content !== 'string' || content === '') continue;
-
-                // Check for final {"output":"..."} from Respond to Webhook
-                try {
-                  const parsed = JSON.parse(content);
-                  if (parsed.output) {
-                    finalOutput = parsed.output;
-                    continue;
-                  }
-                } catch { /* not JSON wrapper */ }
-
-                // Extract step from "Calling agente_xxx" patterns
-                const callingStep = extractCallingStep(content);
-                if (callingStep) {
-                  emitStep(controller, callingStep);
-                  trackEvent();
-                  // Don't emit as token — it's noise
-                  continue;
-                }
-
-                // Filter internal noise
-                if (isInternalAgentNoise(content)) continue;
-
-                // Only stream tokens from the final agent response block
-                if (inFinalAgentBlock) {
-                  streamedContent += content;
-                  emitSSE(controller, { type: 'token', token: content });
-                  trackEvent();
-                }
-              }
+            // Check for emoji-based steps (sub-agent responses)
+            if (/^[📊📋🧠💡✅]/.test(chunk.trim())) {
+              emitStep('Processando resultados...');
             }
           }
 
-          // Process remaining buffer
-          if (n8nBuffer.trim()) {
-            try {
-              const obj = JSON.parse(n8nBuffer.trim());
-              if (obj.type === 'item' && obj.content) {
-                try {
-                  const parsed = JSON.parse(obj.content);
-                  if (parsed.output) finalOutput = parsed.output;
-                } catch {
-                  if (inFinalAgentBlock && !isInternalAgentNoise(obj.content)) {
-                    streamedContent += obj.content;
-                    emitSSE(controller, { type: 'token', token: obj.content });
-                  }
-                }
-              }
-            } catch { /* ignore */ }
+          // ── Stream finished: extract final output ──
+          console.log('[nlq-proxy] Full buffer length:', fullBuffer.length);
+
+          let finalContent = extractFinalOutput(fullBuffer);
+          if (!finalContent) {
+            console.warn('[nlq-proxy] No {"output":"..."} found, using fallback extraction');
+            finalContent = extractFallbackResponse(fullBuffer);
           }
 
-          // Save final content
-          const contentToSave = (finalOutput || streamedContent).trim();
-          if (contentToSave) {
-            await supabase
-              .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content: contentToSave, status: 'complete' });
+          if (!finalContent) {
+            finalContent = 'Desculpe, não consegui processar sua solicitação. Tente novamente.';
+          }
 
-            if (!streamedContent && finalOutput) {
-              emitSSE(controller, { type: 'token', token: finalOutput });
+          // Emit "elaborating" step before sending tokens
+          emitStep('Elaborando resposta final...');
+
+          // Simulate streaming of the final content in chunks
+          for (let i = 0; i < finalContent.length; i += SIMULATED_CHUNK_SIZE) {
+            const tokenChunk = finalContent.substring(i, i + SIMULATED_CHUNK_SIZE);
+            emitSSE({ type: 'token', token: tokenChunk });
+            lastEventTime = Date.now();
+            // Small delay to simulate typing effect
+            if (i + SIMULATED_CHUNK_SIZE < finalContent.length) {
+              await new Promise(r => setTimeout(r, SIMULATED_CHUNK_DELAY_MS));
             }
           }
+
+          // Save clean content to database
+          await supabase
+            .from('chat_messages')
+            .insert({ session_id, role: 'assistant', content: finalContent, status: 'complete' });
 
           clearInterval(keepaliveTimer);
-          emitSSE(controller, { type: 'done' });
+          emitSSE({ type: 'done' });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (err) {
@@ -338,7 +337,7 @@ Deno.serve(async (req) => {
           await supabase
             .from('chat_messages')
             .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-          emitSSE(controller, { error: errMsg });
+          emitSSE({ error: errMsg });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         }
