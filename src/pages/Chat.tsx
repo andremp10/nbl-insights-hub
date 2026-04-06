@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, memo } from 'react';
-import { ArrowUp, Loader2, Bot, Plus } from 'lucide-react';
+import { ArrowUp, Loader2, Bot, Plus, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar } from '@/components/chat/SessionsSidebar';
@@ -18,7 +18,6 @@ export default function Chat() {
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
 
-  // Stable callback refs to avoid invalidating ChatMessage memo
   const retryRef = useRef(retryMessage);
   retryRef.current = retryMessage;
 
@@ -28,7 +27,6 @@ export default function Chat() {
     if (s) { setCurrentSessionId(s.id); return s.id; }
     return null;
   }, [currentSessionId, createSession]);
-
 
   useEffect(() => {
     if (!currentSessionId || !pendingToSendRef.current) return;
@@ -44,7 +42,7 @@ export default function Chat() {
     updateSessionTitle(currentSessionId, title);
   }, [currentSessionId, updateSessionTitle]);
 
-  // Auto-scroll on new messages or during streaming
+  // Auto-scroll
   const lastMsgContent = messages.length > 0 ? messages[messages.length - 1].content : '';
   const lastMsgStatus = messages.length > 0 ? messages[messages.length - 1].status : '';
   useEffect(() => {
@@ -106,7 +104,6 @@ export default function Chat() {
     handleSend(text);
   }, [handleSend]);
 
-  // Stable retry handler using ref
   const handleRetry = useCallback((msgId: string) => {
     retryRef.current(msgId);
   }, []);
@@ -120,9 +117,8 @@ export default function Chat() {
       ? 'error'
       : 'idle';
 
-
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
+    <div className="flex h-full min-h-0 overflow-hidden">
       <SessionsSidebar
         groupedSessions={groupedSessions}
         currentSessionId={currentSessionId}
@@ -135,10 +131,19 @@ export default function Chat() {
         loading={sessionsLoading}
       />
 
-      <div className="flex flex-col flex-1 min-w-0">
-        {/* ── Header fixo ── */}
-        <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-2.5 border-b border-border bg-background sticky top-0 z-10">
+      <div className="flex flex-col flex-1 min-w-0 h-full">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between gap-3 px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
           <div className="flex items-center gap-2.5">
+            {!sidebarOpen && (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mr-1"
+                title="Abrir sessões"
+              >
+                <PanelLeft className="w-4 h-4" />
+              </button>
+            )}
             <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
               <Bot className="w-4 h-4 text-primary" />
             </div>
@@ -150,8 +155,8 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* ── Corpo central ── */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
+        {/* ── Messages area ── */}
+        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
           {messagesLoading ? (
             <div className="flex items-center justify-center h-full gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
@@ -160,16 +165,16 @@ export default function Chat() {
           ) : !hasMessages && !sending ? (
             <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
           ) : (
-            <div className="w-full max-w-[860px] mx-auto px-4 md:px-8 py-6 space-y-5">
+            <div className="w-full max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
               {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    message={message}
-                    onRetry={message.status === 'error' ? () => handleRetry(message.id) : undefined}
-                    onFollowUp={handleSuggestionClick}
-                  />
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  onRetry={message.status === 'error' ? () => handleRetry(message.id) : undefined}
+                  onFollowUp={handleSuggestionClick}
+                />
               ))}
-              <div ref={messagesEndRef} className="h-1" />
+              <div ref={messagesEndRef} className="h-px" />
             </div>
           )}
         </div>
@@ -232,7 +237,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -260,9 +265,9 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
   const canSend = !sending && input.trim().length > 0;
 
   return (
-    <div className="border-t border-border bg-background px-4 py-3 md:px-6">
-      <div className="w-full max-w-[860px] mx-auto">
-        <div className="relative bg-muted/40 rounded-2xl p-2">
+    <div className="shrink-0 border-t border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 md:px-6">
+      <div className="w-full max-w-3xl mx-auto">
+        <div className="relative flex items-end gap-2 bg-muted/40 rounded-2xl border border-border/40 focus-within:border-primary/40 transition-colors p-1.5">
           <textarea
             ref={textareaRef}
             value={input}
@@ -271,8 +276,8 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             onKeyDown={handleKeyDown}
             placeholder="Pergunte sobre financeiro, pedidos, clientes..."
             rows={1}
-            className="w-full resize-none bg-transparent border-0 px-4 py-2.5 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ minHeight: '40px', maxHeight: '120px' }}
+            className="flex-1 resize-none bg-transparent border-0 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ minHeight: '40px', maxHeight: '160px' }}
             aria-label="Campo de mensagem"
           />
           <button
@@ -280,15 +285,18 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             disabled={!canSend}
             aria-label="Enviar mensagem"
             className={cn(
-              'absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 active:scale-95',
+              'shrink-0 flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200 active:scale-95 mb-0.5',
               canSend
-                ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
-                : 'bg-muted-foreground/20 text-muted-foreground cursor-not-allowed'
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/20'
+                : 'bg-muted-foreground/15 text-muted-foreground/40 cursor-not-allowed'
             )}
           >
             {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
           </button>
         </div>
+        <p className="text-[10px] text-muted-foreground/40 text-center mt-1.5">
+          O assistente pode cometer erros. Verifique dados importantes.
+        </p>
       </div>
     </div>
   );
