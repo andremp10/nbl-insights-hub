@@ -1,65 +1,88 @@
 
 
-# Plano — Ajuste do Streaming entre n8n e Edge Function
+# Plano — Isolamento de Sessoes por Usuario no Chat
 
-## Problema Identificado
+## Problemas Identificados
 
-O fluxo atual no n8n e:
+### 1. Edge Function sem validacao de usuario (CRITICO)
+A `nlq-proxy` usa `SERVICE_ROLE_KEY` (bypassa RLS) e **nao valida quem esta chamando**. Qualquer usuario autenticado pode enviar mensagens para qualquer `session_id`, incluindo sessoes de outros usuarios.
+
+### 2. Realtime sem filtragem por usuario
+O canal Realtime em `useChatMessages` escuta `session_id=eq.${sessionId}` — o RLS do Supabase protege no SELECT, mas o canal nao filtra por `user_id`. Na pratica, o RLS ja impede que o usuario veja mensagens de sessoes que nao sao dele, entao isso funciona corretamente.
+
+### 3. Sessoes: OK
+O `useChatSessions` ja filtra por `user_id = auth.uid()` tanto no fetch quanto no Realtime. RLS tambem protege. Isso esta correto.
+
+### 4. Deduplicacao sem escopo de usuario
+A checagem de idempotencia na Edge Function busca por `session_id + content + janela de 10s`, mas como usa `SERVICE_ROLE_KEY`, poderia teoricamente colidir entre usuarios com o mesmo conteudo na mesma sessao (improvavel, mas incorreto).
+
+## Solucao
+
+### Arquivo: `supabase/functions/nlq-proxy/index.ts`
+
+Adicionar validacao JWT no inicio da funcao:
+
+1. Extrair o token do header `Authorization`
+2. Usar `supabase.auth.getUser(token)` para obter o `user_id`
+3. Verificar que o `session_id` enviado pertence ao usuario autenticado (query em `chat_sessions` onde `id = session_id AND user_id = auth_user_id`)
+4. Se nao pertencer, retornar 403
+
+Isso garante que:
+- Usuario A nao pode enviar mensagens na sessao do Usuario B
+- As mensagens inseridas via `SERVICE_ROLE_KEY` sao sempre para sessoes validas do usuario
+
 ```text
-Webhook → agente_negocio → Edit Fields → Respond to Webhook
+Fluxo corrigido:
+
+Frontend (com JWT) ──POST──▶ nlq-proxy
+                                │
+                                ├─ Valida JWT → obtem user_id
+                                ├─ Verifica session_id pertence ao user_id
+                                ├─ Insere user msg
+                                ├─ Chama n8n (stream)
+                                └─ Insere assistant msg ao final
 ```
 
-O node **Edit Fields** entre o agente e o "Respond to Webhook" **quebra o streaming**. Ele espera o output completo do agente para mapear os campos (`pending_message_id` e `output`), e so entao passa para o "Respond to Webhook". Isso significa que o n8n nao envia tokens em tempo real — ele bufferiza tudo e envia de uma vez.
+### Mudancas especificas
 
-## O que precisa mudar no n8n
+**`supabase/functions/nlq-proxy/index.ts`** — Adicionar ~15 linhas no inicio:
 
-### Remover o node Edit Fields
+```typescript
+// Apos o parse do body:
+const authHeader = req.headers.get('Authorization');
+if (!authHeader?.startsWith('Bearer ')) {
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+}
 
-Para streaming real (token a token do LLM), o fluxo deve ser:
+const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: { headers: { Authorization: authHeader } }
+});
+const { data: claims, error: claimsErr } = await userClient.auth.getUser();
+if (claimsErr || !claims.user) {
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
+}
 
-```text
-Webhook → agente_negocio → Respond to Webhook (streaming habilitado)
+const userId = claims.user.id;
+
+// Verificar ownership da sessao
+const { data: sessionOwner } = await supabase
+  .from('chat_sessions')
+  .select('user_id')
+  .eq('id', session_id)
+  .single();
+
+if (!sessionOwner || sessionOwner.user_id !== userId) {
+  return new Response(JSON.stringify({ error: 'Sessao nao pertence ao usuario' }), { status: 403, headers: corsHeaders });
+}
 ```
 
-O "Respond to Webhook" deve receber diretamente a saida do agente, sem intermediarios.
+Nenhuma mudanca no frontend — ele ja envia o token JWT no header `Authorization`.
 
-### O `pending_message_id` nao e mais necessario
+## Resumo
 
-Na arquitetura nova, **a Edge Function (`nlq-proxy`) ja salva a mensagem do assistente no Supabase** ao final do stream (linhas 154-159 do codigo atual). O n8n nao precisa salvar nada no banco. Ele so precisa responder com o texto do agente.
+| Arquivo | Acao |
+|---------|------|
+| `supabase/functions/nlq-proxy/index.ts` | Adicionar validacao JWT + verificacao de ownership da sessao |
 
-Portanto:
-- **Remover** o node Edit Fields
-- **Remover** qualquer logica no n8n que salve no Supabase via `pending_message_id`
-- O n8n so precisa: receber a pergunta, processar no agente, e devolver o texto via streaming
-
-## O que precisa mudar no codigo (Edge Function)
-
-O codigo atual da `nlq-proxy` ja esta correto para este cenario. Porem, o formato do stream vindo do n8n com "Respond to Webhook" pode ser **texto puro** (nao SSE formatado). O codigo atual ja lida com isso — ele le chunks brutos e os repassa como SSE para o frontend.
-
-Ha um ajuste necessario: o n8n com streaming pode enviar o output como texto plano em chunks (sem `data:` prefix). O codigo atual na linha 147-151 ja trata isso corretamente — acumula o chunk e repassa como `data: {"token": "..."}\n\n`.
-
-### Unico ajuste no codigo
-
-Nenhuma mudanca de codigo e necessaria. A Edge Function e o frontend ja estao preparados para:
-1. Receber chunks de texto puro do n8n
-2. Repassar como SSE ao frontend
-3. Acumular e salvar a mensagem completa no Supabase ao final
-
-## Resumo de acoes
-
-| Onde | Acao |
-|------|------|
-| **n8n** | Remover o node "Edit Fields" — conectar `agente_negocio` direto ao `Respond to Webhook` |
-| **n8n** | Garantir que "Respond to Webhook" esta com streaming habilitado |
-| **n8n** | Remover qualquer logica que salve no Supabase via `pending_message_id` (o Edge Function ja faz isso) |
-| **Codigo** | Nenhuma mudanca necessaria — `nlq-proxy` e frontend ja estao corretos |
-
-## Passo a passo no n8n
-
-1. Abra o workflow `nbl_agente`
-2. Delete o node **Edit Fields**
-3. Conecte a saida do **agente_negocio** diretamente ao **Respond to Webhook**
-4. No node **Respond to Webhook**, confirme que a opcao de streaming esta habilitada
-5. Publique o workflow
-6. Teste enviando uma mensagem no chat — os tokens devem aparecer progressivamente
+Apenas 1 arquivo modificado. O restante do fluxo (sessoes, Realtime, frontend) ja esta correto para multi-usuario.
 
