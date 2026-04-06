@@ -12,44 +12,56 @@ const corsHeaders = {
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 const SIMULATED_CHUNK_SIZE = 80;
-const SIMULATED_CHUNK_DELAY_MS = 15;
+const SIMULATED_CHUNK_DELAY_MS = 12;
 
-// ── Step detection patterns ──
-interface StepPattern {
-  regex: RegExp;
+// ── Step detection on text content ──
+interface StepMatch {
   label: string;
-  skip?: boolean; // true = detect but don't emit a step
+  skip?: boolean;
 }
 
-const STEP_PATTERNS: StepPattern[] = [
-  { regex: /to=multi_tool_use/i, label: 'Analisando sua pergunta...' },
-  { regex: /Calling agente_consulta/i, label: 'Consultando dados de pedidos...' },
-  { regex: /Calling agente_financeiro/i, label: 'Consultando dados financeiros...' },
-  { regex: /Calling\s+\w+/i, label: 'Consultando dados...' },
-  { regex: /functions\.chat_historico/i, label: 'Verificando histórico...' },
-  { regex: /functions\.Think/i, label: '', skip: true },
-];
+function detectStepsInText(text: string): StepMatch[] {
+  const matches: StepMatch[] = [];
+  if (/to=multi_tool_use/i.test(text)) matches.push({ label: 'Analisando sua pergunta...' });
+  if (/Calling agente_consulta/i.test(text)) matches.push({ label: 'Consultando dados de pedidos...' });
+  if (/Calling agente_financeiro/i.test(text)) matches.push({ label: 'Consultando dados financeiros...' });
+  if (/Calling\s+\w+/i.test(text) && matches.length === 0) matches.push({ label: 'Consultando dados...' });
+  if (/functions\.chat_historico/i.test(text)) matches.push({ label: 'Verificando histórico...' });
+  return matches;
+}
 
-// ── Detect steps in a new text chunk ──
-function detectSteps(newText: string): string[] {
-  const detected: string[] = [];
-  for (const pattern of STEP_PATTERNS) {
-    if (pattern.regex.test(newText)) {
-      if (!pattern.skip && pattern.label) {
-        detected.push(pattern.label);
-      }
-    }
+// ── Map n8n node names to friendly labels ──
+function nodeToStepLabel(nodeName: string, agentBeginCount: number): string | null {
+  const lower = nodeName.toLowerCase();
+  if (lower.includes('agente_consulta')) return 'Consultando dados de pedidos...';
+  if (lower.includes('agente_financeiro')) return 'Consultando dados financeiros...';
+  if (lower.includes('supabase') || lower.includes('tool')) return 'Acessando banco de dados...';
+  if (lower.includes('agente_negocio') || lower.includes('agente')) {
+    return agentBeginCount <= 1 ? 'Analisando sua pergunta...' : 'Elaborando resposta...';
   }
-  return detected;
+  return 'Processando...';
 }
 
-// ── Extract final output from {"output":"..."} JSON wrapper ──
+// ── Check if text is internal agent noise ──
+function isInternalAgentNoise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (/^Calling \w+ with input:/i.test(t)) return true;
+  if (/^```json\s*\{/.test(t)) return true;
+  if (/^\{"Prompt_|^\{"tool_/i.test(t)) return true;
+  if (/^Thought:|^Action:|^Observation:/i.test(t)) return true;
+  if (t.startsWith('{') && (t.includes('"Batch_Size"') || t.includes('"action_input"'))) return true;
+  if (/^\{[\s\S]*\}$/.test(t) && t.length < 500) {
+    try { JSON.parse(t); return true; } catch { /* not JSON */ }
+  }
+  if (/^to=multi_tool_use/i.test(t)) return true;
+  return false;
+}
+
+// ── Extract final output from {"output":"..."} ──
 function extractFinalOutput(fullBuffer: string): string | null {
-  // Look for the LAST occurrence of {"output":"..."}
-  // The n8n "Respond to Webhook" node wraps the final answer in this format
   const lastBrace = fullBuffer.lastIndexOf('{"output"');
   if (lastBrace === -1) return null;
-
   const substr = fullBuffer.substring(lastBrace);
   try {
     const parsed = JSON.parse(substr);
@@ -57,41 +69,25 @@ function extractFinalOutput(fullBuffer: string): string | null {
       return parsed.output.trim();
     }
   } catch {
-    // The JSON might be split across chunks or malformed — try a regex fallback
-    const match = substr.match(/\{"output"\s*:\s*"([\s\S]+)"\s*\}$/);
+    // Try to find it with regex
+    const match = substr.match(/\{"output"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/);
     if (match) {
-      try {
-        // Unescape JSON string
-        return JSON.parse(`"${match[1]}"`);
-      } catch { /* ignore */ }
+      try { return JSON.parse(`"${match[1]}"`); } catch { /* ignore */ }
     }
   }
   return null;
 }
 
-// ── Fallback: extract last meaningful text block when no {"output":...} found ──
+// ── Fallback extraction ──
 function extractFallbackResponse(fullBuffer: string): string {
-  // Remove known noise patterns
   let cleaned = fullBuffer;
-
-  // Remove "Calling X with input: {...}" blocks
   cleaned = cleaned.replace(/Calling\s+\w+\s+with\s+input:\s*\{[^}]*\}/gi, '');
-  // Remove "to=multi_tool_use..." lines
   cleaned = cleaned.replace(/to=multi_tool_use[^\n]*/gi, '');
-  // Remove raw JSON objects that look like tool payloads
   cleaned = cleaned.replace(/\{"(Prompt_|tool_|Batch_)[^}]*\}/gi, '');
-  // Remove ReAct traces
   cleaned = cleaned.replace(/^(Thought|Action|Observation):[^\n]*/gim, '');
-  // Remove code block JSON
   cleaned = cleaned.replace(/```json[\s\S]*?```/g, '');
-
-  // Take the last substantial block of text (likely the final answer)
   const blocks = cleaned.split(/\n{2,}/).map(b => b.trim()).filter(b => b.length > 20);
-  if (blocks.length > 0) {
-    return blocks[blocks.length - 1];
-  }
-
-  return cleaned.trim();
+  return blocks.length > 0 ? blocks[blocks.length - 1] : cleaned.trim();
 }
 
 Deno.serve(async (req) => {
@@ -176,7 +172,7 @@ Deno.serve(async (req) => {
 
     if (userMsgError) throw userMsgError;
 
-    // Context (last 10 messages)
+    // Context
     const { data: history } = await supabase
       .from('chat_messages')
       .select('role, content')
@@ -214,11 +210,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Non-streaming fallback (no body)
+    // Non-streaming fallback
     if (!n8nResponse.body) {
       const text = await n8nResponse.text();
       let content = text.trim();
-      // Try to extract from {"output":"..."}
       const extracted = extractFinalOutput(content);
       if (extracted) content = extracted;
 
@@ -228,14 +223,16 @@ Deno.serve(async (req) => {
 
       const encoder = new TextEncoder();
       const body = encoder.encode(
-        `data: ${JSON.stringify({ type: 'token', token: content })}\n\ndata: ${JSON.stringify({ user_message_id: userMsg.id })}\n\ndata: [DONE]\n\n`
+        `data: ${JSON.stringify({ user_message_id: userMsg.id })}\n\ndata: ${JSON.stringify({ type: 'token', token: content })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\ndata: [DONE]\n\n`
       );
       return new Response(body, {
         headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
       });
     }
 
-    // ── Streaming: raw text-based parsing ──
+    // ════════════════════════════════════════════════════════════════
+    // STREAMING — Hybrid parser (JSON lines + raw text detection)
+    // ════════════════════════════════════════════════════════════════
     const reader = n8nResponse.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
@@ -243,15 +240,20 @@ Deno.serve(async (req) => {
     const stream = new ReadableStream({
       async start(controller) {
         let fullBuffer = '';
+        let lineBuffer = '';
         const emittedSteps = new Set<string>();
+        let agentBeginCount = 0;
+        let chunkIndex = 0;
+        let detectedFormat: 'json' | 'text' | 'unknown' = 'unknown';
 
         function emitSSE(data: Record<string, unknown>) {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         }
 
         function emitStep(label: string) {
-          if (emittedSteps.has(label)) return;
+          if (!label || emittedSteps.has(label)) return;
           emittedSteps.add(label);
+          console.log(`[nlq-proxy] STEP: ${label}`);
           emitSSE({ type: 'step', step: label });
         }
 
@@ -273,33 +275,128 @@ Deno.serve(async (req) => {
         }, KEEPALIVE_INTERVAL_MS);
 
         try {
-          // Read all chunks from n8n, accumulating and detecting steps
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
             const chunk = decoder.decode(value, { stream: true });
+            chunkIndex++;
             fullBuffer += chunk;
             lastEventTime = Date.now();
 
-            // Detect steps in the new chunk
-            const steps = detectSteps(chunk);
-            for (const step of steps) {
-              emitStep(step);
+            // Log first 5 chunks for format diagnosis
+            if (chunkIndex <= 5) {
+              console.log(`[nlq-proxy] chunk#${chunkIndex} (${chunk.length}b): ${chunk.substring(0, 200)}`);
             }
 
-            // Check for emoji-based steps (sub-agent responses)
-            if (/^[📊📋🧠💡✅]/.test(chunk.trim())) {
-              emitStep('Processando resultados...');
+            // ── Strategy 1: Try JSON-per-line parsing ──
+            lineBuffer += chunk;
+            const lines = lineBuffer.split('\n');
+            lineBuffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+
+              let obj: any;
+              try { obj = JSON.parse(trimmed); } catch { 
+                // Not JSON — use text-based detection on this line
+                const textSteps = detectStepsInText(trimmed);
+                for (const s of textSteps) {
+                  if (!s.skip) emitStep(s.label);
+                }
+                continue; 
+              }
+
+              // Successfully parsed JSON — we know the format
+              if (detectedFormat === 'unknown') {
+                detectedFormat = 'json';
+                console.log('[nlq-proxy] Detected format: JSON-per-line');
+              }
+
+              // Handle n8n structured events
+              if (obj.type === 'begin') {
+                const nodeName = obj.metadata?.nodeName || '';
+                if (nodeName.toLowerCase().includes('agente')) agentBeginCount++;
+                const label = nodeToStepLabel(nodeName, agentBeginCount);
+                if (label) emitStep(label);
+                continue;
+              }
+
+              if (obj.type === 'end') continue;
+
+              if (obj.type === 'item') {
+                const content = obj.content;
+                if (typeof content !== 'string' || !content.trim()) continue;
+
+                // Check for final {"output":"..."} wrapper
+                try {
+                  const parsed = JSON.parse(content);
+                  if (parsed.output) {
+                    console.log('[nlq-proxy] Found {"output":"..."} in item event');
+                    continue; // Will be extracted from fullBuffer later
+                  }
+                } catch { /* not JSON wrapper */ }
+
+                // Detect steps from content text
+                const textSteps = detectStepsInText(content);
+                for (const s of textSteps) {
+                  if (!s.skip) emitStep(s.label);
+                }
+                continue;
+              }
+
+              // Handle direct {"output":"..."} at top level
+              if (obj.output && typeof obj.output === 'string') {
+                console.log('[nlq-proxy] Found top-level {"output":"..."}');
+                continue;
+              }
+            }
+
+            // ── Strategy 2: Text-based detection on accumulated buffer ──
+            if (detectedFormat !== 'json') {
+              if (detectedFormat === 'unknown' && chunkIndex >= 3) {
+                detectedFormat = 'text';
+                console.log('[nlq-proxy] Detected format: raw text');
+              }
+
+              // Detect steps in the raw chunk text
+              const textSteps = detectStepsInText(chunk);
+              for (const s of textSteps) {
+                if (!s.skip) emitStep(s.label);
+              }
+
+              // Emoji-based step detection
+              if (/[📊📋🧠💡✅]/.test(chunk)) {
+                emitStep('Processando resultados...');
+              }
+            }
+          }
+
+          // ── Process remaining lineBuffer ──
+          if (lineBuffer.trim()) {
+            try {
+              const obj = JSON.parse(lineBuffer.trim());
+              if (obj.type === 'item' && obj.content) {
+                // processed below via fullBuffer
+              } else if (obj.output) {
+                console.log('[nlq-proxy] Found {"output":"..."} in remaining buffer');
+              }
+            } catch {
+              const textSteps = detectStepsInText(lineBuffer);
+              for (const s of textSteps) {
+                if (!s.skip) emitStep(s.label);
+              }
             }
           }
 
           // ── Stream finished: extract final output ──
-          console.log('[nlq-proxy] Full buffer length:', fullBuffer.length);
+          console.log(`[nlq-proxy] Stream done. Total buffer: ${fullBuffer.length}b, ${chunkIndex} chunks, format: ${detectedFormat}`);
+          console.log(`[nlq-proxy] Buffer tail (last 300): ${fullBuffer.substring(fullBuffer.length - 300)}`);
 
           let finalContent = extractFinalOutput(fullBuffer);
           if (!finalContent) {
-            console.warn('[nlq-proxy] No {"output":"..."} found, using fallback extraction');
+            console.warn('[nlq-proxy] No {"output":"..."} found, trying fallback');
             finalContent = extractFallbackResponse(fullBuffer);
           }
 
@@ -307,15 +404,16 @@ Deno.serve(async (req) => {
             finalContent = 'Desculpe, não consegui processar sua solicitação. Tente novamente.';
           }
 
-          // Emit "elaborating" step before sending tokens
+          console.log(`[nlq-proxy] Final content length: ${finalContent.length}`);
+
+          // Emit final step
           emitStep('Elaborando resposta final...');
 
-          // Simulate streaming of the final content in chunks
+          // Simulate streaming of the clean final content
           for (let i = 0; i < finalContent.length; i += SIMULATED_CHUNK_SIZE) {
             const tokenChunk = finalContent.substring(i, i + SIMULATED_CHUNK_SIZE);
             emitSSE({ type: 'token', token: tokenChunk });
             lastEventTime = Date.now();
-            // Small delay to simulate typing effect
             if (i + SIMULATED_CHUNK_SIZE < finalContent.length) {
               await new Promise(r => setTimeout(r, SIMULATED_CHUNK_DELAY_MS));
             }
