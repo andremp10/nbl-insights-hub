@@ -128,11 +128,27 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Streaming response from n8n
+    // Streaming response from n8n — parse structured JSON lines
+    // n8n sends lines like: {"type":"item","content":"token text","metadata":{...}}
+    // We extract only the "content" from "type":"item" chunks
     let fullContent = '';
     const reader = n8nResponse.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
+    let n8nBuffer = '';
+
+    // Helper: parse a single JSON line from n8n and extract text content
+    function extractContent(jsonLine: string): string | null {
+      try {
+        const obj = JSON.parse(jsonLine);
+        if (obj.type === 'item' && typeof obj.content === 'string' && obj.content !== '') {
+          return obj.content;
+        }
+      } catch {
+        // Not valid JSON, ignore
+      }
+      return null;
+    }
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -144,11 +160,31 @@ Deno.serve(async (req) => {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = decoder.decode(value, { stream: true });
-            fullContent += chunk;
+            n8nBuffer += decoder.decode(value, { stream: true });
 
-            // Forward chunk as SSE token event
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: chunk })}\n\n`));
+            // Split by newlines — each line is a JSON object from n8n
+            const lines = n8nBuffer.split('\n');
+            n8nBuffer = lines.pop() || ''; // Keep incomplete last line in buffer
+
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              if (!trimmedLine) continue;
+
+              const text = extractContent(trimmedLine);
+              if (text) {
+                fullContent += text;
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: text })}\n\n`));
+              }
+            }
+          }
+
+          // Process any remaining buffer
+          if (n8nBuffer.trim()) {
+            const text = extractContent(n8nBuffer.trim());
+            if (text) {
+              fullContent += text;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: text })}\n\n`));
+            }
           }
 
           // Stream finished — persist full assistant message
