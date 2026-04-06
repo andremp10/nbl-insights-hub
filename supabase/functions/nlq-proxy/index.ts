@@ -10,27 +10,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const KEEPALIVE_INTERVAL_MS = 15_000;
+const KEEPALIVE_INTERVAL_MS = 10_000;
 const SIMULATED_CHUNK_SIZE = 80;
-const SIMULATED_CHUNK_DELAY_MS = 12;
+const SIMULATED_CHUNK_DELAY_MS = 10;
+const N8N_FETCH_TIMEOUT_MS = 360_000; // 6 min timeout for n8n fetch
 
 // ── Step detection on text content ──
-interface StepMatch {
-  label: string;
-  skip?: boolean;
-}
-
-function detectStepsInText(text: string): StepMatch[] {
-  const matches: StepMatch[] = [];
-  if (/to=multi_tool_use/i.test(text)) matches.push({ label: 'Analisando sua pergunta...' });
-  if (/Calling agente_consulta/i.test(text)) matches.push({ label: 'Consultando dados de pedidos...' });
-  if (/Calling agente_financeiro/i.test(text)) matches.push({ label: 'Consultando dados financeiros...' });
-  if (/Calling\s+\w+/i.test(text) && matches.length === 0) matches.push({ label: 'Consultando dados...' });
-  if (/functions\.chat_historico/i.test(text)) matches.push({ label: 'Verificando histórico...' });
+function detectStepsInText(text: string): string[] {
+  const matches: string[] = [];
+  if (/to=multi_tool_use/i.test(text)) matches.push('Analisando sua pergunta...');
+  if (/Calling agente_consulta/i.test(text)) matches.push('Consultando dados de pedidos...');
+  if (/Calling agente_financeiro/i.test(text)) matches.push('Consultando dados financeiros...');
+  if (/Calling\s+\w+/i.test(text) && matches.length === 0) matches.push('Consultando dados...');
+  if (/functions\.chat_historico/i.test(text)) matches.push('Verificando histórico...');
+  if (/[📊📋🧠💡✅]/.test(text)) matches.push('Processando resultados...');
   return matches;
 }
 
-// ── Map n8n node names to friendly labels ──
 function nodeToStepLabel(nodeName: string, agentBeginCount: number): string | null {
   const lower = nodeName.toLowerCase();
   if (lower.includes('agente_consulta')) return 'Consultando dados de pedidos...';
@@ -42,7 +38,6 @@ function nodeToStepLabel(nodeName: string, agentBeginCount: number): string | nu
   return 'Processando...';
 }
 
-// ── Check if text is internal agent noise ──
 function isInternalAgentNoise(text: string): boolean {
   const t = text.trim();
   if (!t) return true;
@@ -58,7 +53,6 @@ function isInternalAgentNoise(text: string): boolean {
   return false;
 }
 
-// ── Extract final output from {"output":"..."} ──
 function extractFinalOutput(fullBuffer: string): string | null {
   const lastBrace = fullBuffer.lastIndexOf('{"output"');
   if (lastBrace === -1) return null;
@@ -69,7 +63,6 @@ function extractFinalOutput(fullBuffer: string): string | null {
       return parsed.output.trim();
     }
   } catch {
-    // Try to find it with regex
     const match = substr.match(/\{"output"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/);
     if (match) {
       try { return JSON.parse(`"${match[1]}"`); } catch { /* ignore */ }
@@ -78,7 +71,6 @@ function extractFinalOutput(fullBuffer: string): string | null {
   return null;
 }
 
-// ── Fallback extraction ──
 function extractFallbackResponse(fullBuffer: string): string {
   let cleaned = fullBuffer;
   cleaned = cleaned.replace(/Calling\s+\w+\s+with\s+input:\s*\{[^}]*\}/gi, '');
@@ -183,71 +175,23 @@ Deno.serve(async (req) => {
 
     const context = (history || []).reverse();
 
-    // Call n8n
-    const n8nResponse = await fetch(N8N_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        app: 'grafica_nbl_lovable',
-        message: trimmedMessage,
-        session_id,
-        user_message_id: userMsg.id,
-        context,
-        supabase_url: SUPABASE_URL,
-        supabase_service_key: SUPABASE_SERVICE_ROLE_KEY,
-      }),
-    });
-
-    if (!n8nResponse.ok) {
-      const errBody = await n8nResponse.text();
-      console.error('[nlq-proxy] n8n error:', n8nResponse.status, errBody);
-      await supabase
-        .from('chat_messages')
-        .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: `Webhook retornou ${n8nResponse.status}` });
-      return new Response(
-        JSON.stringify({ success: false, error: `n8n retornou ${n8nResponse.status}` }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 }
-      );
-    }
-
-    // Non-streaming fallback
-    if (!n8nResponse.body) {
-      const text = await n8nResponse.text();
-      let content = text.trim();
-      const extracted = extractFinalOutput(content);
-      if (extracted) content = extracted;
-
-      await supabase
-        .from('chat_messages')
-        .insert({ session_id, role: 'assistant', content, status: 'complete' });
-
-      const encoder = new TextEncoder();
-      const body = encoder.encode(
-        `data: ${JSON.stringify({ user_message_id: userMsg.id })}\n\ndata: ${JSON.stringify({ type: 'token', token: content })}\n\ndata: ${JSON.stringify({ type: 'done' })}\n\ndata: [DONE]\n\n`
-      );
-      return new Response(body, {
-        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
-      });
-    }
-
     // ════════════════════════════════════════════════════════════════
-    // STREAMING — Hybrid parser (JSON lines + raw text detection)
+    // START SSE STREAM IMMEDIATELY — before calling n8n
+    // This ensures the client always gets data and never hangs
     // ════════════════════════════════════════════════════════════════
-    const reader = n8nResponse.body.getReader();
-    const decoder = new TextDecoder();
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
       async start(controller) {
-        let fullBuffer = '';
-        let lineBuffer = '';
         const emittedSteps = new Set<string>();
         let agentBeginCount = 0;
-        let chunkIndex = 0;
-        let detectedFormat: 'json' | 'text' | 'unknown' = 'unknown';
+        let lastEventTime = Date.now();
 
         function emitSSE(data: Record<string, unknown>) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+            lastEventTime = Date.now();
+          } catch { /* stream closed */ }
         }
 
         function emitStep(label: string) {
@@ -257,24 +201,108 @@ Deno.serve(async (req) => {
           emitSSE({ type: 'step', step: label });
         }
 
-        // Send user_message_id immediately
+        // ── Immediately send user_message_id and first step ──
         emitSSE({ user_message_id: userMsg.id });
-
-        // Emit initial step
         emitStep('Analisando sua pergunta...');
 
-        // Keepalive timer
-        let lastEventTime = Date.now();
+        // ── Keepalive: ping every 10s to prevent connection drops ──
         const keepaliveTimer = setInterval(() => {
           if (Date.now() - lastEventTime >= KEEPALIVE_INTERVAL_MS) {
             try {
               emitSSE({ type: 'ping' });
-              lastEventTime = Date.now();
             } catch { /* stream closed */ }
           }
         }, KEEPALIVE_INTERVAL_MS);
 
+        // Helper to finalize
+        async function finalize(content: string, status: 'complete' | 'error', errorDetail?: string) {
+          clearInterval(keepaliveTimer);
+
+          if (status === 'complete' && content) {
+            emitStep('Elaborando resposta final...');
+            // Simulate streaming of clean content
+            for (let i = 0; i < content.length; i += SIMULATED_CHUNK_SIZE) {
+              const tokenChunk = content.substring(i, i + SIMULATED_CHUNK_SIZE);
+              emitSSE({ type: 'token', token: tokenChunk });
+              if (i + SIMULATED_CHUNK_SIZE < content.length) {
+                await new Promise(r => setTimeout(r, SIMULATED_CHUNK_DELAY_MS));
+              }
+            }
+            await supabase
+              .from('chat_messages')
+              .insert({ session_id, role: 'assistant', content, status: 'complete' });
+          } else {
+            const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
+            await supabase
+              .from('chat_messages')
+              .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
+            emitSSE({ error: errMsg });
+          }
+
+          emitSSE({ type: 'done' });
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        }
+
         try {
+          // ── Call n8n with timeout ──
+          const n8nAbort = new AbortController();
+          const n8nTimeout = setTimeout(() => n8nAbort.abort(), N8N_FETCH_TIMEOUT_MS);
+
+          let n8nResponse: Response;
+          try {
+            n8nResponse = await fetch(N8N_WEBHOOK_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                app: 'grafica_nbl_lovable',
+                message: trimmedMessage,
+                session_id,
+                user_message_id: userMsg.id,
+                context,
+                supabase_url: SUPABASE_URL,
+                supabase_service_key: SUPABASE_SERVICE_ROLE_KEY,
+              }),
+              signal: n8nAbort.signal,
+            });
+            clearTimeout(n8nTimeout);
+          } catch (fetchErr: any) {
+            clearTimeout(n8nTimeout);
+            console.error('[nlq-proxy] n8n fetch failed:', fetchErr.message);
+            if (fetchErr.name === 'AbortError') {
+              await finalize('', 'error', 'A consulta excedeu o tempo limite. Tente com um período menor ou reformule a pergunta.');
+            } else {
+              await finalize('', 'error', 'Não foi possível conectar ao agente. Tente novamente em alguns instantes.');
+            }
+            return;
+          }
+
+          if (!n8nResponse.ok) {
+            const errBody = await n8nResponse.text();
+            console.error('[nlq-proxy] n8n error:', n8nResponse.status, errBody);
+            await finalize('', 'error', `O agente retornou erro (${n8nResponse.status}). Tente novamente.`);
+            return;
+          }
+
+          // ── Non-streaming response ──
+          if (!n8nResponse.body) {
+            const text = await n8nResponse.text();
+            let content = text.trim();
+            const extracted = extractFinalOutput(content);
+            if (extracted) content = extracted;
+            await finalize(content || 'Sem resposta do agente.', content ? 'complete' : 'error');
+            return;
+          }
+
+          // ── Process n8n streaming response ──
+          emitStep('Consultando dados...');
+
+          const reader = n8nResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let fullBuffer = '';
+          let lineBuffer = '';
+          let chunkIndex = 0;
+
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -284,12 +312,11 @@ Deno.serve(async (req) => {
             fullBuffer += chunk;
             lastEventTime = Date.now();
 
-            // Log first 5 chunks for format diagnosis
             if (chunkIndex <= 5) {
               console.log(`[nlq-proxy] chunk#${chunkIndex} (${chunk.length}b): ${chunk.substring(0, 200)}`);
             }
 
-            // ── Strategy 1: Try JSON-per-line parsing ──
+            // Parse lines for JSON events or text patterns
             lineBuffer += chunk;
             const lines = lineBuffer.split('\n');
             lineBuffer = lines.pop() || '';
@@ -299,100 +326,41 @@ Deno.serve(async (req) => {
               if (!trimmed) continue;
 
               let obj: any;
-              try { obj = JSON.parse(trimmed); } catch { 
-                // Not JSON — use text-based detection on this line
-                const textSteps = detectStepsInText(trimmed);
-                for (const s of textSteps) {
-                  if (!s.skip) emitStep(s.label);
-                }
-                continue; 
+              try { obj = JSON.parse(trimmed); } catch {
+                // Text-based step detection
+                const steps = detectStepsInText(trimmed);
+                for (const s of steps) emitStep(s);
+                continue;
               }
 
-              // Successfully parsed JSON — we know the format
-              if (detectedFormat === 'unknown') {
-                detectedFormat = 'json';
-                console.log('[nlq-proxy] Detected format: JSON-per-line');
-              }
-
-              // Handle n8n structured events
+              // JSON events from n8n
               if (obj.type === 'begin') {
                 const nodeName = obj.metadata?.nodeName || '';
                 if (nodeName.toLowerCase().includes('agente')) agentBeginCount++;
                 const label = nodeToStepLabel(nodeName, agentBeginCount);
                 if (label) emitStep(label);
-                continue;
-              }
-
-              if (obj.type === 'end') continue;
-
-              if (obj.type === 'item') {
-                const content = obj.content;
-                if (typeof content !== 'string' || !content.trim()) continue;
-
-                // Check for final {"output":"..."} wrapper
-                try {
-                  const parsed = JSON.parse(content);
-                  if (parsed.output) {
-                    console.log('[nlq-proxy] Found {"output":"..."} in item event');
-                    continue; // Will be extracted from fullBuffer later
-                  }
-                } catch { /* not JSON wrapper */ }
-
-                // Detect steps from content text
-                const textSteps = detectStepsInText(content);
-                for (const s of textSteps) {
-                  if (!s.skip) emitStep(s.label);
-                }
-                continue;
-              }
-
-              // Handle direct {"output":"..."} at top level
-              if (obj.output && typeof obj.output === 'string') {
-                console.log('[nlq-proxy] Found top-level {"output":"..."}');
-                continue;
-              }
-            }
-
-            // ── Strategy 2: Text-based detection on accumulated buffer ──
-            if (detectedFormat !== 'json') {
-              if (detectedFormat === 'unknown' && chunkIndex >= 3) {
-                detectedFormat = 'text';
-                console.log('[nlq-proxy] Detected format: raw text');
-              }
-
-              // Detect steps in the raw chunk text
-              const textSteps = detectStepsInText(chunk);
-              for (const s of textSteps) {
-                if (!s.skip) emitStep(s.label);
-              }
-
-              // Emoji-based step detection
-              if (/[📊📋🧠💡✅]/.test(chunk)) {
+              } else if (obj.type === 'item' && typeof obj.content === 'string') {
+                const steps = detectStepsInText(obj.content);
+                for (const s of steps) emitStep(s);
+              } else if (obj.output && typeof obj.output === 'string') {
                 emitStep('Processando resultados...');
               }
             }
+
+            // Also detect steps in raw chunk text
+            const chunkSteps = detectStepsInText(chunk);
+            for (const s of chunkSteps) emitStep(s);
           }
 
-          // ── Process remaining lineBuffer ──
+          // Process remaining line buffer
           if (lineBuffer.trim()) {
-            try {
-              const obj = JSON.parse(lineBuffer.trim());
-              if (obj.type === 'item' && obj.content) {
-                // processed below via fullBuffer
-              } else if (obj.output) {
-                console.log('[nlq-proxy] Found {"output":"..."} in remaining buffer');
-              }
-            } catch {
-              const textSteps = detectStepsInText(lineBuffer);
-              for (const s of textSteps) {
-                if (!s.skip) emitStep(s.label);
-              }
-            }
+            const steps = detectStepsInText(lineBuffer);
+            for (const s of steps) emitStep(s);
           }
 
-          // ── Stream finished: extract final output ──
-          console.log(`[nlq-proxy] Stream done. Total buffer: ${fullBuffer.length}b, ${chunkIndex} chunks, format: ${detectedFormat}`);
-          console.log(`[nlq-proxy] Buffer tail (last 300): ${fullBuffer.substring(fullBuffer.length - 300)}`);
+          // ── Extract final content ──
+          console.log(`[nlq-proxy] Stream done. ${fullBuffer.length}b, ${chunkIndex} chunks`);
+          console.log(`[nlq-proxy] Buffer tail: ${fullBuffer.substring(Math.max(0, fullBuffer.length - 300))}`);
 
           let finalContent = extractFinalOutput(fullBuffer);
           if (!finalContent) {
@@ -400,51 +368,33 @@ Deno.serve(async (req) => {
             finalContent = extractFallbackResponse(fullBuffer);
           }
 
-          if (!finalContent) {
+          if (!finalContent || finalContent.length < 5) {
             finalContent = 'Desculpe, não consegui processar sua solicitação. Tente novamente.';
           }
 
-          console.log(`[nlq-proxy] Final content length: ${finalContent.length}`);
+          console.log(`[nlq-proxy] Final content: ${finalContent.length} chars`);
+          await finalize(finalContent, 'complete');
 
-          // Emit final step
-          emitStep('Elaborando resposta final...');
-
-          // Simulate streaming of the clean final content
-          for (let i = 0; i < finalContent.length; i += SIMULATED_CHUNK_SIZE) {
-            const tokenChunk = finalContent.substring(i, i + SIMULATED_CHUNK_SIZE);
-            emitSSE({ type: 'token', token: tokenChunk });
-            lastEventTime = Date.now();
-            if (i + SIMULATED_CHUNK_SIZE < finalContent.length) {
-              await new Promise(r => setTimeout(r, SIMULATED_CHUNK_DELAY_MS));
-            }
-          }
-
-          // Save clean content to database
-          await supabase
-            .from('chat_messages')
-            .insert({ session_id, role: 'assistant', content: finalContent, status: 'complete' });
-
-          clearInterval(keepaliveTimer);
-          emitSSE({ type: 'done' });
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
         } catch (err) {
+          console.error('[nlq-proxy] Stream processing error:', err);
           clearInterval(keepaliveTimer);
-          console.error('[nlq-proxy] Stream error:', err);
-          const errMsg = (err as Error).message || 'Erro no stream';
+          const errMsg = (err as Error).message || 'Erro inesperado';
           await supabase
             .from('chat_messages')
             .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
           emitSSE({ error: errMsg });
+          emitSSE({ type: 'done' });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         }
       },
     });
 
+    // Return SSE stream IMMEDIATELY — n8n call happens inside the stream
     return new Response(stream, {
       headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     });
+
   } catch (error) {
     console.error('[nlq-proxy] Error:', error);
     return new Response(
