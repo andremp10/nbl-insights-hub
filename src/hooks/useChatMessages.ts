@@ -15,7 +15,9 @@ export interface ChatMessage {
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-const STREAM_TIMEOUT_MS = 5 * 60 * 1000;
+const STREAM_TIMEOUT_MS = 6 * 60 * 1000; // 6 minutes
+const RECOVERY_POLL_MS = 10_000; // Poll DB every 10s if stream dies without response
+const RECOVERY_MAX_MS = 5 * 60 * 1000; // Keep polling up to 5 minutes
 
 export function useChatMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -23,8 +25,17 @@ export function useChatMessages(sessionId: string | null) {
   const [sending, setSending] = useState(false);
   const invokeInProgressRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const recoveryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load history + subscribe to Realtime for reconnects
+  // Cleanup recovery timer
+  const clearRecovery = useCallback(() => {
+    if (recoveryTimerRef.current) {
+      clearInterval(recoveryTimerRef.current);
+      recoveryTimerRef.current = null;
+    }
+  }, []);
+
+  // Load history + subscribe to Realtime
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
@@ -60,11 +71,25 @@ export function useChatMessages(sessionId: string | null) {
       }, (payload) => {
         const newMsg = payload.new as ChatMessage;
         setMessages(prev => {
+          // Reconcile optimistic messages
           const optIdx = prev.findIndex(m => m.id.startsWith('opt-') && m.role === newMsg.role && m.content === newMsg.content);
           if (optIdx !== -1) {
             const copy = [...prev];
             copy[optIdx] = newMsg;
             return copy;
+          }
+          // If this is an assistant message arriving via Realtime (recovery case),
+          // replace any optimistic assistant that's still streaming/pending
+          if (newMsg.role === 'assistant' && (newMsg.status === 'complete' || newMsg.status === 'error')) {
+            const streamingIdx = prev.findIndex(m => m.id.startsWith('opt-') && m.role === 'assistant' && (m.status === 'streaming' || m.status === 'pending'));
+            if (streamingIdx !== -1) {
+              const copy = [...prev];
+              copy[streamingIdx] = newMsg;
+              // Recovery worked — stop polling and sending state
+              setSending(false);
+              clearRecovery();
+              return copy;
+            }
           }
           const exists = prev.some(m => m.id === newMsg.id);
           return exists ? prev : [...prev, newMsg];
@@ -89,8 +114,56 @@ export function useChatMessages(sessionId: string | null) {
     return () => {
       supabase.removeChannel(channel);
       abortRef.current?.abort();
+      clearRecovery();
     };
-  }, [sessionId]);
+  }, [sessionId, clearRecovery]);
+
+  // Recovery: poll DB for assistant response when stream dies
+  const startRecovery = useCallback((sid: string, optAsstId: string, userContent: string) => {
+    clearRecovery();
+    const startedAt = Date.now();
+    console.log('[chat] Starting recovery polling for session', sid);
+
+    recoveryTimerRef.current = setInterval(async () => {
+      // Check if we've been polling too long
+      if (Date.now() - startedAt > RECOVERY_MAX_MS) {
+        console.log('[chat] Recovery timeout reached');
+        clearRecovery();
+        setMessages(prev => prev.map(m =>
+          m.id === optAsstId && (m.status === 'streaming' || m.status === 'pending')
+            ? { ...m, status: 'error' as const, error_detail: 'A consulta demorou mais que o esperado. Por favor, tente com um período menor ou reformule a pergunta.' }
+            : m
+        ));
+        setSending(false);
+        return;
+      }
+
+      // Poll for the latest assistant message in this session
+      const { data } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('session_id', sid)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data && (data.status === 'complete' || data.status === 'error') && data.content) {
+        console.log('[chat] Recovery found assistant message:', data.id);
+        clearRecovery();
+        setMessages(prev => {
+          const idx = prev.findIndex(m => m.id === optAsstId);
+          if (idx !== -1) {
+            const copy = [...prev];
+            copy[idx] = data as ChatMessage;
+            return copy;
+          }
+          return prev;
+        });
+        setSending(false);
+      }
+    }, RECOVERY_POLL_MS);
+  }, [clearRecovery]);
 
   const sendMessage = useCallback(async (content: string): Promise<boolean> => {
     if (invokeInProgressRef.current) return false;
@@ -104,7 +177,7 @@ export function useChatMessages(sessionId: string | null) {
     const optAsstId = `opt-asst-${Date.now()}`;
     const now = new Date().toISOString();
 
-    // Optimistic: add user message + empty streaming assistant message with steps
+    // Optimistic: add user message + empty streaming assistant message
     setMessages(prev => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now },
@@ -149,6 +222,8 @@ export function useChatMessages(sessionId: string | null) {
       let buffer = '';
       let accumulated = '';
       let realUserMsgId: string | null = null;
+      let receivedDone = false;
+      let receivedAnyToken = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -164,6 +239,7 @@ export function useChatMessages(sessionId: string | null) {
           const payload = line.slice(6).trim();
 
           if (payload === '[DONE]') {
+            receivedDone = true;
             setMessages(prev => prev.map(m =>
               m.id === optAsstId ? { ...m, status: 'complete' as const } : m
             ));
@@ -185,13 +261,20 @@ export function useChatMessages(sessionId: string | null) {
               setMessages(prev => prev.map(m =>
                 m.id === optAsstId ? { ...m, status: 'error' as const, error_detail: parsed.error } : m
               ));
+              receivedDone = true;
               break;
             }
 
-            // Ignore keepalive pings
             if (parsed.type === 'ping') continue;
 
-            // Handle typed events from proxy
+            if (parsed.type === 'done') {
+              receivedDone = true;
+              setMessages(prev => prev.map(m =>
+                m.id === optAsstId ? { ...m, status: 'complete' as const } : m
+              ));
+              continue;
+            }
+
             if (parsed.type === 'step' && parsed.step) {
               setMessages(prev => prev.map(m =>
                 m.id === optAsstId
@@ -202,6 +285,7 @@ export function useChatMessages(sessionId: string | null) {
             }
 
             if (parsed.type === 'token' && parsed.token) {
+              receivedAnyToken = true;
               accumulated += parsed.token;
               const newContent = accumulated;
               setMessages(prev => prev.map(m =>
@@ -212,6 +296,7 @@ export function useChatMessages(sessionId: string | null) {
 
             // Legacy: plain token without type field
             if (parsed.token) {
+              receivedAnyToken = true;
               accumulated += parsed.token;
               const newContent = accumulated;
               setMessages(prev => prev.map(m =>
@@ -224,13 +309,53 @@ export function useChatMessages(sessionId: string | null) {
         }
       }
 
+      // ── Stream ended — ensure proper state ──
+      if (!receivedDone) {
+        console.warn('[chat] Stream ended without [DONE] marker');
+        if (receivedAnyToken && accumulated.trim()) {
+          // We got content but no DONE — mark as complete
+          setMessages(prev => prev.map(m =>
+            m.id === optAsstId ? { ...m, status: 'complete' as const } : m
+          ));
+        } else {
+          // Stream closed with NO content at all — start recovery polling
+          // The n8n agent may still be working and will write to the DB eventually
+          console.warn('[chat] Stream closed with no content. Starting recovery...');
+          setMessages(prev => prev.map(m =>
+            m.id === optAsstId
+              ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta do agente...'], status: 'streaming' as const }
+              : m
+          ));
+          startRecovery(sessionId, optAsstId, trimmed);
+          // Don't set sending=false yet — recovery will handle it
+          invokeInProgressRef.current = false;
+          clearTimeout(timeout);
+          abortRef.current = null;
+          return true;
+        }
+      }
+
       return true;
     } catch (err: any) {
       console.error('Erro ao enviar:', err);
-      const errorMsg = err.name === 'AbortError'
-        ? 'A consulta demorou mais que o esperado. Por favor, tente novamente.'
-        : 'Não foi possível enviar sua mensagem. Tente novamente.';
+      
+      if (err.name === 'AbortError') {
+        // Timeout — but the agent might still be working on the backend
+        // Start recovery polling instead of showing error immediately
+        console.warn('[chat] Request timed out. Starting recovery polling...');
+        setMessages(prev => prev.map(m =>
+          m.id === optAsstId
+            ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta do agente...'], status: 'streaming' as const }
+            : m
+        ));
+        startRecovery(sessionId, optAsstId, trimmed);
+        invokeInProgressRef.current = false;
+        clearTimeout(timeout);
+        abortRef.current = null;
+        return true;
+      }
 
+      const errorMsg = 'Não foi possível enviar sua mensagem. Tente novamente.';
       setMessages(prev => prev.map(m =>
         m.id === optAsstId
           ? { ...m, content: '', status: 'error' as const, error_detail: errorMsg }
@@ -240,10 +365,13 @@ export function useChatMessages(sessionId: string | null) {
     } finally {
       clearTimeout(timeout);
       invokeInProgressRef.current = false;
-      setSending(false);
+      // Only set sending=false if recovery is NOT active
+      if (!recoveryTimerRef.current) {
+        setSending(false);
+      }
       abortRef.current = null;
     }
-  }, [sessionId]);
+  }, [sessionId, startRecovery, clearRecovery]);
 
   const retryMessage = useCallback(async (errorMessageId: string) => {
     const errorIndex = messages.findIndex(m => m.id === errorMessageId);
