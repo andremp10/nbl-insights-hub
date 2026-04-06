@@ -14,7 +14,7 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const prevMsgCountRef = useRef(0);
+  const pendingHandled = useRef(false);
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
