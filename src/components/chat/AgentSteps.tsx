@@ -38,10 +38,6 @@ export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedA
   if (!steps.length) return null;
 
   const totalElapsed = startedAt ? now - startedAt : 0;
-  const currentStepElapsed = steps.length > 0 && stepTimestamps.current.length > 0
-    ? now - stepTimestamps.current[steps.length - 1]
-    : 0;
-  const showLongWait = !isComplete && currentStepElapsed > 90_000;
 
   return (
     <div className="rounded-lg bg-muted/30 border border-border/30 px-3 py-2.5 space-y-0.5">
@@ -93,12 +89,6 @@ export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedA
         );
       })}
 
-      {showLongWait && (
-        <div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground/35 animate-in fade-in duration-500">
-          <Clock className="w-3 h-3 shrink-0" />
-          <span>Isso pode levar alguns instantes...</span>
-        </div>
-      )}
 
       {isComplete && startedAt && totalElapsed > 2000 && (
         <div className="flex items-center gap-2 pt-1 border-t border-border/20 mt-1 text-[10px] text-muted-foreground/35">
