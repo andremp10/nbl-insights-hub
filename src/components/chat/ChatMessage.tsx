@@ -2,7 +2,7 @@ import { memo, useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
 import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info } from 'lucide-react';
-import { ThinkingBubble } from './ThinkingBubble';
+import { AgentSteps } from './AgentSteps';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
@@ -143,6 +143,11 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
 
+  const hasSteps = !!(message.steps && message.steps.length > 0);
+  const hasContent = !!message.content;
+  const showSteps = !isUser && (isStreaming || isPending) && hasSteps;
+  const showThinking = !isUser && (isStreaming || isPending) && !hasSteps && !hasContent;
+
   const highlightCard = useMemo(() => {
     if (isUser || isPending || isError) return null;
     return detectHighlightCard(message.content);
@@ -156,7 +161,16 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     });
   }, [message.content]);
 
-  if (isPending && !isUser && !isStreaming) return <ThinkingBubble />;
+  if (isUser) {
+    return (
+      <div className="chat-msg-fade-in flex justify-end">
+        <div className="chat-msg-user max-w-[75%]">
+          <p className="text-sm leading-relaxed">{message.content}</p>
+          <span className="block text-[11px] text-primary-foreground/50 mt-1 text-right">{formatTime(message.created_at)}</span>
+        </div>
+      </div>
+    );
+  }
 
   const renderContent = () => {
     if (isError) {
@@ -176,37 +190,46 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       );
     }
 
-    if (highlightCard) {
+    // Show thinking shimmer when no steps and no content yet
+    if (showThinking) {
       return (
-        <div className="text-center py-2">
-          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">{highlightCard.label}</p>
-          <p className="text-2xl font-bold text-primary">{highlightCard.value}</p>
+        <div className="flex items-center gap-3 py-2">
+          <div className="chat-shimmer-bar" />
+          <span className="text-xs text-muted-foreground/60 whitespace-nowrap">Analisando…</span>
         </div>
       );
     }
 
     return (
-      <div className="text-sm leading-relaxed break-words">
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-          {normalizeMarkdown(message.content)}
-        </ReactMarkdown>
-        {isStreaming && (
-          <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+      <div className="space-y-3">
+        {/* Agent steps indicator */}
+        {showSteps && (
+          <AgentSteps steps={message.steps!} isComplete={hasContent} />
+        )}
+
+        {/* Main content */}
+        {hasContent && (
+          <>
+            {highlightCard ? (
+              <div className="text-center py-2">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">{highlightCard.label}</p>
+                <p className="text-2xl font-bold text-primary">{highlightCard.value}</p>
+              </div>
+            ) : (
+              <div className="text-sm leading-relaxed break-words">
+                <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+                  {normalizeMarkdown(message.content)}
+                </ReactMarkdown>
+                {isStreaming && (
+                  <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     );
   };
-
-  if (isUser) {
-    return (
-      <div className="chat-msg-fade-in flex justify-end">
-        <div className="chat-msg-user max-w-[75%]">
-          <p className="text-sm leading-relaxed">{message.content}</p>
-          <span className="block text-[11px] text-primary-foreground/50 mt-1 text-right">{formatTime(message.created_at)}</span>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -226,7 +249,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       </div>
 
       {/* Actions */}
-      {!isError && !isPending && message.content && (
+      {!isError && !isPending && !isStreaming && message.content && (
         <div className={cn('flex items-center gap-2 mt-1 transition-opacity duration-150', hovered ? 'opacity-100' : 'opacity-0')}>
           <button
             onClick={handleCopy}
