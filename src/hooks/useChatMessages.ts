@@ -10,6 +10,7 @@ export interface ChatMessage {
   error_detail?: string | null;
   created_at: string;
   steps?: string[];
+  startedAt?: number;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
