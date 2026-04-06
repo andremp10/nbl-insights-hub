@@ -237,7 +237,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   }, []);
 
   const handleSubmit = useCallback(async () => {
@@ -265,9 +265,13 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
   const canSend = !sending && input.trim().length > 0;
 
   return (
-    <div className="shrink-0 border-t border-border/60 bg-background/80 backdrop-blur-sm px-4 py-3 md:px-6">
+    <div className="shrink-0 border-t border-border/50 bg-background px-3 py-3 sm:px-4 md:px-6">
       <div className="w-full max-w-3xl mx-auto">
-        <div className="relative flex items-end gap-2 bg-muted/40 rounded-2xl border border-border/40 focus-within:border-primary/40 transition-colors p-1.5">
+        <div className={cn(
+          'relative rounded-2xl border bg-card/60 transition-all duration-200',
+          'shadow-sm',
+          input.trim() ? 'border-primary/30 shadow-primary/5' : 'border-border/50',
+        )}>
           <textarea
             ref={textareaRef}
             value={input}
@@ -276,25 +280,37 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             onKeyDown={handleKeyDown}
             placeholder="Pergunte sobre financeiro, pedidos, clientes..."
             rows={1}
-            className="flex-1 resize-none bg-transparent border-0 px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ minHeight: '40px', maxHeight: '160px' }}
+            className={cn(
+              'w-full resize-none bg-transparent border-0',
+              'px-4 pt-3 pb-12 text-sm text-foreground',
+              'placeholder:text-muted-foreground/40',
+              'focus:outline-none focus:ring-0',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+            )}
+            style={{ minHeight: '52px', maxHeight: '200px' }}
             aria-label="Campo de mensagem"
           />
-          <button
-            onClick={handleSubmit}
-            disabled={!canSend}
-            aria-label="Enviar mensagem"
-            className={cn(
-              'shrink-0 flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200 active:scale-95 mb-0.5',
-              canSend
-                ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/20'
-                : 'bg-muted-foreground/15 text-muted-foreground/40 cursor-not-allowed'
-            )}
-          >
-            {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
-          </button>
+          {/* Bottom bar inside the composer */}
+          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2">
+            <span className="text-[10px] text-muted-foreground/30 select-none">
+              Shift+Enter para nova linha
+            </span>
+            <button
+              onClick={handleSubmit}
+              disabled={!canSend}
+              aria-label="Enviar mensagem"
+              className={cn(
+                'flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 active:scale-95',
+                canSend
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/25'
+                  : 'bg-muted text-muted-foreground/30 cursor-not-allowed'
+              )}
+            >
+              {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
-        <p className="text-[10px] text-muted-foreground/40 text-center mt-1.5">
+        <p className="text-[10px] text-muted-foreground/30 text-center mt-2 select-none">
           O assistente pode cometer erros. Verifique dados importantes.
         </p>
       </div>
