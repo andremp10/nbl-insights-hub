@@ -10,6 +10,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+// Maps n8n node names to user-friendly step labels
+function nodeToStepLabel(nodeName: string, agentBeginCount: number): string {
+  const lower = nodeName.toLowerCase();
+  if (lower.includes('supabase') || lower.includes('tool')) return 'Consultando banco de dados...';
+  if (lower.includes('agente_negocio') || lower.includes('agente')) {
+    return agentBeginCount <= 1 ? 'Processando sua pergunta...' : 'Elaborando resposta...';
+  }
+  return 'Processando...';
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -128,7 +138,6 @@ Deno.serve(async (req) => {
       const errBody = await n8nResponse.text();
       console.error('[nlq-proxy] n8n error:', n8nResponse.status, errBody);
 
-      // Save error message
       await supabase
         .from('chat_messages')
         .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: `Webhook retornou ${n8nResponse.status}` });
@@ -139,9 +148,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // If n8n returns a stream, pipe it through to the frontend
+    // Non-streaming fallback
     if (!n8nResponse.body) {
-      // Non-streaming response — treat as single chunk
       const text = await n8nResponse.text();
       const content = text.trim();
 
@@ -151,7 +159,7 @@ Deno.serve(async (req) => {
 
       const encoder = new TextEncoder();
       const body = encoder.encode(
-        `data: ${JSON.stringify({ token: content })}\n\ndata: ${JSON.stringify({ user_message_id: userMsg.id })}\n\ndata: [DONE]\n\n`
+        `data: ${JSON.stringify({ type: 'token', token: content })}\n\ndata: ${JSON.stringify({ user_message_id: userMsg.id })}\n\ndata: [DONE]\n\n`
       );
 
       return new Response(body, {
@@ -164,11 +172,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Streaming response from n8n
-    // n8n sends structured JSON lines: {"type":"item","content":"...","metadata":{...}}
-    // The stream includes agent thinking, tool calls, and final response.
-    // We track begin/end blocks and only stream content from the LAST agente_negocio block.
-    // The very last chunk contains {"output":"final text"} from "Respond to Webhook".
+    // Streaming response from n8n — emit typed SSE events (step / token)
     const reader = n8nResponse.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
@@ -178,10 +182,21 @@ Deno.serve(async (req) => {
     let agentBlockCount = 0;
     let inFinalAgentBlock = false;
     let currentNodeName = '';
+    const emittedSteps = new Set<string>();
+
+    function emitSSE(controller: ReadableStreamDefaultController, data: Record<string, unknown>) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+    }
+
+    function emitStep(controller: ReadableStreamDefaultController, label: string) {
+      if (emittedSteps.has(label)) return;
+      emittedSteps.add(label);
+      emitSSE(controller, { type: 'step', step: label });
+    }
 
     const stream = new ReadableStream({
       async start(controller) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ user_message_id: userMsg.id })}\n\n`));
+        emitSSE(controller, { user_message_id: userMsg.id });
 
         try {
           while (true) {
@@ -199,16 +214,17 @@ Deno.serve(async (req) => {
               let obj: any;
               try { obj = JSON.parse(trimmedLine); } catch { continue; }
 
-              // Track begin/end blocks to identify the final agent response
               if (obj.type === 'begin') {
                 currentNodeName = obj.metadata?.nodeName || '';
                 if (currentNodeName === 'agente_negocio') {
                   agentBlockCount++;
-                  // The second+ begin of agente_negocio is the actual response
                   if (agentBlockCount >= 2) {
                     inFinalAgentBlock = true;
                   }
                 }
+                // Emit a step indicator for every begin event
+                const stepLabel = nodeToStepLabel(currentNodeName, agentBlockCount);
+                emitStep(controller, stepLabel);
                 continue;
               }
 
@@ -223,7 +239,7 @@ Deno.serve(async (req) => {
                 const content = obj.content;
                 if (typeof content !== 'string' || content === '') continue;
 
-                // Check if this is the final {"output":"..."} from Respond to Webhook
+                // Check for final {"output":"..."} from Respond to Webhook
                 try {
                   const parsed = JSON.parse(content);
                   if (parsed.output) {
@@ -231,13 +247,13 @@ Deno.serve(async (req) => {
                     continue;
                   }
                 } catch {
-                  // Not JSON output wrapper — it's a regular token
+                  // Not a JSON wrapper
                 }
 
                 // Only stream tokens from the final agent response block
                 if (inFinalAgentBlock) {
                   streamedContent += content;
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: content })}\n\n`));
+                  emitSSE(controller, { type: 'token', token: content });
                 }
               }
             }
@@ -254,26 +270,26 @@ Deno.serve(async (req) => {
                 } catch {
                   if (inFinalAgentBlock) {
                     streamedContent += obj.content;
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: obj.content })}\n\n`));
+                    emitSSE(controller, { type: 'token', token: obj.content });
                   }
                 }
               }
             } catch { /* ignore */ }
           }
 
-          // Determine the best content to save
+          // Save final content
           const contentToSave = (finalOutput || streamedContent).trim();
           if (contentToSave) {
             await supabase
               .from('chat_messages')
               .insert({ session_id, role: 'assistant', content: contentToSave, status: 'complete' });
 
-            // If we had no streaming tokens but have finalOutput, send it as a single token
             if (!streamedContent && finalOutput) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: finalOutput })}\n\n`));
+              emitSSE(controller, { type: 'token', token: finalOutput });
             }
           }
 
+          emitSSE(controller, { type: 'done' });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (err) {
@@ -284,7 +300,7 @@ Deno.serve(async (req) => {
             .from('chat_messages')
             .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
 
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: errMsg })}\n\n`));
+          emitSSE(controller, { error: errMsg });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         }

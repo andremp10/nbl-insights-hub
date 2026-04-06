@@ -9,6 +9,7 @@ export interface ChatMessage {
   status: 'pending' | 'streaming' | 'complete' | 'error';
   error_detail?: string | null;
   created_at: string;
+  steps?: string[];
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -48,7 +49,6 @@ export function useChatMessages(sessionId: string | null) {
         setLoading(false);
       });
 
-    // Realtime for messages inserted by the Edge Function (reconciliation)
     const channel = supabase
       .channel(`messages-${sessionId}`)
       .on('postgres_changes', {
@@ -59,7 +59,6 @@ export function useChatMessages(sessionId: string | null) {
       }, (payload) => {
         const newMsg = payload.new as ChatMessage;
         setMessages(prev => {
-          // Replace optimistic msg if user_message_id matches
           const optIdx = prev.findIndex(m => m.id.startsWith('opt-') && m.role === newMsg.role && m.content === newMsg.content);
           if (optIdx !== -1) {
             const copy = [...prev];
@@ -104,11 +103,11 @@ export function useChatMessages(sessionId: string | null) {
     const optAsstId = `opt-asst-${Date.now()}`;
     const now = new Date().toISOString();
 
-    // Optimistic: add user message + empty streaming assistant message
+    // Optimistic: add user message + empty streaming assistant message with steps
     setMessages(prev => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: [] },
     ]);
 
     const abort = new AbortController();
@@ -137,7 +136,6 @@ export function useChatMessages(sessionId: string | null) {
       }
 
       if (!response.body) {
-        // Non-streaming fallback
         const text = await response.text();
         setMessages(prev => prev.map(m =>
           m.id === optAsstId ? { ...m, content: text.trim(), status: 'complete' as const } : m
@@ -157,7 +155,6 @@ export function useChatMessages(sessionId: string | null) {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE lines
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
@@ -166,7 +163,6 @@ export function useChatMessages(sessionId: string | null) {
           const payload = line.slice(6).trim();
 
           if (payload === '[DONE]') {
-            // Stream complete
             setMessages(prev => prev.map(m =>
               m.id === optAsstId ? { ...m, status: 'complete' as const } : m
             ));
@@ -178,7 +174,6 @@ export function useChatMessages(sessionId: string | null) {
 
             if (parsed.user_message_id) {
               realUserMsgId = parsed.user_message_id;
-              // Reconcile optimistic user message ID
               setMessages(prev => prev.map(m =>
                 m.id === optUserId ? { ...m, id: realUserMsgId! } : m
               ));
@@ -192,6 +187,26 @@ export function useChatMessages(sessionId: string | null) {
               break;
             }
 
+            // Handle typed events from proxy
+            if (parsed.type === 'step' && parsed.step) {
+              setMessages(prev => prev.map(m =>
+                m.id === optAsstId
+                  ? { ...m, steps: [...(m.steps || []), parsed.step] }
+                  : m
+              ));
+              continue;
+            }
+
+            if (parsed.type === 'token' && parsed.token) {
+              accumulated += parsed.token;
+              const newContent = accumulated;
+              setMessages(prev => prev.map(m =>
+                m.id === optAsstId ? { ...m, content: newContent } : m
+              ));
+              continue;
+            }
+
+            // Legacy: plain token without type field
             if (parsed.token) {
               accumulated += parsed.token;
               const newContent = accumulated;
@@ -237,11 +252,9 @@ export function useChatMessages(sessionId: string | null) {
 
     if (!userMessage) return;
 
-    // Remove the error message
     if (!errorMessageId.startsWith('opt-')) {
       await supabase.from('chat_messages').delete().eq('id', errorMessageId);
     }
-    // Also remove the user message that triggered it (will be re-sent)
     const userMsgId = userMessage.id;
     if (!userMsgId.startsWith('opt-')) {
       await supabase.from('chat_messages').delete().eq('id', userMsgId);
