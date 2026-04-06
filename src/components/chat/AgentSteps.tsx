@@ -38,10 +38,6 @@ export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedA
   if (!steps.length) return null;
 
   const totalElapsed = startedAt ? now - startedAt : 0;
-  const currentStepElapsed = steps.length > 0 && stepTimestamps.current.length > 0
-    ? now - stepTimestamps.current[steps.length - 1]
-    : 0;
-  const showLongWait = !isComplete && currentStepElapsed > 90_000;
 
   return (
     <div className="rounded-lg bg-muted/30 border border-border/30 px-3 py-2.5 space-y-0.5">
