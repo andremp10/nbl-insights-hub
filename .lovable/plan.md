@@ -1,76 +1,140 @@
 
 
-# Plano — Acelerar Carregamento e Transicao de Paginas
+# Plano — Streaming do Chat via Edge Function (SSE)
 
-## Diagnostico
+## O que voce precisa fazer no n8n
 
-Apos analise do codigo, identifiquei 5 causas principais de lentidao:
+**Sim, troque o node final para "Respond to Webhook"** com a opcao de streaming habilitada. Sem isso, o n8n fecha a conexao HTTP imediatamente e nao ha stream para consumir.
 
-### 1. AnimatePresence mode="wait" bloqueia navegacao
-Em `App.tsx`, o `AnimatePresence mode="wait"` forca a pagina antiga a completar a animacao de saida ANTES de iniciar a nova pagina. Isso cria um delay visivel de ~200ms onde nada acontece, mais o tempo do lazy load do chunk da nova pagina.
+## Arquitetura nova
 
-### 2. PageTransition com framer-motion em TODAS as rotas
-Cada rota e envolvida em `<PageTransition>` que usa `motion.div` com `initial/animate/exit`. Combinado com o `mode="wait"`, toda navegacao fica: exit antigo (180ms) → carregar chunk → enter novo (180ms).
+```text
+Frontend (fetch) ──POST──▶ nlq-proxy (Edge Function)
+                                │
+                                ├─ Insere user msg no Supabase
+                                ├─ Busca contexto (10 msgs)
+                                ├─ Chama n8n webhook (aguarda stream)
+                                │
+                          n8n retorna SSE
+                                │
+                                ├─ Cada chunk ──▶ repassa ao Frontend via SSE
+                                │
+                          Stream finaliza
+                                │
+                                └─ Insere msg assistant completa no Supabase
+                                └─ Fecha conexao
 
-### 3. Home.tsx tem 4 motion.section com delays escalonados
-A pagina Home usa `motion.section` em cada bloco (hero, cards, KPIs, atividade) com delays de 0 a 200ms. Isso atrasa a percepcao de carregamento — o usuario ve a pagina "vazia" enquanto as secoes animam sequencialmente.
+Frontend: le chunks progressivamente, atualiza mensagem em tempo real
+```
 
-### 4. Canvas da pagina Auth roda indefinidamente
-O `DotMap` dentro de `travel-connect-signin-1.tsx` executa `requestAnimationFrame` em loop infinito, rediscutindo centenas de pontos e rotas a cada frame — mesmo quando o usuario ja esta digitando.
+## Mudancas por arquivo
 
-### 5. QueryClient sem configuracao global
-O `QueryClient` e criado sem defaults. Isso significa `refetchOnWindowFocus: true` e `staleTime: 0` para TODAS as queries, causando refetches desnecessarios ao alternar abas ou voltar ao app.
+### 1. `supabase/functions/nlq-proxy/index.ts` — Reescrever
 
-## Solucao
+**Remover**: fire-and-forget, insert de pending msg, waitUntil
+**Manter**: idempotencia 10s, insert user msg, busca contexto
 
-### A. Remover AnimatePresence + PageTransition
-**Arquivo:** `src/App.tsx`, `src/components/layout/PageTransition.tsx`
+Novo fluxo:
+1. Validar input + dedup
+2. Inserir user message no Supabase
+3. Buscar contexto (10 msgs)
+4. Chamar n8n webhook com fetch, receber body como ReadableStream
+5. Criar `TransformStream` que repassa chunks SSE ao frontend
+6. Ao final do stream, inserir mensagem completa do assistant no Supabase com status `complete`
+7. Em erro, inserir com status `error`
+8. Response com `Content-Type: text/event-stream`
 
-- Remover `AnimatePresence` completamente
-- Substituir `PageTransition` por um wrapper CSS simples com `animation: fadeIn 0.15s ease-out`
-- Resultado: navegacao instantanea, sem bloqueio de exit
+Cada chunk enviado ao frontend no formato:
+```
+data: {"token":"texto parcial"}\n\n
+```
+Ao final:
+```
+data: [DONE]\n\n
+```
 
-### B. Substituir motion.section por CSS na Home
-**Arquivo:** `src/pages/Home.tsx`
+### 2. `src/hooks/useChatMessages.ts` — Reescrever sendMessage
 
-- Remover import de `framer-motion`
-- Trocar `motion.section` por `<section>` com classes CSS de fade-in usando `animation-delay` via style
-- Animacao CSS pura e muito mais leve que framer-motion
+**Remover**: `supabase.functions.invoke` (nao suporta streaming), pending timeouts
+**Manter**: Realtime subscription (para sessoes recarregadas), retryMessage
 
-### C. Otimizar canvas do Auth (reduzir FPS)
-**Arquivo:** `src/components/ui/travel-connect-signin-1.tsx`
+Novo `sendMessage`:
+1. Inserir mensagem user localmente (optimistic com id temporario `opt-`)
+2. Criar mensagem assistant vazia localmente com status `streaming`
+3. Fazer `fetch` direto para `https://bcypejzqbcwibvtbbfor.supabase.co/functions/v1/nlq-proxy` com headers de auth
+4. Ler `response.body` como ReadableStream via `getReader()`
+5. Parsear linhas SSE (`data: {...}`) e extrair tokens
+6. A cada token, acumular no content da mensagem assistant via `setMessages`
+7. Ao receber `[DONE]`, marcar status `complete`
+8. Em erro mid-stream, marcar status `error`
 
-- Limitar o loop de animacao a ~15 FPS em vez de 60 FPS (usar `setTimeout` dentro do RAF)
-- Parar animacao quando rotas completam (apos ~15s nao precisa mais redesenhar dots estaticos)
+O Realtime subscription continua ativo para:
+- Reconciliar mensagem do usuario (substituir `opt-` pelo ID real do banco)
+- Sessoes recarregadas que tenham pending antigos
 
-### D. Configurar QueryClient com defaults globais
-**Arquivo:** `src/App.tsx`
+### 3. `src/hooks/useChatMessages.ts` — Interface ChatMessage
 
-- Adicionar `staleTime: 2 * 60 * 1000` (2 min) como default global
-- Adicionar `refetchOnWindowFocus: false`
-- Isso evita refetches desnecessarios em TODAS as queries
+Adicionar `'streaming'` como status local:
+```typescript
+status: 'pending' | 'streaming' | 'complete' | 'error';
+```
 
-### E. Remover motion.div do sidebar (layoutId)
-**Arquivo:** `src/components/layout/AppSidebar.tsx`
+### 4. `src/components/chat/ChatMessage.tsx` — Adaptar para streaming
 
-- O `motion.div` com `layoutId="activeIndicator"` na sidebar executa animacao spring a cada navegacao
-- Substituir por um `<div>` com CSS transition simples
+- Remover `useTypewriter` — o streaming ja entrega tokens progressivamente
+- Quando `status === 'streaming'`: renderizar markdown do content atual + cursor pulsante
+- Quando `status === 'complete'`: renderizar markdown normalmente (sem cursor)
+- Manter tudo o mais (copy, retry, highlight card, etc.)
 
-## Arquivos
+### 5. `src/pages/Chat.tsx` — Auto-scroll durante streaming
+
+- Remover logica de `animateId` (nao ha mais typewriter)
+- Auto-scroll: observar mudancas no content da ultima mensagem streaming e rolar para baixo
+- O StatusBadge ja mostra "Consultando..." quando `sending=true`, manter
+
+### 6. `src/hooks/useTypewriter.ts` — Remover
+
+Nao e mais utilizado por nenhum componente.
+
+## Detalhes tecnicos
+
+### Construcao da URL da Edge Function no frontend
+```typescript
+const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/nlq-proxy`;
+```
+
+### Headers necessarios no fetch
+```typescript
+headers: {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${session.access_token}`,
+  'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+}
+```
+
+### Parser SSE no frontend
+```typescript
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  // parse lines, extract "data: ..." events
+}
+```
+
+### Edge Function — repasse de stream
+A Edge Function le o body do n8n como stream e repassa ao frontend. O conteudo acumulado e salvo no Supabase ao final.
+
+## Resumo
 
 | Arquivo | Acao |
 |---------|------|
-| `src/App.tsx` | Remover AnimatePresence, configurar QueryClient defaults |
-| `src/components/layout/PageTransition.tsx` | Reescrever com CSS puro (sem framer-motion) |
-| `src/pages/Home.tsx` | Trocar motion.section por section + CSS animations |
-| `src/components/ui/travel-connect-signin-1.tsx` | Limitar FPS do canvas, parar quando ocioso |
-| `src/components/layout/AppSidebar.tsx` | Remover motion.div do indicador ativo |
-| `src/index.css` | Adicionar keyframe `page-fade-in` |
-
-## Resultado Esperado
-
-- Navegacao entre paginas praticamente instantanea (sem delay de exit animation)
-- Home carrega visualmente mais rapido (sem delays escalonados de 200ms)
-- Menor uso de CPU na pagina de Auth (canvas otimizado)
-- Menos requisicoes ao Supabase (cache global de 2 min)
+| `supabase/functions/nlq-proxy/index.ts` | Reescrever — streaming proxy SSE |
+| `src/hooks/useChatMessages.ts` | Reescrever sendMessage com fetch + stream reader |
+| `src/components/chat/ChatMessage.tsx` | Remover typewriter, suportar status `streaming` |
+| `src/pages/Chat.tsx` | Remover animateId, scroll continuo durante stream |
+| `src/hooks/useTypewriter.ts` | Deletar |
 
