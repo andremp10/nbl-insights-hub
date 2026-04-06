@@ -128,31 +128,23 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Streaming response from n8n — parse structured JSON lines
-    // n8n sends lines like: {"type":"item","content":"token text","metadata":{...}}
-    // We extract only the "content" from "type":"item" chunks
-    let fullContent = '';
+    // Streaming response from n8n
+    // n8n sends structured JSON lines: {"type":"item","content":"...","metadata":{...}}
+    // The stream includes agent thinking, tool calls, and final response.
+    // We track begin/end blocks and only stream content from the LAST agente_negocio block.
+    // The very last chunk contains {"output":"final text"} from "Respond to Webhook".
     const reader = n8nResponse.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
     let n8nBuffer = '';
-
-    // Helper: parse a single JSON line from n8n and extract text content
-    function extractContent(jsonLine: string): string | null {
-      try {
-        const obj = JSON.parse(jsonLine);
-        if (obj.type === 'item' && typeof obj.content === 'string' && obj.content !== '') {
-          return obj.content;
-        }
-      } catch {
-        // Not valid JSON, ignore
-      }
-      return null;
-    }
+    let streamedContent = '';
+    let finalOutput: string | null = null;
+    let agentBlockCount = 0;
+    let inFinalAgentBlock = false;
+    let currentNodeName = '';
 
     const stream = new ReadableStream({
       async start(controller) {
-        // Send user_message_id as first event so frontend can reconcile
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ user_message_id: userMsg.id })}\n\n`));
 
         try {
@@ -161,38 +153,89 @@ Deno.serve(async (req) => {
             if (done) break;
 
             n8nBuffer += decoder.decode(value, { stream: true });
-
-            // Split by newlines — each line is a JSON object from n8n
             const lines = n8nBuffer.split('\n');
-            n8nBuffer = lines.pop() || ''; // Keep incomplete last line in buffer
+            n8nBuffer = lines.pop() || '';
 
             for (const line of lines) {
               const trimmedLine = line.trim();
               if (!trimmedLine) continue;
 
-              const text = extractContent(trimmedLine);
-              if (text) {
-                fullContent += text;
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: text })}\n\n`));
+              let obj: any;
+              try { obj = JSON.parse(trimmedLine); } catch { continue; }
+
+              // Track begin/end blocks to identify the final agent response
+              if (obj.type === 'begin') {
+                currentNodeName = obj.metadata?.nodeName || '';
+                if (currentNodeName === 'agente_negocio') {
+                  agentBlockCount++;
+                  // The second+ begin of agente_negocio is the actual response
+                  if (agentBlockCount >= 2) {
+                    inFinalAgentBlock = true;
+                  }
+                }
+                continue;
+              }
+
+              if (obj.type === 'end') {
+                if (currentNodeName === 'agente_negocio' && inFinalAgentBlock) {
+                  inFinalAgentBlock = false;
+                }
+                continue;
+              }
+
+              if (obj.type === 'item') {
+                const content = obj.content;
+                if (typeof content !== 'string' || content === '') continue;
+
+                // Check if this is the final {"output":"..."} from Respond to Webhook
+                try {
+                  const parsed = JSON.parse(content);
+                  if (parsed.output) {
+                    finalOutput = parsed.output;
+                    continue;
+                  }
+                } catch {
+                  // Not JSON output wrapper — it's a regular token
+                }
+
+                // Only stream tokens from the final agent response block
+                if (inFinalAgentBlock) {
+                  streamedContent += content;
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: content })}\n\n`));
+                }
               }
             }
           }
 
-          // Process any remaining buffer
+          // Process remaining buffer
           if (n8nBuffer.trim()) {
-            const text = extractContent(n8nBuffer.trim());
-            if (text) {
-              fullContent += text;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: text })}\n\n`));
-            }
+            try {
+              const obj = JSON.parse(n8nBuffer.trim());
+              if (obj.type === 'item' && obj.content) {
+                try {
+                  const parsed = JSON.parse(obj.content);
+                  if (parsed.output) finalOutput = parsed.output;
+                } catch {
+                  if (inFinalAgentBlock) {
+                    streamedContent += obj.content;
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: obj.content })}\n\n`));
+                  }
+                }
+              }
+            } catch { /* ignore */ }
           }
 
-          // Stream finished — persist full assistant message
-          const trimmed = fullContent.trim();
-          if (trimmed) {
+          // Determine the best content to save
+          const contentToSave = (finalOutput || streamedContent).trim();
+          if (contentToSave) {
             await supabase
               .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content: trimmed, status: 'complete' });
+              .insert({ session_id, role: 'assistant', content: contentToSave, status: 'complete' });
+
+            // If we had no streaming tokens but have finalOutput, send it as a single token
+            if (!streamedContent && finalOutput) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: finalOutput })}\n\n`));
+            }
           }
 
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
