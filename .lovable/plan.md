@@ -1,140 +1,65 @@
 
 
-# Plano — Streaming do Chat via Edge Function (SSE)
+# Plano — Ajuste do Streaming entre n8n e Edge Function
 
-## O que voce precisa fazer no n8n
+## Problema Identificado
 
-**Sim, troque o node final para "Respond to Webhook"** com a opcao de streaming habilitada. Sem isso, o n8n fecha a conexao HTTP imediatamente e nao ha stream para consumir.
+O fluxo atual no n8n e:
+```text
+Webhook → agente_negocio → Edit Fields → Respond to Webhook
+```
 
-## Arquitetura nova
+O node **Edit Fields** entre o agente e o "Respond to Webhook" **quebra o streaming**. Ele espera o output completo do agente para mapear os campos (`pending_message_id` e `output`), e so entao passa para o "Respond to Webhook". Isso significa que o n8n nao envia tokens em tempo real — ele bufferiza tudo e envia de uma vez.
+
+## O que precisa mudar no n8n
+
+### Remover o node Edit Fields
+
+Para streaming real (token a token do LLM), o fluxo deve ser:
 
 ```text
-Frontend (fetch) ──POST──▶ nlq-proxy (Edge Function)
-                                │
-                                ├─ Insere user msg no Supabase
-                                ├─ Busca contexto (10 msgs)
-                                ├─ Chama n8n webhook (aguarda stream)
-                                │
-                          n8n retorna SSE
-                                │
-                                ├─ Cada chunk ──▶ repassa ao Frontend via SSE
-                                │
-                          Stream finaliza
-                                │
-                                └─ Insere msg assistant completa no Supabase
-                                └─ Fecha conexao
-
-Frontend: le chunks progressivamente, atualiza mensagem em tempo real
+Webhook → agente_negocio → Respond to Webhook (streaming habilitado)
 ```
 
-## Mudancas por arquivo
+O "Respond to Webhook" deve receber diretamente a saida do agente, sem intermediarios.
 
-### 1. `supabase/functions/nlq-proxy/index.ts` — Reescrever
+### O `pending_message_id` nao e mais necessario
 
-**Remover**: fire-and-forget, insert de pending msg, waitUntil
-**Manter**: idempotencia 10s, insert user msg, busca contexto
+Na arquitetura nova, **a Edge Function (`nlq-proxy`) ja salva a mensagem do assistente no Supabase** ao final do stream (linhas 154-159 do codigo atual). O n8n nao precisa salvar nada no banco. Ele so precisa responder com o texto do agente.
 
-Novo fluxo:
-1. Validar input + dedup
-2. Inserir user message no Supabase
-3. Buscar contexto (10 msgs)
-4. Chamar n8n webhook com fetch, receber body como ReadableStream
-5. Criar `TransformStream` que repassa chunks SSE ao frontend
-6. Ao final do stream, inserir mensagem completa do assistant no Supabase com status `complete`
-7. Em erro, inserir com status `error`
-8. Response com `Content-Type: text/event-stream`
+Portanto:
+- **Remover** o node Edit Fields
+- **Remover** qualquer logica no n8n que salve no Supabase via `pending_message_id`
+- O n8n so precisa: receber a pergunta, processar no agente, e devolver o texto via streaming
 
-Cada chunk enviado ao frontend no formato:
-```
-data: {"token":"texto parcial"}\n\n
-```
-Ao final:
-```
-data: [DONE]\n\n
-```
+## O que precisa mudar no codigo (Edge Function)
 
-### 2. `src/hooks/useChatMessages.ts` — Reescrever sendMessage
+O codigo atual da `nlq-proxy` ja esta correto para este cenario. Porem, o formato do stream vindo do n8n com "Respond to Webhook" pode ser **texto puro** (nao SSE formatado). O codigo atual ja lida com isso — ele le chunks brutos e os repassa como SSE para o frontend.
 
-**Remover**: `supabase.functions.invoke` (nao suporta streaming), pending timeouts
-**Manter**: Realtime subscription (para sessoes recarregadas), retryMessage
+Ha um ajuste necessario: o n8n com streaming pode enviar o output como texto plano em chunks (sem `data:` prefix). O codigo atual na linha 147-151 ja trata isso corretamente — acumula o chunk e repassa como `data: {"token": "..."}\n\n`.
 
-Novo `sendMessage`:
-1. Inserir mensagem user localmente (optimistic com id temporario `opt-`)
-2. Criar mensagem assistant vazia localmente com status `streaming`
-3. Fazer `fetch` direto para `https://bcypejzqbcwibvtbbfor.supabase.co/functions/v1/nlq-proxy` com headers de auth
-4. Ler `response.body` como ReadableStream via `getReader()`
-5. Parsear linhas SSE (`data: {...}`) e extrair tokens
-6. A cada token, acumular no content da mensagem assistant via `setMessages`
-7. Ao receber `[DONE]`, marcar status `complete`
-8. Em erro mid-stream, marcar status `error`
+### Unico ajuste no codigo
 
-O Realtime subscription continua ativo para:
-- Reconciliar mensagem do usuario (substituir `opt-` pelo ID real do banco)
-- Sessoes recarregadas que tenham pending antigos
+Nenhuma mudanca de codigo e necessaria. A Edge Function e o frontend ja estao preparados para:
+1. Receber chunks de texto puro do n8n
+2. Repassar como SSE ao frontend
+3. Acumular e salvar a mensagem completa no Supabase ao final
 
-### 3. `src/hooks/useChatMessages.ts` — Interface ChatMessage
+## Resumo de acoes
 
-Adicionar `'streaming'` como status local:
-```typescript
-status: 'pending' | 'streaming' | 'complete' | 'error';
-```
+| Onde | Acao |
+|------|------|
+| **n8n** | Remover o node "Edit Fields" — conectar `agente_negocio` direto ao `Respond to Webhook` |
+| **n8n** | Garantir que "Respond to Webhook" esta com streaming habilitado |
+| **n8n** | Remover qualquer logica que salve no Supabase via `pending_message_id` (o Edge Function ja faz isso) |
+| **Codigo** | Nenhuma mudanca necessaria — `nlq-proxy` e frontend ja estao corretos |
 
-### 4. `src/components/chat/ChatMessage.tsx` — Adaptar para streaming
+## Passo a passo no n8n
 
-- Remover `useTypewriter` — o streaming ja entrega tokens progressivamente
-- Quando `status === 'streaming'`: renderizar markdown do content atual + cursor pulsante
-- Quando `status === 'complete'`: renderizar markdown normalmente (sem cursor)
-- Manter tudo o mais (copy, retry, highlight card, etc.)
-
-### 5. `src/pages/Chat.tsx` — Auto-scroll durante streaming
-
-- Remover logica de `animateId` (nao ha mais typewriter)
-- Auto-scroll: observar mudancas no content da ultima mensagem streaming e rolar para baixo
-- O StatusBadge ja mostra "Consultando..." quando `sending=true`, manter
-
-### 6. `src/hooks/useTypewriter.ts` — Remover
-
-Nao e mais utilizado por nenhum componente.
-
-## Detalhes tecnicos
-
-### Construcao da URL da Edge Function no frontend
-```typescript
-const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/nlq-proxy`;
-```
-
-### Headers necessarios no fetch
-```typescript
-headers: {
-  'Content-Type': 'application/json',
-  'Authorization': `Bearer ${session.access_token}`,
-  'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-}
-```
-
-### Parser SSE no frontend
-```typescript
-const reader = response.body.getReader();
-const decoder = new TextDecoder();
-let buffer = '';
-while (true) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  buffer += decoder.decode(value, { stream: true });
-  // parse lines, extract "data: ..." events
-}
-```
-
-### Edge Function — repasse de stream
-A Edge Function le o body do n8n como stream e repassa ao frontend. O conteudo acumulado e salvo no Supabase ao final.
-
-## Resumo
-
-| Arquivo | Acao |
-|---------|------|
-| `supabase/functions/nlq-proxy/index.ts` | Reescrever — streaming proxy SSE |
-| `src/hooks/useChatMessages.ts` | Reescrever sendMessage com fetch + stream reader |
-| `src/components/chat/ChatMessage.tsx` | Remover typewriter, suportar status `streaming` |
-| `src/pages/Chat.tsx` | Remover animateId, scroll continuo durante stream |
-| `src/hooks/useTypewriter.ts` | Deletar |
+1. Abra o workflow `nbl_agente`
+2. Delete o node **Edit Fields**
+3. Conecte a saida do **agente_negocio** diretamente ao **Respond to Webhook**
+4. No node **Respond to Webhook**, confirme que a opcao de streaming esta habilitada
+5. Publique o workflow
+6. Teste enviando uma mensagem no chat — os tokens devem aparecer progressivamente
 
