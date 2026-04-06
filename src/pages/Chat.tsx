@@ -166,21 +166,14 @@ export default function Chat() {
             <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
           ) : (
             <div className="w-full max-w-[860px] mx-auto px-4 md:px-8 py-6 space-y-5">
-              {messages.map((message) => {
-                const shouldAnimate = message.id === animateId;
-                if (!shouldAnimate && lastAnimatedIdRef.current === message.id && message.status === 'complete') {
-                  animatedIdsRef.current.add(message.id);
-                }
-                return (
+              {messages.map((message) => (
                   <ChatMessage
                     key={message.id}
                     message={message}
-                    animate={shouldAnimate}
                     onRetry={message.status === 'error' ? () => handleRetry(message.id) : undefined}
                     onFollowUp={handleSuggestionClick}
                   />
-                );
-              })}
+              ))}
               <div ref={messagesEndRef} className="h-1" />
             </div>
           )}
