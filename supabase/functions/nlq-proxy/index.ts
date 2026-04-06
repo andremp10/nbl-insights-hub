@@ -10,15 +10,46 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-// Maps n8n node names to user-friendly step labels
+// ── Noise filter: skip internal agent traces ──
+function isInternalAgentNoise(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (/^Calling \w+ with input:/i.test(t)) return true;
+  if (/^```json\s*\{/.test(t)) return true;
+  if (/^\{"Prompt_|^\{"tool_/i.test(t)) return true;
+  if (/^Thought:|^Action:|^Observation:/i.test(t)) return true;
+  if (t.startsWith('{') && (t.includes('"Batch_Size"') || t.includes('"action_input"'))) return true;
+  // Skip raw JSON payloads that look like tool inputs/outputs
+  if (/^\{[\s\S]*\}$/.test(t) && t.length < 500) {
+    try { JSON.parse(t); return true; } catch { /* not JSON, continue */ }
+  }
+  return false;
+}
+
+// ── Map n8n node names to user-friendly step labels ──
 function nodeToStepLabel(nodeName: string, agentBeginCount: number): string {
   const lower = nodeName.toLowerCase();
-  if (lower.includes('supabase') || lower.includes('tool')) return 'Consultando banco de dados...';
+  if (lower.includes('agente_consulta')) return 'Consultando dados de pedidos...';
+  if (lower.includes('agente_financeiro')) return 'Consultando dados financeiros...';
+  if (lower.includes('supabase') || lower.includes('tool')) return 'Acessando banco de dados...';
   if (lower.includes('agente_negocio') || lower.includes('agente')) {
-    return agentBeginCount <= 1 ? 'Processando sua pergunta...' : 'Elaborando resposta...';
+    return agentBeginCount <= 1 ? 'Analisando sua pergunta...' : 'Elaborando resposta...';
   }
   return 'Processando...';
 }
+
+// ── Extract step from content like "Calling agente_consulta with input:" ──
+function extractCallingStep(content: string): string | null {
+  const match = content.trim().match(/^Calling (\w+) with input:/i);
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  if (name.includes('consulta')) return 'Consultando dados de pedidos...';
+  if (name.includes('financeiro')) return 'Consultando dados financeiros...';
+  if (name.includes('supabase') || name.includes('tool')) return 'Acessando banco de dados...';
+  return `Processando ${match[1]}...`;
+}
+
+const KEEPALIVE_INTERVAL_MS = 15_000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -41,7 +72,7 @@ Deno.serve(async (req) => {
 
     const trimmedMessage = message.trim();
 
-    // AUTH: Validate JWT and session ownership
+    // AUTH
     const authHeader = req.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
@@ -53,7 +84,6 @@ Deno.serve(async (req) => {
     const token = authHeader.replace('Bearer ', '');
     const { data: userData, error: authError } = await supabase.auth.getUser(token);
     if (authError || !userData?.user) {
-      console.error('[nlq-proxy] Auth error:', authError?.message);
       return new Response(
         JSON.stringify({ success: false, error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -62,7 +92,7 @@ Deno.serve(async (req) => {
 
     const userId = userData.user.id;
 
-    // Verify session belongs to the authenticated user
+    // Session ownership
     const { data: sessionOwner, error: sessionError } = await supabase
       .from('chat_sessions')
       .select('user_id')
@@ -70,14 +100,13 @@ Deno.serve(async (req) => {
       .single();
 
     if (sessionError || !sessionOwner || sessionOwner.user_id !== userId) {
-      console.error('[nlq-proxy] Session ownership check failed for user', userId, 'session', session_id);
       return new Response(
         JSON.stringify({ success: false, error: 'Sessão não pertence ao usuário' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // IDEMPOTENCY: Check for duplicate message in last 10 seconds
+    // Dedup
     const windowStart = new Date(Date.now() - 10000).toISOString();
     const { data: recentDuplicate } = await supabase
       .from('chat_messages')
@@ -89,26 +118,22 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (recentDuplicate) {
-      console.log('[nlq-proxy] Deduplicated message');
       return new Response(
         JSON.stringify({ success: true, deduplicated: true }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
       );
     }
 
-    // STEP 1: Insert user message
+    // Insert user message
     const { data: userMsg, error: userMsgError } = await supabase
       .from('chat_messages')
       .insert({ session_id, role: 'user', content: trimmedMessage, status: 'complete' })
       .select('id')
       .single();
 
-    if (userMsgError) {
-      console.error('[nlq-proxy] Error inserting user message:', userMsgError);
-      throw userMsgError;
-    }
+    if (userMsgError) throw userMsgError;
 
-    // STEP 2: Fetch last 10 messages for context
+    // Context
     const { data: history } = await supabase
       .from('chat_messages')
       .select('role, content')
@@ -119,7 +144,7 @@ Deno.serve(async (req) => {
 
     const context = (history || []).reverse();
 
-    // STEP 3: Call n8n webhook and stream the response
+    // Call n8n
     const n8nResponse = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -129,19 +154,17 @@ Deno.serve(async (req) => {
         session_id,
         user_message_id: userMsg.id,
         context,
-        supabase_url: Deno.env.get('SUPABASE_URL'),
-        supabase_service_key: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
+        supabase_url: SUPABASE_URL,
+        supabase_service_key: SUPABASE_SERVICE_ROLE_KEY,
       }),
     });
 
     if (!n8nResponse.ok) {
       const errBody = await n8nResponse.text();
       console.error('[nlq-proxy] n8n error:', n8nResponse.status, errBody);
-
       await supabase
         .from('chat_messages')
         .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: `Webhook retornou ${n8nResponse.status}` });
-
       return new Response(
         JSON.stringify({ success: false, error: `n8n retornou ${n8nResponse.status}` }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 502 }
@@ -152,7 +175,6 @@ Deno.serve(async (req) => {
     if (!n8nResponse.body) {
       const text = await n8nResponse.text();
       const content = text.trim();
-
       await supabase
         .from('chat_messages')
         .insert({ session_id, role: 'assistant', content, status: 'complete' });
@@ -161,18 +183,12 @@ Deno.serve(async (req) => {
       const body = encoder.encode(
         `data: ${JSON.stringify({ type: 'token', token: content })}\n\ndata: ${JSON.stringify({ user_message_id: userMsg.id })}\n\ndata: [DONE]\n\n`
       );
-
       return new Response(body, {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
       });
     }
 
-    // Streaming response from n8n — emit typed SSE events (step / token)
+    // ── Streaming response ──
     const reader = n8nResponse.body.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
@@ -198,6 +214,19 @@ Deno.serve(async (req) => {
       async start(controller) {
         emitSSE(controller, { user_message_id: userMsg.id });
 
+        // Keepalive: send ping every 15s if no other event was sent
+        let lastEventTime = Date.now();
+        const keepaliveTimer = setInterval(() => {
+          if (Date.now() - lastEventTime >= KEEPALIVE_INTERVAL_MS) {
+            try {
+              emitSSE(controller, { type: 'ping' });
+              lastEventTime = Date.now();
+            } catch { /* stream closed */ }
+          }
+        }, KEEPALIVE_INTERVAL_MS);
+
+        const trackEvent = () => { lastEventTime = Date.now(); };
+
         try {
           while (true) {
             const { done, value } = await reader.read();
@@ -218,13 +247,11 @@ Deno.serve(async (req) => {
                 currentNodeName = obj.metadata?.nodeName || '';
                 if (currentNodeName === 'agente_negocio') {
                   agentBlockCount++;
-                  if (agentBlockCount >= 2) {
-                    inFinalAgentBlock = true;
-                  }
+                  if (agentBlockCount >= 2) inFinalAgentBlock = true;
                 }
-                // Emit a step indicator for every begin event
                 const stepLabel = nodeToStepLabel(currentNodeName, agentBlockCount);
                 emitStep(controller, stepLabel);
+                trackEvent();
                 continue;
               }
 
@@ -246,14 +273,25 @@ Deno.serve(async (req) => {
                     finalOutput = parsed.output;
                     continue;
                   }
-                } catch {
-                  // Not a JSON wrapper
+                } catch { /* not JSON wrapper */ }
+
+                // Extract step from "Calling agente_xxx" patterns
+                const callingStep = extractCallingStep(content);
+                if (callingStep) {
+                  emitStep(controller, callingStep);
+                  trackEvent();
+                  // Don't emit as token — it's noise
+                  continue;
                 }
+
+                // Filter internal noise
+                if (isInternalAgentNoise(content)) continue;
 
                 // Only stream tokens from the final agent response block
                 if (inFinalAgentBlock) {
                   streamedContent += content;
                   emitSSE(controller, { type: 'token', token: content });
+                  trackEvent();
                 }
               }
             }
@@ -268,7 +306,7 @@ Deno.serve(async (req) => {
                   const parsed = JSON.parse(obj.content);
                   if (parsed.output) finalOutput = parsed.output;
                 } catch {
-                  if (inFinalAgentBlock) {
+                  if (inFinalAgentBlock && !isInternalAgentNoise(obj.content)) {
                     streamedContent += obj.content;
                     emitSSE(controller, { type: 'token', token: obj.content });
                   }
@@ -289,17 +327,17 @@ Deno.serve(async (req) => {
             }
           }
 
+          clearInterval(keepaliveTimer);
           emitSSE(controller, { type: 'done' });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch (err) {
+          clearInterval(keepaliveTimer);
           console.error('[nlq-proxy] Stream error:', err);
           const errMsg = (err as Error).message || 'Erro no stream';
-
           await supabase
             .from('chat_messages')
             .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-
           emitSSE(controller, { error: errMsg });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
@@ -308,12 +346,7 @@ Deno.serve(async (req) => {
     });
 
     return new Response(stream, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
+      headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     });
   } catch (error) {
     console.error('[nlq-proxy] Error:', error);

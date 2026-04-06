@@ -10,11 +10,12 @@ export interface ChatMessage {
   error_detail?: string | null;
   created_at: string;
   steps?: string[];
+  startedAt?: number;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-const STREAM_TIMEOUT_MS = 2 * 60 * 1000;
+const STREAM_TIMEOUT_MS = 5 * 60 * 1000;
 
 export function useChatMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -107,7 +108,7 @@ export function useChatMessages(sessionId: string | null) {
     setMessages(prev => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: [] },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: [], startedAt: Date.now() },
     ]);
 
     const abort = new AbortController();
@@ -186,6 +187,9 @@ export function useChatMessages(sessionId: string | null) {
               ));
               break;
             }
+
+            // Ignore keepalive pings
+            if (parsed.type === 'ping') continue;
 
             // Handle typed events from proxy
             if (parsed.type === 'step' && parsed.step) {
