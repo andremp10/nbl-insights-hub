@@ -1,72 +1,101 @@
 
-Diagnóstico
+Objetivo
 
-- O problema está no `supabase/functions/nlq-proxy/index.ts`, não no renderer do chat.
-- Hoje o proxy envia `type:"token"` para qualquer `item.content` vindo de nós `agente*`.
-- `isNoiseContent()` já existe, mas não está sendo aplicada no fluxo real.
-- `detectStepsInText()` também lê texto cru do stream, então frases como `Calling agente_consulta...`, queries SQL e payloads internos acabam virando conteúdo visível.
-- Quando `{"output":"..."}` não é encontrado, o fallback usa `streamedContent` bruto. É isso que está expondo logs internos e colando respostas duplicadas.
+- Blindar o streaming para que o chat mostre apenas etapas mascaradas durante a execução e persista/exiba uma única resposta final limpa.
+
+Diagnóstico confirmado
+
+- Há mensagens contaminadas já gravadas em `chat_messages`; 3 de 69 respostas recentes ainda têm `Calling ...`, JSON bruto ou traces internos.
+- O caso mais claro concatena logs técnicos + uma resposta parcial + uma segunda resposta final no mesmo conteúdo persistido.
+- A arquitetura atual ainda falha em 4 pontos:
+  1. `classifyNode()` em `nlq-proxy` trata qualquer nó com `agente` como `final_agent`.
+  2. `extractFinalOutput()` é frágil e pode perder wrappers reais como arrays/objetos com espaços (`[ { "output": ... } ]`).
+  3. O parser lê apenas linhas JSON puras; se o n8n vier em SSE (`data:`), arrays, objetos parciais ou chunks quebrados, ele ignora o evento certo e cai no fallback.
+  4. `sanitizeFallbackContent()` ainda pode deixar respostas duplicadas ou escolher o bloco errado.
 
 Plano
 
-1. Trocar o proxy para modo “somente etapas até a resposta final”
-- Parar de emitir tokens do n8n em tempo real durante os `item`.
-- Durante a execução, enviar apenas `type:"step"` com os passos mascarados que vocês definiram.
-- Manter `ping`/keepalive e o fluxo de recuperação já existente.
+1. Reestruturar o parser do `nlq-proxy` em camadas
+- Separar claramente: normalização de chunks -> classificação de eventos -> coleta privada de candidatos -> seleção final -> validação de segurança.
+- Isso elimina a mistura atual entre parsing, steps e fallback.
 
-2. Reclassificar o stream em vez de confiar em “todo agente é conteúdo válido”
-- Criar 3 categorias no parser:
-  - nós de etapa: usados só para atualizar progresso amigável;
-  - nós internos: `chat_historico`, `MCP_Client`, `tool`, `supabase`, `agente_consulta` e similares;
-  - candidatos à resposta final: buffers acumulados internamente, sem nunca ir para a UI antes da hora.
-- Remover a regra atual que libera qualquer node com `agente` no nome.
+2. Trocar heurística aberta por allowlist estrita
+- Remover a regra `if (lower.includes('agente')) return 'final_agent'`.
+- Definir explicitamente:
+  - `internal`: webhook, MCP, tools, histórico, supabase, traces técnicos
+  - `sub_agent`: agentes auxiliares, nunca exibidos
+  - `final_agent`: apenas nós finais conhecidos/permitidos
+- Qualquer nó desconhecido passa a ser ignorado, não promovido a resposta final.
 
-3. Parar de inferir etapas a partir do texto cru
-- Remover a dependência de `detectStepsInText()` sobre conteúdo bruto.
-- As etapas devem vir só de `begin/end` + mapeamento por `nodeName`/palavras-chave controladas.
-- Assim o usuário verá apenas algo como:
+3. Tornar a captura do output determinística
+- Criar um extrator robusto para:
+  - `{"output":"..."}`
+  - `[{"output":"..."}]`
+  - objetos com espaços/quebras
+  - eventos SSE `data: ...`
+- Se chegar um `obj.output` no stream, guardar isso como candidato canônico imediatamente.
+
+4. Endurecer o fallback
+- Manter buffers separados por origem:
+  - `canonicalOutput`
+  - `finalAgentCandidate`
+  - `subAgentCandidate`
+- Antes de usar fallback, aplicar:
+  - remoção de prefixos técnicos (`Calling`, SQL, JSON, traces)
+  - divisão de blocos repetidos
+  - escolha do melhor bloco por score de resposta útil/markdown
+- Se ainda houver ruído, falhar fechado com erro controlado; nunca persistir conteúdo bruto.
+
+5. Blindar persistência e emissão
+- Só persistir/enviar ao front conteúdo aprovado por uma função final de segurança.
+- Se o texto final contiver marcadores de vazamento (`Calling`, `SELECT`, `{"type":`, `to=multi_tool_use`, `MCP_Client`), bloquear a resposta e retornar erro amigável.
+- Durante a execução, continuar enviando apenas `step` + `ping`.
+- Só no `finalize()` emitir a resposta final limpa.
+
+6. Melhorar a deduplicação de respostas
+- Detectar quando o stream traz duas versões da resposta no mesmo buffer.
+- Manter apenas o bloco final canônico ou o último bloco limpo válido.
+- Evitar concatenar “resumo 1 + resposta final 2” no mesmo conteúdo persistido.
+
+7. Reforçar testes de regressão
+- Cobrir em `supabase/functions/nlq-proxy/index.test.ts`:
+  - wrapper simples `{"output":...}`
+  - wrapper em array `[{"output":...}]`
+  - SSE com `data:`
+  - chunks quebrados no meio do JSON
+  - subagente com `Calling ...` + resposta válida
+  - resposta duplicada no mesmo buffer
+  - nó desconhecido com “agente” no nome
+  - fallback ainda ruidoso -> erro controlado
+
+8. Verificação após implementação
+- Reexecutar os casos reais que hoje quebram.
+- Conferir dois pontos:
+  - no chat: apenas steps mascarados até o fim
+  - no banco: nenhuma nova linha em `chat_messages` com `Calling`, `{"type":`, SQL ou traces internos
+- Opcional: limpar mensagens históricas já poluídas para não manter sessões antigas “feias”.
+
+Detalhes técnicos
+
+- Arquivos principais: `supabase/functions/nlq-proxy/index.ts`, `supabase/functions/nlq-proxy/index.test.ts`
+- Ajuste pequeno opcional no front: `src/hooks/useChatMessages.ts` apenas se eu precisar distinguir “final pronto” de “token final em lote”; a maior correção está no proxy.
+- Não precisa migration de banco.
+
+Fluxo alvo
+
 ```text
-Analisando sua pergunta...
-Consultando dados...
-Processando resultados...
-Elaborando resposta final...
+n8n stream
+-> normalizar eventos reais (JSON / SSE / chunks)
+-> classificar por allowlist
+-> acumular candidatos privados
+-> escolher 1 resposta final segura
+-> validar contra vazamento
+-> persistir + emitir resposta final
 ```
-
-4. Finalizar com uma seleção segura da resposta
-- Ordem de escolha:
-  1. `extractFinalOutput(fullBuffer)` como fonte principal;
-  2. fallback sanitizado do melhor buffer candidato;
-  3. se nada for seguro, retornar resposta controlada — nunca conteúdo bruto.
-- Criar um sanitizador/selector para:
-  - remover prefixos `Calling ...`, SQL, JSON técnico e traces internos;
-  - detectar o início de resposta real (`_Períodos:`, `**Resumo**`, `📊`, headings, tabelas markdown);
-  - escolher o melhor bloco final e evitar conteúdo duplicado.
-
-5. Só liberar conteúdo quando o output estiver pronto
-- O proxy deve acumular tudo internamente e só enviar a resposta para o frontend no `finalize()`.
-- Pode reutilizar o frontend atual enviando:
-  - um único `token` com a resposta limpa inteira, ou
-  - lotes pequenos apenas depois que a resposta final estiver definida.
-- Só depois disso enviar `type:"done"` e `[DONE]`.
-
-6. Blindagem para “nunca mais acontecer”
-- Adicionar testes do parser do `nlq-proxy` cobrindo:
-  - stream com `{"output":"..."}`;
-  - stream apenas com `item.content`;
-  - stream com `Calling ...`, SQL e JSON técnico;
-  - stream com duas respostas concatenadas;
-  - chunk quebrado no meio do JSON.
-- Regra de segurança: se o fallback ainda contiver marcadores internos, bloquear e devolver erro controlado em vez de vazar logs.
-
-Arquivos impactados
-
-- `supabase/functions/nlq-proxy/index.ts` — correção principal do parser, masking dos steps e finalização segura.
-- `src/hooks/useChatMessages.ts` — ajuste opcional se eu preferir introduzir um evento final dedicado; se eu mantiver `token` final único, praticamente não precisa mudar.
-- `supabase/functions/nlq-proxy/*.test.ts` — testes de regressão do parser.
 
 Resultado esperado
 
-- Durante o processamento: apenas etapas mascaradas.
-- Nenhum `Calling ...`, SQL, prompt interno ou log técnico aparecendo no chat.
-- No fim: uma única resposta limpa, formatada e sem repetição.
-- Se o `output` final não vier: fallback seguro ou erro controlado, nunca conteúdo feio/bruto.
+- Nenhum pensamento literal, tool call ou SQL no chat.
+- Nenhuma resposta duplicada.
+- Steps mascarados durante o processamento.
+- Apenas uma resposta final limpa, consistente e persistida com segurança.
