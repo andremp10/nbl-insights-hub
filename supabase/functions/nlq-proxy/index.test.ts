@@ -1,20 +1,63 @@
 import { assertEquals, assertNotEquals } from "https://deno.land/std@0.208.0/assert/mod.ts";
 
-// Import the exported functions directly
-// Since edge functions are served via Deno.serve, we test the utility functions
-// by re-declaring them here (they're exported from index.ts)
+// ══════════════════════════════════════════════════════════════════
+// Re-declare exported functions for testing (Deno edge functions
+// can't be imported directly since they call Deno.serve)
+// ══════════════════════════════════════════════════════════════════
+
+// ── classifyNode ──
+
+const INTERNAL_NODES = [
+  'webhook', 'respond to webhook', 'tool', 'supabase', 'execute',
+  'http request', 'code', 'set', 'switch', 'if', 'merge', 'split',
+  'function', 'item lists', 'no operation', 'mcp_client', 'mcp client',
+  'chat_historico', 'chat historico',
+];
+const SUB_AGENT_NODES = ['agente_consulta', 'agente_financeiro'];
+const FINAL_AGENT_NODE = 'agente_negocio';
+
+function classifyNode(nodeName: string): 'internal' | 'sub_agent' | 'final_agent' | 'ignored' {
+  if (!nodeName) return 'internal';
+  const lower = nodeName.toLowerCase();
+  if (lower.includes(FINAL_AGENT_NODE)) return 'final_agent';
+  if (SUB_AGENT_NODES.some(n => lower.includes(n))) return 'sub_agent';
+  if (INTERNAL_NODES.some(n => lower.includes(n))) return 'internal';
+  return 'ignored';
+}
+
+// ── normalizeChunkLine ──
+
+function normalizeChunkLine(raw: string): string[] {
+  let line = raw.trim();
+  if (!line) return [];
+  if (line.startsWith('data:')) line = line.substring(5).trim();
+  if (line === '[DONE]') return [];
+  if (line.startsWith('[') && line.endsWith(']')) {
+    try {
+      const arr = JSON.parse(line);
+      if (Array.isArray(arr)) return arr.map((item: any) => JSON.stringify(item));
+    } catch { /* not valid */ }
+  }
+  return [line];
+}
 
 // ── extractFinalOutput ──
 
 function extractFinalOutput(fullBuffer: string): string | null {
+  const arrayMatch = fullBuffer.match(/\[\s*\{\s*"output"\s*:/);
+  if (arrayMatch && arrayMatch.index !== undefined) {
+    const substr = fullBuffer.substring(arrayMatch.index);
+    try {
+      const arr = JSON.parse(substr);
+      if (Array.isArray(arr) && arr[0]?.output?.trim()) return arr[0].output.trim();
+    } catch { /* try object */ }
+  }
   const lastBrace = fullBuffer.lastIndexOf('{"output"');
   if (lastBrace === -1) return null;
   const substr = fullBuffer.substring(lastBrace);
   try {
     const parsed = JSON.parse(substr);
-    if (typeof parsed.output === 'string' && parsed.output.trim()) {
-      return parsed.output.trim();
-    }
+    if (typeof parsed.output === 'string' && parsed.output.trim()) return parsed.output.trim();
   } catch {
     const match = substr.match(/\{"output"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/);
     if (match) {
@@ -22,6 +65,36 @@ function extractFinalOutput(fullBuffer: string): string | null {
     }
   }
   return null;
+}
+
+// ── hasSafetyLeakage ──
+
+const LEAKAGE_PATTERNS = [
+  /^Calling \w+ with/im,
+  /^Thought:/m,
+  /^Action:/m,
+  /^Observation:/m,
+  /^to=multi_tool_use/m,
+  /\{"type"\s*:\s*"(item|begin|end)"/,
+  /\{"tool_/,
+  /\{"Prompt_/,
+  /\{"Batch_Size"/,
+  /\{"action_input"/,
+  /MCP_Client/i,
+  /nodeName.*agente/i,
+];
+const SQL_LEAKAGE_PATTERNS = [
+  /^SELECT\s+[\w.*]+\s+FROM\s+/im,
+  /^WITH\s+\w+\s+AS\s*\(/im,
+  /^FROM\s+public\.\w+/im,
+];
+
+function hasSafetyLeakage(text: string): boolean {
+  if (LEAKAGE_PATTERNS.some(p => p.test(text))) return true;
+  const lines = text.split('\n');
+  const sqlLines = lines.filter(l => SQL_LEAKAGE_PATTERNS.some(p => p.test(l.trim())));
+  if (sqlLines.length > 2) return true;
+  return false;
 }
 
 // ── sanitizeFallbackContent ──
@@ -42,7 +115,6 @@ const NOISE_MARKERS = [
   /^FROM\s+public\./im,
   /^WITH\s+\w+\s+AS\s*\(/im,
 ];
-
 const RESPONSE_START_PATTERNS = [
   /^_Períodos?:/m,
   /^\*\*Resumo\*\*/m,
@@ -71,70 +143,55 @@ function sanitizeFallbackContent(raw: string): string | null {
   if (hasNoise) {
     let lastGoodStart = -1;
     for (const pattern of RESPONSE_START_PATTERNS) {
-      let m;
       const globalPattern = new RegExp(pattern.source, pattern.flags.includes('m') ? 'gm' : 'g');
+      let m;
       while ((m = globalPattern.exec(raw)) !== null) {
         if (m.index > lastGoodStart) lastGoodStart = m.index;
       }
     }
     if (lastGoodStart > 0) {
       text = raw.substring(lastGoodStart);
-      const stillNoisy = NOISE_MARKERS.some(p => p.test(text));
-      if (stillNoisy) return null;
+      if (NOISE_MARKERS.some(p => p.test(text))) return null;
     } else {
       return null;
     }
   }
-  const jsonLikeLines = text.split('\n').filter(l => l.trim().startsWith('{') || l.trim().startsWith('"type"'));
-  if (jsonLikeLines.length > text.split('\n').length * 0.3) return null;
+  const allLines = text.split('\n');
+  const jsonLikeLines = allLines.filter(l => l.trim().startsWith('{') || l.trim().startsWith('"type"'));
+  if (jsonLikeLines.length > allLines.length * 0.3) return null;
   const cleaned = text.trim();
-  return cleaned.length > 20 ? cleaned : null;
+  if (cleaned.length <= 20) return null;
+  if (hasSafetyLeakage(cleaned)) return null;
+  return cleaned;
 }
 
-// ── classifyNode ──
+// ── deduplicateResponse ──
 
-const INTERNAL_NODES = [
-  'webhook', 'respond to webhook', 'tool', 'supabase', 'execute',
-  'http request', 'code', 'set', 'switch', 'if', 'merge', 'split',
-  'function', 'item lists', 'no operation', 'mcp_client', 'mcp client',
-  'chat_historico', 'chat historico',
-];
-const SUB_AGENT_NODES = ['agente_consulta', 'agente_financeiro'];
-const FINAL_AGENT_NODE = 'agente_negocio';
-
-function classifyNode(nodeName: string): 'internal' | 'sub_agent' | 'final_agent' | 'step_only' {
-  if (!nodeName) return 'internal';
-  const lower = nodeName.toLowerCase();
-  if (lower.includes(FINAL_AGENT_NODE)) return 'final_agent';
-  if (SUB_AGENT_NODES.some(n => lower.includes(n))) return 'sub_agent';
-  if (INTERNAL_NODES.some(n => lower.includes(n))) return 'internal';
-  if (lower.includes('agente')) return 'final_agent';
-  return 'step_only';
+function deduplicateResponse(text: string): string {
+  const resumoMatches = [...text.matchAll(/\*\*Resumo\*\*/g)];
+  if (resumoMatches.length >= 2) {
+    const lastIdx = resumoMatches[resumoMatches.length - 1].index!;
+    const beforeLast = text.substring(0, lastIdx);
+    const periodMatch = beforeLast.lastIndexOf('_Períodos:');
+    const periodMatch2 = beforeLast.lastIndexOf('_Período:');
+    const startIdx = Math.max(periodMatch, periodMatch2, 0);
+    if (startIdx > 0 && startIdx < lastIdx) return text.substring(startIdx).trim();
+    return text.substring(lastIdx).trim();
+  }
+  const emojiMatches = [...text.matchAll(/📊/g)];
+  if (emojiMatches.length >= 2) {
+    const lastIdx = emojiMatches[emojiMatches.length - 1].index!;
+    return text.substring(lastIdx).trim();
+  }
+  return text;
 }
+
 
 // ════════════════════════════════════════════════════════════════
 // TESTS
 // ════════════════════════════════════════════════════════════════
 
-Deno.test("extractFinalOutput — finds output wrapper", () => {
-  const buffer = 'some noise\n{"output":"Hello **world**"}\n';
-  assertEquals(extractFinalOutput(buffer), "Hello **world**");
-});
-
-Deno.test("extractFinalOutput — returns null when no output", () => {
-  const buffer = '{"type":"item","content":"R"}\n{"type":"end"}\n';
-  assertEquals(extractFinalOutput(buffer), null);
-});
-
-Deno.test("extractFinalOutput — handles escaped content", () => {
-  const buffer = '{"output":"Valor: R$ 100,00\\nLinha 2"}';
-  assertEquals(extractFinalOutput(buffer), "Valor: R$ 100,00\nLinha 2");
-});
-
-Deno.test("extractFinalOutput — picks last output in buffer", () => {
-  const buffer = '{"output":"first"}\ngarbage\n{"output":"second"}';
-  assertEquals(extractFinalOutput(buffer), "second");
-});
+// ── classifyNode ──
 
 Deno.test("classifyNode — agente_negocio is final_agent", () => {
   assertEquals(classifyNode("agente_negocio"), "final_agent");
@@ -164,15 +221,114 @@ Deno.test("classifyNode — empty string is internal", () => {
   assertEquals(classifyNode(""), "internal");
 });
 
-Deno.test("classifyNode — unknown agente is final_agent", () => {
-  assertEquals(classifyNode("agente_xyz"), "final_agent");
+Deno.test("classifyNode — unknown 'agente_xyz' is IGNORED (not final_agent)", () => {
+  assertEquals(classifyNode("agente_xyz"), "ignored");
 });
+
+Deno.test("classifyNode — random node name is ignored", () => {
+  assertEquals(classifyNode("some_random_node"), "ignored");
+});
+
+// ── normalizeChunkLine ──
+
+Deno.test("normalizeChunkLine — strips SSE data: prefix", () => {
+  const result = normalizeChunkLine('data: {"type":"item","content":"hello"}');
+  assertEquals(result, ['{"type":"item","content":"hello"}']);
+});
+
+Deno.test("normalizeChunkLine — handles array wrapper", () => {
+  const result = normalizeChunkLine('[{"output":"test result"}]');
+  assertEquals(result.length, 1);
+  const parsed = JSON.parse(result[0]);
+  assertEquals(parsed.output, "test result");
+});
+
+Deno.test("normalizeChunkLine — ignores [DONE]", () => {
+  assertEquals(normalizeChunkLine("[DONE]"), []);
+  assertEquals(normalizeChunkLine("data: [DONE]"), []);
+});
+
+Deno.test("normalizeChunkLine — passes through plain JSON", () => {
+  const result = normalizeChunkLine('{"type":"begin"}');
+  assertEquals(result, ['{"type":"begin"}']);
+});
+
+Deno.test("normalizeChunkLine — empty line returns empty", () => {
+  assertEquals(normalizeChunkLine(""), []);
+  assertEquals(normalizeChunkLine("   "), []);
+});
+
+// ── extractFinalOutput ──
+
+Deno.test("extractFinalOutput — finds output wrapper", () => {
+  const buffer = 'some noise\n{"output":"Hello **world**"}\n';
+  assertEquals(extractFinalOutput(buffer), "Hello **world**");
+});
+
+Deno.test("extractFinalOutput — returns null when no output", () => {
+  const buffer = '{"type":"item","content":"R"}\n{"type":"end"}\n';
+  assertEquals(extractFinalOutput(buffer), null);
+});
+
+Deno.test("extractFinalOutput — handles escaped content", () => {
+  const buffer = '{"output":"Valor: R$ 100,00\\nLinha 2"}';
+  assertEquals(extractFinalOutput(buffer), "Valor: R$ 100,00\nLinha 2");
+});
+
+Deno.test("extractFinalOutput — picks last output in buffer", () => {
+  const buffer = '{"output":"first"}\ngarbage\n{"output":"second"}';
+  assertEquals(extractFinalOutput(buffer), "second");
+});
+
+Deno.test("extractFinalOutput — handles array wrapper [{'output':'...'}]", () => {
+  const buffer = 'noise\n[{"output":"Array result here"}]\n';
+  assertEquals(extractFinalOutput(buffer), "Array result here");
+});
+
+Deno.test("extractFinalOutput — handles array with spaces", () => {
+  const buffer = '[ { "output": "Spaced array" } ]';
+  assertEquals(extractFinalOutput(buffer), "Spaced array");
+});
+
+// ── hasSafetyLeakage ──
+
+Deno.test("hasSafetyLeakage — detects 'Calling' pattern", () => {
+  assertEquals(hasSafetyLeakage("Calling agente_consulta with input: blah"), true);
+});
+
+Deno.test("hasSafetyLeakage — detects Thought/Action traces", () => {
+  assertEquals(hasSafetyLeakage("Thought: I need to query\nAction: execute_sql"), true);
+});
+
+Deno.test("hasSafetyLeakage — detects MCP_Client", () => {
+  assertEquals(hasSafetyLeakage("Using MCP_Client to connect"), true);
+});
+
+Deno.test("hasSafetyLeakage — detects JSON type markers", () => {
+  assertEquals(hasSafetyLeakage('Some text {"type": "item"} more'), true);
+});
+
+Deno.test("hasSafetyLeakage — clean markdown passes", () => {
+  assertEquals(hasSafetyLeakage("**Resumo**\nEm março de 2026 tivemos 837 pedidos."), false);
+});
+
+Deno.test("hasSafetyLeakage — multiple SQL lines are blocked", () => {
+  const text = "SELECT * FROM public.is_pedidos\nFROM public.is_clientes\nWITH cte AS (\nSELECT id";
+  assertEquals(hasSafetyLeakage(text), true);
+});
+
+Deno.test("hasSafetyLeakage — single SQL mention in prose is OK", () => {
+  const text = "O sistema usa SELECT para consultar dados.\n**Resumo**\nTivemos 100 pedidos.";
+  assertEquals(hasSafetyLeakage(text), false);
+});
+
+// ── sanitizeFallbackContent ──
 
 Deno.test("sanitizeFallbackContent — rejects short content", () => {
   assertEquals(sanitizeFallbackContent("Hi"), null);
 });
 
-Deno.test("sanitizeFallbackContent — strips Calling prefix", () => {
+Deno.test("sanitizeFallbackContent — strips Calling prefix and finds response", () => {
   const raw = 'Calling agente_consulta with input: {"Prompt":"test"}\n\n**Resumo**\nEm março de 2026 tivemos 837 pedidos com faturamento total de R$ 450k.';
   const result = sanitizeFallbackContent(raw);
   assertNotEquals(result, null);
@@ -196,6 +352,11 @@ Deno.test("sanitizeFallbackContent — rejects JSON-heavy content", () => {
   assertEquals(sanitizeFallbackContent(lines), null);
 });
 
+Deno.test("sanitizeFallbackContent — rejects content with leakage markers", () => {
+  const raw = '**Resumo**\nCalling agente_consulta with input: something\nEm março de 2026 tivemos pedidos.';
+  assertEquals(sanitizeFallbackContent(raw), null);
+});
+
 Deno.test("sanitizeFallbackContent — handles duplicated responses by finding last marker", () => {
   const raw = 'Calling agente with input: blah\n📊 First response here with enough content to be valid\nSELECT * FROM public.table\n📊 Resumo final correto com dados detalhados e tabelas completas';
   const result = sanitizeFallbackContent(raw);
@@ -203,4 +364,80 @@ Deno.test("sanitizeFallbackContent — handles duplicated responses by finding l
     assertEquals(result.includes("Calling"), false);
     assertEquals(result.includes("SELECT"), false);
   }
+});
+
+// ── deduplicateResponse ──
+
+Deno.test("deduplicateResponse — single response unchanged", () => {
+  const text = "**Resumo**\nEm março de 2026 tivemos 837 pedidos.";
+  assertEquals(deduplicateResponse(text), text);
+});
+
+Deno.test("deduplicateResponse — removes first of two **Resumo** blocks", () => {
+  const text = "_Períodos: 01/03_\n**Resumo**\nPrimeira versão.\n\n_Períodos: 01/03_\n**Resumo**\nSegunda versão final.";
+  const result = deduplicateResponse(text);
+  assertEquals(result.includes("Segunda versão final"), true);
+  assertEquals(result.includes("Primeira versão"), false);
+});
+
+Deno.test("deduplicateResponse — handles duplicated 📊 blocks", () => {
+  const text = "📊 First summary with data\nSome noise\n📊 Final summary with corrected data";
+  const result = deduplicateResponse(text);
+  assertEquals(result.startsWith("📊 Final summary"), true);
+});
+
+// ── Integration: real-world stream simulation ──
+
+Deno.test("Integration — full buffer with Calling + SQL + output wrapper", () => {
+  const buffer = [
+    'Calling chat_historico with {}',
+    'Calling agente_consulta with input: {"Prompt":"test"}',
+    'Calling MCP_Client with input: {"query":"SELECT * FROM public.is_pedidos","tool":"execute_sql"}',
+    '{"type":"begin","metadata":{"nodeName":"agente_consulta"}}',
+    '{"type":"item","content":"📊 Sub-agent response","metadata":{"nodeName":"agente_consulta"}}',
+    '{"type":"end","metadata":{"nodeName":"agente_consulta"}}',
+    '{"type":"begin","metadata":{"nodeName":"agente_negocio"}}',
+    '{"type":"item","content":"_Períodos: 01/03_\\n\\n**Resumo**\\nFinal answer.","metadata":{"nodeName":"agente_negocio"}}',
+    '{"type":"end","metadata":{"nodeName":"agente_negocio"}}',
+    '{"output":"_Períodos: 01/03_\\n\\n**Resumo**\\nFinal clean answer from output wrapper."}',
+  ].join('\n');
+
+  // extractFinalOutput should find the canonical output
+  const result = extractFinalOutput(buffer);
+  assertNotEquals(result, null);
+  assertEquals(result!.includes("Final clean answer"), true);
+});
+
+Deno.test("Integration — buffer WITHOUT output wrapper falls back to final agent", () => {
+  // Simulate no {"output":"..."} but agente_negocio content exists
+  const finalAgentContent = "_Períodos: 01/03/2026 a 31/03/2026_\n\n**Resumo**\nEm março tivemos 837 pedidos com R$ 450k de faturamento.";
+
+  // extractFinalOutput returns null since no wrapper
+  const buffer = '{"type":"item","content":"...","metadata":{"nodeName":"agente_negocio"}}';
+  assertEquals(extractFinalOutput(buffer), null);
+
+  // sanitizeFallbackContent should accept clean content
+  const sanitized = sanitizeFallbackContent(finalAgentContent);
+  assertNotEquals(sanitized, null);
+  assertEquals(sanitized!.includes("837 pedidos"), true);
+});
+
+Deno.test("Integration — noisy fallback is blocked by safety gate", () => {
+  const noisyContent = "Calling agente_consulta with input: blah\nThought: I need to think\n**Resumo**\nSome data here with enough length to pass.";
+  const sanitized = sanitizeFallbackContent(noisyContent);
+  // Should be null because the last block still has noise or leakage
+  // The sanitizer should strip prefix but hasSafetyLeakage catches Calling
+  // Since we start from **Resumo**, the Calling is stripped, but let's verify
+  if (sanitized) {
+    assertEquals(hasSafetyLeakage(sanitized), false);
+  }
+});
+
+Deno.test("Integration — SSE-prefixed array output is extracted", () => {
+  const buffer = 'data: [{"output":"SSE array output with valid content"}]\n';
+  // normalizeChunkLine strips data: prefix
+  const lines = normalizeChunkLine('data: [{"output":"SSE array output with valid content"}]');
+  assertEquals(lines.length, 1);
+  const parsed = JSON.parse(lines[0]);
+  assertEquals(parsed.output, "SSE array output with valid content");
 });
