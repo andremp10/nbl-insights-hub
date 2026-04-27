@@ -168,22 +168,27 @@ function sanitizeFallbackContent(raw: string): string | null {
 // ── deduplicateResponse ──
 
 function deduplicateResponse(text: string): string {
-  const resumoMatches = [...text.matchAll(/\*\*Resumo\*\*/g)];
-  if (resumoMatches.length >= 2) {
-    const lastIdx = resumoMatches[resumoMatches.length - 1].index!;
-    const beforeLast = text.substring(0, lastIdx);
-    const periodMatch = beforeLast.lastIndexOf('_Períodos:');
-    const periodMatch2 = beforeLast.lastIndexOf('_Período:');
-    const startIdx = Math.max(periodMatch, periodMatch2, 0);
-    if (startIdx > 0 && startIdx < lastIdx) return text.substring(startIdx).trim();
-    return text.substring(lastIdx).trim();
+  const startMarkers = [
+    /\*\*Resumo\*\*/g, /_Períodos?:/g, /📊\s*\*?\*?Resumo/g, /📊/g,
+  ];
+  const allPositions: number[] = [];
+  for (const re of startMarkers) {
+    let m;
+    while ((m = re.exec(text)) !== null) allPositions.push(m.index);
   }
-  const emojiMatches = [...text.matchAll(/📊/g)];
-  if (emojiMatches.length >= 2) {
-    const lastIdx = emojiMatches[emojiMatches.length - 1].index!;
-    return text.substring(lastIdx).trim();
+  allPositions.sort((a, b) => a - b);
+  if (allPositions.length < 2) return text;
+  const blocks: number[] = [allPositions[0]];
+  for (let i = 1; i < allPositions.length; i++) {
+    if (allPositions[i] - blocks[blocks.length - 1] > 50) blocks.push(allPositions[i]);
   }
-  return text;
+  if (blocks.length < 2) return text;
+  const lastBlockStart = blocks[blocks.length - 1];
+  const windowStart = Math.max(0, lastBlockStart - 200);
+  const window = text.substring(windowStart, lastBlockStart);
+  const periodInWindow = window.search(/_Períodos?:/);
+  const realStart = periodInWindow !== -1 ? windowStart + periodInWindow : lastBlockStart;
+  return text.substring(realStart).trim();
 }
 
 
