@@ -264,10 +264,12 @@ export function deduplicateResponse(text: string): string {
 
   if (allPositions.length < 2) return text;
 
-  // Group near positions (within 50 chars) — they belong to the same block
+  // Group near positions (within 30 chars) — they belong to the same block.
+  // E.g. "_Períodos:..." then "**Resumo**" right after = same block.
+  // But "📊 First summary" + "📊 Final summary" 38 chars apart = different blocks.
   const blocks: number[] = [allPositions[0]];
   for (let i = 1; i < allPositions.length; i++) {
-    if (allPositions[i] - blocks[blocks.length - 1] > 50) {
+    if (allPositions[i] - blocks[blocks.length - 1] > 30) {
       blocks.push(allPositions[i]);
     }
   }
@@ -277,11 +279,13 @@ export function deduplicateResponse(text: string): string {
   // Multiple distinct blocks → keep last one
   const lastBlockStart = blocks[blocks.length - 1];
 
-  // Walk backwards from lastBlockStart to find the earliest related marker
-  // (e.g., _Períodos: usually appears before **Resumo** in the same block)
-  const windowStart = Math.max(0, lastBlockStart - 200);
+  // Walk backwards from lastBlockStart to find the NEAREST _Períodos: marker
+  // belonging to the same block (within ~80 chars before lastBlockStart).
+  const windowStart = Math.max(0, lastBlockStart - 80);
   const window = text.substring(windowStart, lastBlockStart);
-  const periodInWindow = window.search(/_Períodos?:/);
+  // Use lastIndexOf to find the closest preceding _Períodos: (not the earliest)
+  let periodInWindow = window.lastIndexOf('_Períodos:');
+  if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
   const realStart = periodInWindow !== -1 ? windowStart + periodInWindow : lastBlockStart;
 
   return text.substring(realStart).trim();
