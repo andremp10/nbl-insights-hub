@@ -683,25 +683,34 @@ Deno.serve(async (req) => {
             }
           }
 
-          // P3: Final agent accumulated content (sanitized)
+          // P3: Final agent — extract LAST clean block (handles ReAct + dup)
           if (!finalContent && finalAgentContent.length > 20) {
-            const sanitized = sanitizeFallbackContent(finalAgentContent);
-            if (sanitized) {
-              finalContent = sanitized;
-              console.log(`[nlq-proxy] P3: sanitized finalAgent: ${finalContent.length} chars`);
+            const cleaned = extractLastCleanBlock(finalAgentContent);
+            if (cleaned) {
+              finalContent = cleaned;
+              console.log(`[nlq-proxy] P3: extracted last clean block from finalAgent: ${finalContent.length} chars`);
             }
           }
 
-          // P4: Sub-agent content as last resort (sanitized)
+          // P4: Sub-agent content as last resort
           if (!finalContent && subAgentContent.length > 20) {
-            const sanitized = sanitizeFallbackContent(subAgentContent);
-            if (sanitized) {
-              finalContent = sanitized;
-              console.log(`[nlq-proxy] P4: sanitized subAgent: ${finalContent.length} chars`);
+            const cleaned = extractLastCleanBlock(subAgentContent);
+            if (cleaned) {
+              finalContent = cleaned;
+              console.log(`[nlq-proxy] P4: extracted last clean block from subAgent: ${finalContent.length} chars`);
             }
           }
 
-          // DEDUPLICATION
+          // P5: Last-resort scan of entire fullBuffer for clean block
+          if (!finalContent && fullBuffer.length > 100) {
+            const cleaned = extractLastCleanBlock(fullBuffer);
+            if (cleaned) {
+              finalContent = cleaned;
+              console.log(`[nlq-proxy] P5: extracted last clean block from fullBuffer: ${finalContent.length} chars`);
+            }
+          }
+
+          // DEDUPLICATION (defensive — extractLastCleanBlock already calls it)
           if (finalContent) {
             finalContent = deduplicateResponse(finalContent);
           }
