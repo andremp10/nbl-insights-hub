@@ -464,7 +464,9 @@ function extractLastCleanBlock(raw: string): string | null {
     const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
     let m;
     while ((m = re.exec(raw)) !== null) {
-      if (m.index > lastNoiseEnd && m.index > bestStart) bestStart = m.index;
+      if (m.index > lastNoiseEnd) {
+        if (bestStart === -1 || m.index < bestStart) bestStart = m.index;
+      }
     }
   }
 
