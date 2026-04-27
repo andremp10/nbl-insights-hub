@@ -184,11 +184,15 @@ function deduplicateResponse(text: string): string {
   }
   if (blocks.length < 2) return text;
   const lastBlockStart = blocks[blocks.length - 1];
-  const windowStart = Math.max(0, lastBlockStart - 80);
-  const window = text.substring(windowStart, lastBlockStart);
-  let periodInWindow = window.lastIndexOf('_Períodos:');
-  if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
-  const realStart = periodInWindow !== -1 ? windowStart + periodInWindow : lastBlockStart;
+  let realStart = lastBlockStart;
+  const sliceAhead = text.substring(lastBlockStart, lastBlockStart + 12);
+  if (!/^_Períodos?:/.test(sliceAhead)) {
+    const windowStart = Math.max(0, lastBlockStart - 80);
+    const window = text.substring(windowStart, lastBlockStart);
+    let periodInWindow = window.lastIndexOf('_Períodos:');
+    if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
+    if (periodInWindow !== -1) realStart = windowStart + periodInWindow;
+  }
   return text.substring(realStart).trim();
 }
 
