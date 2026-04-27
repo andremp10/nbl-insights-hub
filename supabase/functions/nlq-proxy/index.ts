@@ -316,12 +316,17 @@ export function extractLastCleanBlock(raw: string): string | null {
   }
 
   // Find LAST occurrence of any response-start marker that comes AFTER lastNoiseEnd
+  // Find EARLIEST occurrence of any response-start marker that comes AFTER lastNoiseEnd.
+  // (Earliest, because we want the natural start of the answer block — e.g. _Períodos:
+  // before **Resumo** in the same response.)
   let bestStart = -1;
   for (const pattern of RESPONSE_START_PATTERNS) {
     const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
     let m;
     while ((m = re.exec(raw)) !== null) {
-      if (m.index > lastNoiseEnd && m.index > bestStart) bestStart = m.index;
+      if (m.index > lastNoiseEnd) {
+        if (bestStart === -1 || m.index < bestStart) bestStart = m.index;
+      }
     }
   }
 
