@@ -180,13 +180,14 @@ function deduplicateResponse(text: string): string {
   if (allPositions.length < 2) return text;
   const blocks: number[] = [allPositions[0]];
   for (let i = 1; i < allPositions.length; i++) {
-    if (allPositions[i] - blocks[blocks.length - 1] > 50) blocks.push(allPositions[i]);
+    if (allPositions[i] - blocks[blocks.length - 1] > 30) blocks.push(allPositions[i]);
   }
   if (blocks.length < 2) return text;
   const lastBlockStart = blocks[blocks.length - 1];
-  const windowStart = Math.max(0, lastBlockStart - 200);
+  const windowStart = Math.max(0, lastBlockStart - 80);
   const window = text.substring(windowStart, lastBlockStart);
-  const periodInWindow = window.search(/_Períodos?:/);
+  let periodInWindow = window.lastIndexOf('_Períodos:');
+  if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
   const realStart = periodInWindow !== -1 ? windowStart + periodInWindow : lastBlockStart;
   return text.substring(realStart).trim();
 }
