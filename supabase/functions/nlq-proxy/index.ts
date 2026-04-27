@@ -247,30 +247,117 @@ export function sanitizeFallbackContent(raw: string): string | null {
 // ════════════════════════════════════════════════════════════════
 
 export function deduplicateResponse(text: string): string {
-  // Detect two copies of a response by looking for repeated "**Resumo**" or "_Períodos:"
-  const resumoMatches = [...text.matchAll(/\*\*Resumo\*\*/g)];
-  if (resumoMatches.length >= 2) {
-    // Take content from the LAST occurrence onward
-    const lastIdx = resumoMatches[resumoMatches.length - 1].index!;
-    // Walk back to find the nearest response start before this Resumo
-    const beforeLast = text.substring(0, lastIdx);
-    const periodMatch = beforeLast.lastIndexOf('_Períodos:');
-    const periodMatch2 = beforeLast.lastIndexOf('_Período:');
-    const startIdx = Math.max(periodMatch, periodMatch2, 0);
-    if (startIdx > 0 && startIdx < lastIdx) {
-      return text.substring(startIdx).trim();
+  // Collect ALL response-start positions of any kind
+  const startMarkers = [
+    /\*\*Resumo\*\*/g,
+    /_Períodos?:/g,
+    /📊\s*\*?\*?Resumo/g,
+    /📊/g,
+  ];
+
+  const allPositions: number[] = [];
+  for (const re of startMarkers) {
+    let m;
+    while ((m = re.exec(text)) !== null) allPositions.push(m.index);
+  }
+  allPositions.sort((a, b) => a - b);
+
+  if (allPositions.length < 2) return text;
+
+  // Group near positions (within 30 chars) — they belong to the same block.
+  // E.g. "_Períodos:..." then "**Resumo**" right after = same block.
+  // But "📊 First summary" + "📊 Final summary" 38 chars apart = different blocks.
+  const blocks: number[] = [allPositions[0]];
+  for (let i = 1; i < allPositions.length; i++) {
+    if (allPositions[i] - blocks[blocks.length - 1] > 30) {
+      blocks.push(allPositions[i]);
     }
-    return text.substring(lastIdx).trim();
   }
 
-  // Check for duplicated "📊" blocks
-  const emojiMatches = [...text.matchAll(/📊/g)];
-  if (emojiMatches.length >= 2) {
-    const lastIdx = emojiMatches[emojiMatches.length - 1].index!;
-    return text.substring(lastIdx).trim();
+  if (blocks.length < 2) return text;
+
+  // Multiple distinct blocks → keep last one
+  const lastBlockStart = blocks[blocks.length - 1];
+
+  // If lastBlockStart already IS a _Períodos: marker, use it directly.
+  // Otherwise walk back ~80 chars to find a preceding _Períodos: from the same block.
+  let realStart = lastBlockStart;
+  const sliceAhead = text.substring(lastBlockStart, lastBlockStart + 12);
+  if (!/^_Períodos?:/.test(sliceAhead)) {
+    const windowStart = Math.max(0, lastBlockStart - 80);
+    const window = text.substring(windowStart, lastBlockStart);
+    let periodInWindow = window.lastIndexOf('_Períodos:');
+    if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
+    if (periodInWindow !== -1) realStart = windowStart + periodInWindow;
   }
 
-  return text;
+  return text.substring(realStart).trim();
+}
+
+// ════════════════════════════════════════════════════════════════
+// LAYER 7b: EXTRACT LAST CLEAN BLOCK (handles ReAct + dup mixed content)
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * For finalAgentContent that may contain:
+ *  - ReAct traces ("Calling X with...", "Thought:", JSON dumps)
+ *  - Sub-agent observation echoed back
+ *  - The actual final answer
+ *
+ * Strategy: scan for noise positions and response-start positions.
+ * Pick the LAST response-start that occurs AFTER the LAST noise marker.
+ * If the resulting slice still has noise, return null.
+ */
+export function extractLastCleanBlock(raw: string): string | null {
+  if (!raw || raw.trim().length < 20) return null;
+
+  // Find LAST occurrence of any noise marker
+  let lastNoiseEnd = -1;
+  for (const pattern of NOISE_MARKERS) {
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      const end = m.index + m[0].length;
+      if (end > lastNoiseEnd) lastNoiseEnd = end;
+    }
+  }
+
+  // Find LAST occurrence of any response-start marker that comes AFTER lastNoiseEnd
+  // Find EARLIEST occurrence of any response-start marker that comes AFTER lastNoiseEnd.
+  // (Earliest, because we want the natural start of the answer block — e.g. _Períodos:
+  // before **Resumo** in the same response.)
+  let bestStart = -1;
+  for (const pattern of RESPONSE_START_PATTERNS) {
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      if (m.index > lastNoiseEnd) {
+        if (bestStart === -1 || m.index < bestStart) bestStart = m.index;
+      }
+    }
+  }
+
+  if (bestStart === -1) {
+    // No clean response after noise. Maybe no noise at all? Try sanitize fallback.
+    if (lastNoiseEnd === -1) return sanitizeFallbackContent(raw);
+    return null;
+  }
+
+  let candidate = raw.substring(bestStart).trim();
+  if (candidate.length < 20) return null;
+
+  // Apply dedup to remove echoed sub-agent block if present
+  candidate = deduplicateResponse(candidate);
+
+  // Final safety check
+  if (hasSafetyLeakage(candidate)) return null;
+
+  // Reject if it became JSON-heavy
+  const allLines = candidate.split('\n');
+  const jsonLikeLines = allLines.filter(l => l.trim().startsWith('{') || l.trim().startsWith('"type"'));
+  if (jsonLikeLines.length > allLines.length * 0.3) return null;
+
+  return candidate;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -608,25 +695,34 @@ Deno.serve(async (req) => {
             }
           }
 
-          // P3: Final agent accumulated content (sanitized)
+          // P3: Final agent — extract LAST clean block (handles ReAct + dup)
           if (!finalContent && finalAgentContent.length > 20) {
-            const sanitized = sanitizeFallbackContent(finalAgentContent);
-            if (sanitized) {
-              finalContent = sanitized;
-              console.log(`[nlq-proxy] P3: sanitized finalAgent: ${finalContent.length} chars`);
+            const cleaned = extractLastCleanBlock(finalAgentContent);
+            if (cleaned) {
+              finalContent = cleaned;
+              console.log(`[nlq-proxy] P3: extracted last clean block from finalAgent: ${finalContent.length} chars`);
             }
           }
 
-          // P4: Sub-agent content as last resort (sanitized)
+          // P4: Sub-agent content as last resort
           if (!finalContent && subAgentContent.length > 20) {
-            const sanitized = sanitizeFallbackContent(subAgentContent);
-            if (sanitized) {
-              finalContent = sanitized;
-              console.log(`[nlq-proxy] P4: sanitized subAgent: ${finalContent.length} chars`);
+            const cleaned = extractLastCleanBlock(subAgentContent);
+            if (cleaned) {
+              finalContent = cleaned;
+              console.log(`[nlq-proxy] P4: extracted last clean block from subAgent: ${finalContent.length} chars`);
             }
           }
 
-          // DEDUPLICATION
+          // P5: Last-resort scan of entire fullBuffer for clean block
+          if (!finalContent && fullBuffer.length > 100) {
+            const cleaned = extractLastCleanBlock(fullBuffer);
+            if (cleaned) {
+              finalContent = cleaned;
+              console.log(`[nlq-proxy] P5: extracted last clean block from fullBuffer: ${finalContent.length} chars`);
+            }
+          }
+
+          // DEDUPLICATION (defensive — extractLastCleanBlock already calls it)
           if (finalContent) {
             finalContent = deduplicateResponse(finalContent);
           }

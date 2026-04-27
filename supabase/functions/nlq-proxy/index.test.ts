@@ -168,22 +168,32 @@ function sanitizeFallbackContent(raw: string): string | null {
 // ── deduplicateResponse ──
 
 function deduplicateResponse(text: string): string {
-  const resumoMatches = [...text.matchAll(/\*\*Resumo\*\*/g)];
-  if (resumoMatches.length >= 2) {
-    const lastIdx = resumoMatches[resumoMatches.length - 1].index!;
-    const beforeLast = text.substring(0, lastIdx);
-    const periodMatch = beforeLast.lastIndexOf('_Períodos:');
-    const periodMatch2 = beforeLast.lastIndexOf('_Período:');
-    const startIdx = Math.max(periodMatch, periodMatch2, 0);
-    if (startIdx > 0 && startIdx < lastIdx) return text.substring(startIdx).trim();
-    return text.substring(lastIdx).trim();
+  const startMarkers = [
+    /\*\*Resumo\*\*/g, /_Períodos?:/g, /📊\s*\*?\*?Resumo/g, /📊/g,
+  ];
+  const allPositions: number[] = [];
+  for (const re of startMarkers) {
+    let m;
+    while ((m = re.exec(text)) !== null) allPositions.push(m.index);
   }
-  const emojiMatches = [...text.matchAll(/📊/g)];
-  if (emojiMatches.length >= 2) {
-    const lastIdx = emojiMatches[emojiMatches.length - 1].index!;
-    return text.substring(lastIdx).trim();
+  allPositions.sort((a, b) => a - b);
+  if (allPositions.length < 2) return text;
+  const blocks: number[] = [allPositions[0]];
+  for (let i = 1; i < allPositions.length; i++) {
+    if (allPositions[i] - blocks[blocks.length - 1] > 30) blocks.push(allPositions[i]);
   }
-  return text;
+  if (blocks.length < 2) return text;
+  const lastBlockStart = blocks[blocks.length - 1];
+  let realStart = lastBlockStart;
+  const sliceAhead = text.substring(lastBlockStart, lastBlockStart + 12);
+  if (!/^_Períodos?:/.test(sliceAhead)) {
+    const windowStart = Math.max(0, lastBlockStart - 80);
+    const window = text.substring(windowStart, lastBlockStart);
+    let periodInWindow = window.lastIndexOf('_Períodos:');
+    if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
+    if (periodInWindow !== -1) realStart = windowStart + periodInWindow;
+  }
+  return text.substring(realStart).trim();
 }
 
 
@@ -440,4 +450,132 @@ Deno.test("Integration — SSE-prefixed array output is extracted", () => {
   assertEquals(lines.length, 1);
   const parsed = JSON.parse(lines[0]);
   assertEquals(parsed.output, "SSE array output with valid content");
+});
+
+// ════════════════════════════════════════════════════════════════
+// extractLastCleanBlock — new function tests
+// ════════════════════════════════════════════════════════════════
+
+function extractLastCleanBlock(raw: string): string | null {
+  if (!raw || raw.trim().length < 20) return null;
+
+  let lastNoiseEnd = -1;
+  for (const pattern of NOISE_MARKERS) {
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      const end = m.index + m[0].length;
+      if (end > lastNoiseEnd) lastNoiseEnd = end;
+    }
+  }
+
+  let bestStart = -1;
+  for (const pattern of RESPONSE_START_PATTERNS) {
+    const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g');
+    let m;
+    while ((m = re.exec(raw)) !== null) {
+      if (m.index > lastNoiseEnd) {
+        if (bestStart === -1 || m.index < bestStart) bestStart = m.index;
+      }
+    }
+  }
+
+  if (bestStart === -1) {
+    if (lastNoiseEnd === -1) return sanitizeFallbackContent(raw);
+    return null;
+  }
+
+  let candidate = raw.substring(bestStart).trim();
+  if (candidate.length < 20) return null;
+
+  candidate = deduplicateResponse(candidate);
+  if (hasSafetyLeakage(candidate)) return null;
+
+  const allLines = candidate.split('\n');
+  const jsonLikeLines = allLines.filter(l => l.trim().startsWith('{') || l.trim().startsWith('"type"'));
+  if (jsonLikeLines.length > allLines.length * 0.3) return null;
+
+  return candidate;
+}
+
+Deno.test("extractLastCleanBlock — picks final answer after ReAct traces", () => {
+  const raw = [
+    'Calling chat_historico with {}',
+    'Calling agente_consulta with input: {"Prompt":"x","Batch_Size":200}',
+    'Calling MCP_Client with input: {"query":"SELECT * FROM public.is_pedidos","tool":"execute_sql"}',
+    '',
+    '_Períodos: 01/03/2026 a 31/03/2026_',
+    '',
+    '**Resumo**',
+    'Em março de 2026 tivemos 837 pedidos com R$ 450k de faturamento.',
+  ].join('\n');
+  const result = extractLastCleanBlock(raw);
+  assertNotEquals(result, null);
+  assertEquals(result!.startsWith('_Períodos:'), true);
+  assertEquals(result!.includes('Calling'), false);
+  assertEquals(result!.includes('SELECT'), false);
+});
+
+Deno.test("extractLastCleanBlock — picks last block when sub-agent + final coexist", () => {
+  const raw = [
+    'Calling agente_consulta with input: {"x":1}',
+    '📊 Sub-agent response with data details',
+    'Calling MCP_Client with input: {"query":"x"}',
+    '_Períodos: 01/03/2026_',
+    '**Resumo**',
+    'Final correct answer with full context.',
+  ].join('\n');
+  const result = extractLastCleanBlock(raw);
+  assertNotEquals(result, null);
+  assertEquals(result!.includes('Final correct answer'), true);
+  assertEquals(result!.includes('Sub-agent'), false);
+  assertEquals(result!.includes('Calling'), false);
+});
+
+Deno.test("extractLastCleanBlock — returns null when only noise remains", () => {
+  const raw = 'Calling agente with input: blah\nThought: I need to think\nAction: query';
+  assertEquals(extractLastCleanBlock(raw), null);
+});
+
+Deno.test("extractLastCleanBlock — clean content passes through", () => {
+  const raw = '_Períodos: 01/03_\n**Resumo**\nClean response with enough text content here.';
+  const result = extractLastCleanBlock(raw);
+  assertNotEquals(result, null);
+  assertEquals(result!.includes('Clean response'), true);
+});
+
+Deno.test("deduplicateResponse — handles mixed markers (📊 + **Resumo**)", () => {
+  const text = '📊 Resumo do sub-agente com dados\n_Períodos: 01/03_\n**Resumo**\nResposta final correta.';
+  const result = deduplicateResponse(text);
+  assertEquals(result.includes('Resposta final correta'), true);
+  assertEquals(result.includes('sub-agente'), false);
+});
+
+Deno.test("deduplicateResponse — handles repeated _Períodos:", () => {
+  const text = '_Períodos: 01/03_\n**Resumo**\nPrimeira versão\n\n_Períodos: 01/03_\n**Resumo**\nSegunda versão final';
+  const result = deduplicateResponse(text);
+  assertEquals(result.includes('Segunda versão final'), true);
+  assertEquals(result.includes('Primeira versão'), false);
+});
+
+Deno.test("Integration — real-world buffer with mixed leak gets cleaned", () => {
+  const buffer = `Calling chat_historico with {}Calling agente_consulta with input: {"Prompt__User_Message_":"Análise","Batch_Size":200}Calling MCP_Client with input: {"query":"SELECT table_name FROM public.vw_schema","tool":"execute_sql"}
+
+_Períodos: 01/03/2026 a 31/03/2026 · Escopo: pedidos do mês_
+
+**Resumo**
+Em março de 2026 foram registrados 837 pedidos com faturamento total de R$ 450.026,98.
+
+**Dados detalhados**
+
+| ERP ID | Cliente | Valor |
+|---|---|---|
+| 100 | Cliente A | R$ 1.000 |`;
+
+  const result = extractLastCleanBlock(buffer);
+  assertNotEquals(result, null);
+  assertEquals(result!.startsWith('_Períodos:'), true);
+  assertEquals(result!.includes('Calling'), false);
+  assertEquals(result!.includes('SELECT'), false);
+  assertEquals(result!.includes('837 pedidos'), true);
 });
