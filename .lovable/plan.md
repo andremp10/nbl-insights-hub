@@ -1,101 +1,113 @@
 
-Objetivo
 
-- Blindar o streaming para que o chat mostre apenas etapas mascaradas durante a execução e persista/exiba uma única resposta final limpa.
+## Diagnóstico final — raiz do problema
 
-Diagnóstico confirmado
+Analisei o código atual (`nlq-proxy/index.ts`), as mensagens persistidas no banco, e o pipeline frontend. O cenário é:
 
-- Há mensagens contaminadas já gravadas em `chat_messages`; 3 de 69 respostas recentes ainda têm `Calling ...`, JSON bruto ou traces internos.
-- O caso mais claro concatena logs técnicos + uma resposta parcial + uma segunda resposta final no mesmo conteúdo persistido.
-- A arquitetura atual ainda falha em 4 pontos:
-  1. `classifyNode()` em `nlq-proxy` trata qualquer nó com `agente` como `final_agent`.
-  2. `extractFinalOutput()` é frágil e pode perder wrappers reais como arrays/objetos com espaços (`[ { "output": ... } ]`).
-  3. O parser lê apenas linhas JSON puras; se o n8n vier em SSE (`data:`), arrays, objetos parciais ou chunks quebrados, ele ignora o evento certo e cai no fallback.
-  4. `sanitizeFallbackContent()` ainda pode deixar respostas duplicadas ou escolher o bloco errado.
+### O que acontece no n8n
 
-Plano
+O `agente_negocio` é um agente ReAct. Quando ele "pensa", o n8n emite seus traces como `{"type":"item","content":"Calling agente_consulta with...","metadata":{"nodeName":"agente_negocio"}}`. Ou seja, o conteúdo de tool calls vem DENTRO de items do nó final.
 
-1. Reestruturar o parser do `nlq-proxy` em camadas
-- Separar claramente: normalização de chunks -> classificação de eventos -> coleta privada de candidatos -> seleção final -> validação de segurança.
-- Isso elimina a mistura atual entre parsing, steps e fallback.
-
-2. Trocar heurística aberta por allowlist estrita
-- Remover a regra `if (lower.includes('agente')) return 'final_agent'`.
-- Definir explicitamente:
-  - `internal`: webhook, MCP, tools, histórico, supabase, traces técnicos
-  - `sub_agent`: agentes auxiliares, nunca exibidos
-  - `final_agent`: apenas nós finais conhecidos/permitidos
-- Qualquer nó desconhecido passa a ser ignorado, não promovido a resposta final.
-
-3. Tornar a captura do output determinística
-- Criar um extrator robusto para:
-  - `{"output":"..."}`
-  - `[{"output":"..."}]`
-  - objetos com espaços/quebras
-  - eventos SSE `data: ...`
-- Se chegar um `obj.output` no stream, guardar isso como candidato canônico imediatamente.
-
-4. Endurecer o fallback
-- Manter buffers separados por origem:
-  - `canonicalOutput`
-  - `finalAgentCandidate`
-  - `subAgentCandidate`
-- Antes de usar fallback, aplicar:
-  - remoção de prefixos técnicos (`Calling`, SQL, JSON, traces)
-  - divisão de blocos repetidos
-  - escolha do melhor bloco por score de resposta útil/markdown
-- Se ainda houver ruído, falhar fechado com erro controlado; nunca persistir conteúdo bruto.
-
-5. Blindar persistência e emissão
-- Só persistir/enviar ao front conteúdo aprovado por uma função final de segurança.
-- Se o texto final contiver marcadores de vazamento (`Calling`, `SELECT`, `{"type":`, `to=multi_tool_use`, `MCP_Client`), bloquear a resposta e retornar erro amigável.
-- Durante a execução, continuar enviando apenas `step` + `ping`.
-- Só no `finalize()` emitir a resposta final limpa.
-
-6. Melhorar a deduplicação de respostas
-- Detectar quando o stream traz duas versões da resposta no mesmo buffer.
-- Manter apenas o bloco final canônico ou o último bloco limpo válido.
-- Evitar concatenar “resumo 1 + resposta final 2” no mesmo conteúdo persistido.
-
-7. Reforçar testes de regressão
-- Cobrir em `supabase/functions/nlq-proxy/index.test.ts`:
-  - wrapper simples `{"output":...}`
-  - wrapper em array `[{"output":...}]`
-  - SSE com `data:`
-  - chunks quebrados no meio do JSON
-  - subagente com `Calling ...` + resposta válida
-  - resposta duplicada no mesmo buffer
-  - nó desconhecido com “agente” no nome
-  - fallback ainda ruidoso -> erro controlado
-
-8. Verificação após implementação
-- Reexecutar os casos reais que hoje quebram.
-- Conferir dois pontos:
-  - no chat: apenas steps mascarados até o fim
-  - no banco: nenhuma nova linha em `chat_messages` com `Calling`, `{"type":`, SQL ou traces internos
-- Opcional: limpar mensagens históricas já poluídas para não manter sessões antigas “feias”.
-
-Detalhes técnicos
-
-- Arquivos principais: `supabase/functions/nlq-proxy/index.ts`, `supabase/functions/nlq-proxy/index.test.ts`
-- Ajuste pequeno opcional no front: `src/hooks/useChatMessages.ts` apenas se eu precisar distinguir “final pronto” de “token final em lote”; a maior correção está no proxy.
-- Não precisa migration de banco.
-
-Fluxo alvo
+Além disso, o `agente_negocio` recebe a resposta do sub-agente como "Observation" e pode re-emitir esse texto. Resultado: `finalAgentContent` acumula:
 
 ```text
-n8n stream
--> normalizar eventos reais (JSON / SSE / chunks)
--> classificar por allowlist
--> acumular candidatos privados
--> escolher 1 resposta final segura
--> validar contra vazamento
--> persistir + emitir resposta final
+Calling agente_consulta with input: {...}    ← ReAct trace
+Calling MCP_Client with input: {...}         ← ReAct trace  
+📊 Resumo [resposta do sub-agente]           ← Observation (duplicada)
+_Períodos:_ **Resumo** [resposta final]      ← Resposta real
 ```
 
-Resultado esperado
+### Por que o código atual falha
 
-- Nenhum pensamento literal, tool call ou SQL no chat.
-- Nenhuma resposta duplicada.
-- Steps mascarados durante o processamento.
-- Apenas uma resposta final limpa, consistente e persistida com segurança.
+1. **Quando `{"output":"..."}` existe**: P1/P2 funciona — a mensagem de 17:41 do dia 06/04 saiu limpa
+2. **Quando `{"output":"..."}` NÃO existe**: Cai no P3 (`sanitizeFallbackContent(finalAgentContent)`)
+   - O sanitizador encontra `📊` como primeiro marcador de resposta e corta o prefixo "Calling..."
+   - Mas o texto resultante contém DUAS respostas (sub-agente + final) coladas
+   - `deduplicateResponse` não detecta porque os marcadores são diferentes (`📊 Resumo` vs `**Resumo**`)
+   - Resultado: ambas as respostas são persistidas concatenadas
+
+3. **Quando o stream vem como texto puro** (sem JSON): As linhas "Calling..." falham no `JSON.parse`, não vão para nenhum buffer de conteúdo, mas `fullBuffer` fica poluído. Se `extractFinalOutput` falha, não há fallback.
+
+### Falhas específicas na deduplicação
+
+- `deduplicateResponse` só detecta `**Resumo**` repetido (com asteriscos) ou `📊` repetido
+- Não detecta `📊 Resumo` (sem bold) + `**Resumo**` (com bold) como duplicata
+- Não detecta `_Períodos:` repetido como sinal de dois blocos
+
+---
+
+## Plano de correção
+
+### 1. Adicionar filtragem de conteúdo durante acumulação do `finalAgentContent`
+
+Mesmo que tokens cheguem caractere a caractere, podemos detectar padrões no buffer acumulado periodicamente. A cada item do `agente_negocio`:
+
+- Após acumular, verificar se `finalAgentContent` termina com padrão de noise (`Calling `, `Thought:`, `Action:`, etc.)
+- Se sim, marcar um "reset point" — tudo antes é descartável
+- No final, usar apenas o conteúdo APÓS o último reset point
+
+### 2. Reescrever `extractLastCleanBlock()` (nova função)
+
+Substitui o uso direto de `sanitizeFallbackContent` no P3/P4:
+
+```text
+extractLastCleanBlock(text):
+  1. Encontrar TODAS as posições de marcadores de ruído
+  2. Encontrar TODAS as posições de marcadores de resposta real
+  3. Pegar o ÚLTIMO marcador de resposta que vem DEPOIS do ÚLTIMO ruído
+  4. Retornar o texto a partir desse ponto
+  5. Se ainda tem ruído → retornar null
+```
+
+### 3. Melhorar `deduplicateResponse()`
+
+Adicionar detecção de:
+- `_Períodos:` ou `_Período:` repetido (2+ ocorrências)
+- Bloco de tabela repetido (2+ separadores `|---|`)
+- Marcadores mistos (`📊` + `**Resumo**` como indicador de 2 blocos)
+- Heurística de tamanho: se o conteúdo tem >2000 chars e contém 2+ blocos de resposta estruturada, manter o último
+
+### 4. Endurecer `hasSafetyLeakage()` 
+
+Adicionar padrões:
+- `Calling \w+ with input:` (sem `^`, para pegar no meio do texto)
+- `Batch_Size` e `Prompt__User_Message_` fora de JSON
+- Detecção de resposta duplicada como sinal de leak
+
+### 5. Limpeza de mensagens históricas poluídas
+
+Executar um UPDATE nas 3 mensagens com leak já identificadas:
+- `0f9a052f` (Calling chat_historico...)
+- `8e62ff9e` (to=multi_tool_use...)
+- `afc93b6b` ({"type":"begin"...})
+
+Aplicar `sanitizeFallbackContent` nelas ou marcar como error.
+
+---
+
+## Detalhes técnicos
+
+### Arquivo: `supabase/functions/nlq-proxy/index.ts`
+
+Mudanças:
+- Nova função `extractLastCleanBlock(text)` entre Layer 6 e Layer 7
+- Refatorar P3/P4 no priority chain para usar `extractLastCleanBlock` → `deduplicateResponse` → `hasSafetyLeakage`
+- Melhorar `deduplicateResponse` com novos padrões
+- Adicionar noise tracking durante acumulação de `finalAgentContent`
+
+### Arquivo: `supabase/functions/nlq-proxy/index.test.ts`
+
+Novos testes:
+- `finalAgentContent` com ReAct traces + 2 respostas → extrai só a última
+- Marcadores mistos (`📊` + `**Resumo**`) detectados como duplicata
+- `_Períodos:` repetido → dedup funciona
+- Fallback ainda ruidoso → erro controlado (nunca conteúdo bruto)
+
+### Resultado esperado
+
+- Durante processamento: apenas steps mascarados
+- No final: uma única resposta limpa
+- Se `{"output":"..."}` chega: usa direto (já funciona)
+- Se NÃO chega: extrai o último bloco limpo do `finalAgentContent`, deduplicado e validado
+- Se nada é seguro: erro controlado, nunca lixo
+
