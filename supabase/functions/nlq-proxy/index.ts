@@ -279,14 +279,17 @@ export function deduplicateResponse(text: string): string {
   // Multiple distinct blocks → keep last one
   const lastBlockStart = blocks[blocks.length - 1];
 
-  // Walk backwards from lastBlockStart to find the NEAREST _Períodos: marker
-  // belonging to the same block (within ~80 chars before lastBlockStart).
-  const windowStart = Math.max(0, lastBlockStart - 80);
-  const window = text.substring(windowStart, lastBlockStart);
-  // Use lastIndexOf to find the closest preceding _Períodos: (not the earliest)
-  let periodInWindow = window.lastIndexOf('_Períodos:');
-  if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
-  const realStart = periodInWindow !== -1 ? windowStart + periodInWindow : lastBlockStart;
+  // If lastBlockStart already IS a _Períodos: marker, use it directly.
+  // Otherwise walk back ~80 chars to find a preceding _Períodos: from the same block.
+  let realStart = lastBlockStart;
+  const sliceAhead = text.substring(lastBlockStart, lastBlockStart + 12);
+  if (!/^_Períodos?:/.test(sliceAhead)) {
+    const windowStart = Math.max(0, lastBlockStart - 80);
+    const window = text.substring(windowStart, lastBlockStart);
+    let periodInWindow = window.lastIndexOf('_Períodos:');
+    if (periodInWindow === -1) periodInWindow = window.lastIndexOf('_Período:');
+    if (periodInWindow !== -1) realStart = windowStart + periodInWindow;
+  }
 
   return text.substring(realStart).trim();
 }
