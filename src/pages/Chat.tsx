@@ -42,11 +42,16 @@ export default function Chat() {
     updateSessionTitle(currentSessionId, title);
   }, [currentSessionId, updateSessionTitle]);
 
-  // Auto-scroll
+  // Auto-scroll: throttled via rAF, uses 'auto' during streaming to avoid reflow storms.
   const lastMsgContent = messages.length > 0 ? messages[messages.length - 1].content : '';
   const lastMsgStatus = messages.length > 0 ? messages[messages.length - 1].status : '';
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    let raf = 0;
+    raf = requestAnimationFrame(() => {
+      const isStreaming = lastMsgStatus === 'streaming' || lastMsgStatus === 'pending' || sending;
+      messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' });
+    });
+    return () => cancelAnimationFrame(raf);
   }, [messages.length, lastMsgContent, lastMsgStatus, sending]);
 
   useEffect(() => {
