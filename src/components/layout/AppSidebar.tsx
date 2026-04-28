@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { LayoutDashboard, Bot, Wallet, PackageSearch, LogOut, Printer, UserPlus } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
-import { CreateUserModal } from '@/components/admin/CreateUserModal';
+
+const CreateUserModal = lazy(() =>
+  import('@/components/admin/CreateUserModal').then(m => ({ default: m.CreateUserModal }))
+);
 import {
   Sidebar,
   SidebarContent,
@@ -150,7 +153,11 @@ export function AppSidebar() {
         <SidebarRail />
       </Sidebar>
 
-      <CreateUserModal open={showCreateUser} onOpenChange={setShowCreateUser} />
+      {showCreateUser && (
+        <Suspense fallback={null}>
+          <CreateUserModal open={showCreateUser} onOpenChange={setShowCreateUser} />
+        </Suspense>
+      )}
     </>
   );
 }
