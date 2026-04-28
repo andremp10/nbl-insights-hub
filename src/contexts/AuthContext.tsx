@@ -23,6 +23,29 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const APP_USER_CACHE_KEY = 'nbl_app_user_cache_v1';
+
+function readCachedAppUser(authUserId: string): AppUser | null {
+  try {
+    const raw = sessionStorage.getItem(APP_USER_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AppUser;
+    if (parsed?.auth_user_id === authUserId) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedAppUser(appUser: AppUser | null) {
+  try {
+    if (!appUser) sessionStorage.removeItem(APP_USER_CACHE_KEY);
+    else sessionStorage.setItem(APP_USER_CACHE_KEY, JSON.stringify(appUser));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -41,33 +64,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data as AppUser;
   };
 
-  const handleSession = async (newSession: Session | null) => {
+  const handleSession = (newSession: Session | null) => {
     setSession(newSession);
     setUser(newSession?.user ?? null);
 
-    if (newSession?.user) {
-      // Skip if we already fetched for this user
-      if (fetchedUserIdRef.current === newSession.user.id) {
-        setLoading(false);
-        return;
-      }
-      fetchedUserIdRef.current = newSession.user.id;
+    if (!newSession?.user) {
+      setAppUser(null);
+      fetchedUserIdRef.current = null;
+      writeCachedAppUser(null);
+      setLoading(false);
+      return;
+    }
 
-      const appUserData = await fetchAppUser(newSession.user.id);
+    // Try cache first — unblocks UI immediately on refresh.
+    const cached = readCachedAppUser(newSession.user.id);
+    if (cached) {
+      setAppUser(cached);
+      setLoading(false);
+    }
+
+    if (fetchedUserIdRef.current === newSession.user.id) {
+      setLoading(false);
+      return;
+    }
+    fetchedUserIdRef.current = newSession.user.id;
+
+    // Revalidate in background; do not block UI.
+    fetchAppUser(newSession.user.id).then((appUserData) => {
       if (!appUserData || appUserData.status !== 'active') {
         setAppUser(null);
         fetchedUserIdRef.current = null;
-        await supabase.auth.signOut();
+        writeCachedAppUser(null);
+        supabase.auth.signOut();
         setSession(null);
         setUser(null);
       } else {
         setAppUser(appUserData);
+        writeCachedAppUser(appUserData);
       }
-    } else {
-      setAppUser(null);
-      fetchedUserIdRef.current = null;
-    }
-    setLoading(false);
+      setLoading(false);
+    });
   };
 
   useEffect(() => {
@@ -99,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     fetchedUserIdRef.current = null;
+    writeCachedAppUser(null);
     await supabase.auth.signOut();
   };
 

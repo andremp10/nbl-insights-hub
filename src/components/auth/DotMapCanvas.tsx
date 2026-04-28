@@ -140,6 +140,10 @@ const DotMapCanvas = () => {
         }
 
         function animate() {
+            if (document.hidden) {
+                animationFrameId = requestAnimationFrame(animate);
+                return;
+            }
             drawDots();
             drawRoutes();
 

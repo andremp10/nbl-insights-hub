@@ -225,6 +225,31 @@ export function useChatMessages(sessionId: string | null) {
       let receivedDone = false;
       let receivedAnyToken = false;
 
+      // Throttle setMessages updates to 1 per animation frame to avoid
+      // re-rendering on every token. Tokens accumulate in `accumulated`,
+      // and a single rAF flushes the latest content into state.
+      let pendingFlush = false;
+      let rafId = 0;
+      const scheduleFlush = () => {
+        if (pendingFlush) return;
+        pendingFlush = true;
+        rafId = requestAnimationFrame(() => {
+          pendingFlush = false;
+          const snapshot = accumulated;
+          setMessages(prev => prev.map(m =>
+            m.id === optAsstId ? { ...m, content: snapshot } : m
+          ));
+        });
+      };
+      const flushNow = () => {
+        if (rafId) cancelAnimationFrame(rafId);
+        pendingFlush = false;
+        const snapshot = accumulated;
+        setMessages(prev => prev.map(m =>
+          m.id === optAsstId ? { ...m, content: snapshot } : m
+        ));
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -240,6 +265,7 @@ export function useChatMessages(sessionId: string | null) {
 
           if (payload === '[DONE]') {
             receivedDone = true;
+            flushNow();
             setMessages(prev => prev.map(m =>
               m.id === optAsstId ? { ...m, status: 'complete' as const } : m
             ));
@@ -258,6 +284,7 @@ export function useChatMessages(sessionId: string | null) {
             }
 
             if (parsed.error) {
+              flushNow();
               setMessages(prev => prev.map(m =>
                 m.id === optAsstId ? { ...m, status: 'error' as const, error_detail: parsed.error } : m
               ));
@@ -269,6 +296,7 @@ export function useChatMessages(sessionId: string | null) {
 
             if (parsed.type === 'done') {
               receivedDone = true;
+              flushNow();
               setMessages(prev => prev.map(m =>
                 m.id === optAsstId ? { ...m, status: 'complete' as const } : m
               ));
@@ -276,9 +304,10 @@ export function useChatMessages(sessionId: string | null) {
             }
 
             if (parsed.type === 'step' && parsed.step) {
+              const step = parsed.step;
               setMessages(prev => prev.map(m =>
                 m.id === optAsstId
-                  ? { ...m, steps: [...(m.steps || []), parsed.step] }
+                  ? { ...m, steps: [...(m.steps || []), step] }
                   : m
               ));
               continue;
@@ -287,10 +316,7 @@ export function useChatMessages(sessionId: string | null) {
             if (parsed.type === 'token' && parsed.token) {
               receivedAnyToken = true;
               accumulated += parsed.token;
-              const newContent = accumulated;
-              setMessages(prev => prev.map(m =>
-                m.id === optAsstId ? { ...m, content: newContent } : m
-              ));
+              scheduleFlush();
               continue;
             }
 
@@ -298,16 +324,16 @@ export function useChatMessages(sessionId: string | null) {
             if (parsed.token) {
               receivedAnyToken = true;
               accumulated += parsed.token;
-              const newContent = accumulated;
-              setMessages(prev => prev.map(m =>
-                m.id === optAsstId ? { ...m, content: newContent } : m
-              ));
+              scheduleFlush();
             }
           } catch {
             // Skip unparseable lines
           }
         }
       }
+
+      // Final flush in case anything is pending
+      flushNow();
 
       // ── Stream ended — ensure proper state ──
       if (!receivedDone) {

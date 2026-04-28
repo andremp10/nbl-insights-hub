@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 
+
 function formatTime(timestamp: string): string {
   try {
     return new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -119,6 +120,19 @@ const markdownComponents = {
 
 const remarkPlugins = [remarkGfm];
 
+/**
+ * Memoized markdown body — only re-renders when content actually changes.
+ * Prevents reparsing markdown for every token during streaming.
+ */
+const MarkdownBody = memo(function MarkdownBody({ content }: { content: string }) {
+  const normalized = useMemo(() => normalizeMarkdown(content), [content]);
+  return (
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      {normalized}
+    </ReactMarkdown>
+  );
+});
+
 interface ChatMessageProps {
   message: ChatMessageType;
   onRetry?: () => void;
@@ -196,9 +210,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
 
         {hasContent && (
           <div className="text-sm leading-relaxed break-words prose-chat">
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-              {normalizeMarkdown(message.content)}
-            </ReactMarkdown>
+            <MarkdownBody content={message.content} />
             {isStreaming && (
               <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
             )}
