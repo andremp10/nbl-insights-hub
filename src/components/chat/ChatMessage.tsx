@@ -120,6 +120,19 @@ const markdownComponents = {
 
 const remarkPlugins = [remarkGfm];
 
+/**
+ * Memoized markdown body — only re-renders when content actually changes.
+ * Prevents reparsing markdown for every token during streaming.
+ */
+const MarkdownBody = memo(function MarkdownBody({ content }: { content: string }) {
+  const normalized = useMemo(() => normalizeMarkdown(content), [content]);
+  return (
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      {normalized}
+    </ReactMarkdown>
+  );
+});
+
 interface ChatMessageProps {
   message: ChatMessageType;
   onRetry?: () => void;
