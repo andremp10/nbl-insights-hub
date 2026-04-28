@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useDateFilter } from '@/contexts/DateFilterContext';
@@ -68,19 +69,17 @@ export function usePedidosData() {
 export function usePedidosKPIs() {
   const { data: items, isLoading, error } = usePedidosData();
 
-  const kpis: PedidosKPIs = {
-    totalPedidos: 0,
-    faturamento: 0,
-    emProducao: 0,
-    atrasados: 0,
-  };
-
-  if (items) {
-    kpis.totalPedidos = items.length;
-    kpis.faturamento = items.reduce((sum, item) => sum + Number(item.valor_total || 0), 0);
-    kpis.emProducao = items.filter(item => item.status_pedido === 'Em Produção').length;
-    kpis.atrasados = items.filter(item => item.is_atrasado).length;
-  }
+  const kpis = useMemo<PedidosKPIs>(() => {
+    const acc: PedidosKPIs = { totalPedidos: 0, faturamento: 0, emProducao: 0, atrasados: 0 };
+    if (!items) return acc;
+    for (const item of items) {
+      acc.totalPedidos += 1;
+      acc.faturamento += Number(item.valor_total || 0);
+      if (item.status_pedido === 'Em Produção') acc.emProducao += 1;
+      if (item.is_atrasado) acc.atrasados += 1;
+    }
+    return acc;
+  }, [items]);
 
   return { kpis, isLoading, error };
 }
@@ -88,26 +87,22 @@ export function usePedidosKPIs() {
 export function useStatusDistribuicao() {
   const { data: items, isLoading, error } = usePedidosData();
 
-  let statusData: StatusAgrupado[] = [];
-
-  if (items) {
+  const statusData = useMemo<StatusAgrupado[]>(() => {
+    if (!items) return [];
     const total = items.length;
-
-    // Group by status
     const grouped = items.reduce((acc, item) => {
       const status = item.status_pedido || 'Desconhecido';
       acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
-
-    statusData = Object.entries(grouped)
+    return Object.entries(grouped)
       .map(([status, quantidade]) => ({
         status,
         quantidade,
         percentual: total > 0 ? (quantidade / total) * 100 : 0,
       }))
       .sort((a, b) => b.quantidade - a.quantidade);
-  }
+  }, [items]);
 
   return { statusData, isLoading, error };
 }
@@ -115,28 +110,19 @@ export function useStatusDistribuicao() {
 export function useTopClientes() {
   const { data: items, isLoading, error } = usePedidosData();
 
-  let clientes: ClienteAgrupado[] = [];
-
-  if (items) {
-    // Group by cliente
+  const clientes = useMemo<ClienteAgrupado[]>(() => {
+    if (!items) return [];
     const grouped = items.reduce((acc, item) => {
       const cliente = item.cliente_nome || 'Cliente Desconhecido';
-      if (!acc[cliente]) {
-        acc[cliente] = { valor: 0, pedidos: 0 };
-      }
+      if (!acc[cliente]) acc[cliente] = { valor: 0, pedidos: 0 };
       acc[cliente].valor += Number(item.valor_total || 0);
       acc[cliente].pedidos += 1;
       return acc;
     }, {} as Record<string, { valor: number; pedidos: number }>);
-
-    clientes = Object.entries(grouped)
-      .map(([cliente, data]) => ({
-        cliente,
-        valor: data.valor,
-        pedidos: data.pedidos,
-      }))
+    return Object.entries(grouped)
+      .map(([cliente, data]) => ({ cliente, valor: data.valor, pedidos: data.pedidos }))
       .sort((a, b) => b.valor - a.valor);
-  }
+  }, [items]);
 
   return { clientes, isLoading, error };
 }
@@ -148,16 +134,16 @@ export function usePedidosPaginados(
 ) {
   const { data: items, isLoading, error } = usePedidosData();
 
-  let filteredItems = items || [];
-
-  // Client-side filtering
-  if (filters?.status && filters.status !== 'all') {
-    filteredItems = filteredItems.filter(item => item.status_pedido === filters.status);
-  }
+  const filteredItems = useMemo(() => {
+    if (!items) return [];
+    if (filters?.status && filters.status !== 'all') {
+      return items.filter(item => item.status_pedido === filters.status);
+    }
+    return items;
+  }, [items, filters?.status]);
 
   const startIndex = (page - 1) * pageSize;
   const endIndex = startIndex + pageSize;
-
   const pedidos = filteredItems.slice(startIndex, endIndex);
   const totalPages = Math.ceil(filteredItems.length / pageSize);
   const totalItems = filteredItems.length;
