@@ -1,89 +1,49 @@
 ## Contexto
 
-Os dados das views `vw_dashboard_financeiro` e `vw_dashboard_pedidos` (e RPCs derivadas) são atualizados pelo ETL **somente uma vez por dia, às 04:30 da manhã** (horário de Fortaleza). Hoje, todos os hooks de Financeiro, Pedidos, Home (KPIs e Atividade Recente) usam `staleTime: 5 minutos` no React Query, o que faz com que:
+Erro observado em produção: `TypeError: The stream controller cannot close or enqueue` em `nlq-proxy/index.ts:509`, seguido de uma "mensagem de erro fantasma" no chat **mesmo com a resposta correta já salva no banco** (visível na captura do usuário: a tabela do ranking de clientes apareceu, e logo abaixo veio um balão vermelho "The stream controller cannot close or enqueue").
 
-- Cada troca de aba/rota dispare refetch (montagem do componente).
-- Cada `window focus` dispare refetch (default do React Query).
-- Cada reconexão dispare refetch.
-- Vários usuários simultâneos multipliquem essas queries pesadas no Postgres.
+### Causa raiz
 
-Resultado: Supabase em estado de "exhausting multiple resources" como mostrado nos logs.
+1. A resposta do n8n demorou ~50s e tinha 1122 chars.
+2. Antes do `finalize()` terminar de fazer streaming token-a-token (loop com `setTimeout(10ms)` por batch), o cliente fechou a conexão SSE (`Http: connection closed before message completed`).
+3. `finalize()` continuou rodando: o `INSERT` da assistant message com `status: complete` foi executado **com sucesso** (linha 519), mas em seguida o `emitSSE({type:'token'})` e o `controller.enqueue([DONE])` explodiram porque o controller já estava fechado.
+4. O catch externo no `start()` chamou novamente o caminho de erro → criou uma **segunda assistant message com `status: error`** no banco. Daí o balão vermelho fantasma.
 
-Como o dado **não muda durante o dia**, todo refetch antes das 04:30 do dia seguinte é desperdício puro.
+A arquitetura async v4 já implementada (atrás do flag `VITE_CHAT_ASYNC_MODE`) elimina este cenário, mas ainda não está ativa porque depende do n8n ser reconfigurado para "Respond Immediately". Enquanto isso, precisamos estabilizar o caminho SSE legado.
 
-## Estratégia
+## Mudanças
 
-Trocar o cache time-based fixo por um cache **alinhado ao próximo ETL (04:30 America/Fortaleza)**. O dado fica "fresh" até esse horário, depois invalida automaticamente uma única vez.
+### 1. `supabase/functions/nlq-proxy/index.ts` — guards defensivos
 
-Camadas de defesa:
+- Adicionar flag local `controllerClosed = false`. Toda função `emitSSE`, `emitStep` e `finalize` checa essa flag antes de tentar enfileirar.
+- Tratar `TypeError` específico de "controller cannot close or enqueue" como **sinal de cliente desconectado**, não como erro de processamento. Setar `controllerClosed = true` e parar de tentar emitir.
+- Em `finalize()`:
+  - Se `status === 'complete'`, fazer **primeiro** o `INSERT` da assistant message (já é assim) e **depois** tentar o streaming token-a-token. Se o stream falhar, o conteúdo já está persistido — apenas logar e sair sem reentrar no caminho de erro.
+  - Envolver o loop de tokens (linhas 509-515) num try/catch que detecta controller fechado e quebra o loop silenciosamente em vez de propagar.
+  - Mover o `controller.close()` final para um try/catch que não relança.
+- No `catch` externo do `start()` (linha ~699), **antes** de inserir uma assistant message com `status: error`, verificar se já existe uma assistant message com `status: complete` para o mesmo `user_message_id` criada nos últimos 30s. Se existir, suprimir o INSERT de erro (apenas logar).
 
-1. **`staleTime` dinâmico** = `próximo_04:30 - agora` (ms). Enquanto fresh, React Query NUNCA vai à rede, mesmo com remount.
-2. **`gcTime`** alto (24h) para manter dados em memória entre navegações.
-3. **Desligar refetch automáticos** que são inúteis nesse contexto:
-   - `refetchOnWindowFocus: false`
-   - `refetchOnReconnect: false`
-   - `refetchOnMount: false` (já temos placeholderData)
-   - `refetchInterval: false`
-4. **Persistência opcional em `localStorage`** (chave por usuário + data ETL) para sobreviver a refresh da página sem hit no banco. Implementação leve, manual no hook (sem dependência nova).
+### 2. `src/hooks/useChatMessages.ts` — dedupe defensivo no cliente
 
-## Arquivos a alterar
+- No subscribe Realtime / refetch, se chegarem duas assistant messages para o mesmo `user_message_id` (ou em janela de <5s) sendo uma `complete` e outra `error`, manter apenas a `complete` na UI. (Defesa em profundidade, caso o backend crie a fantasma mesmo assim.)
 
-### 1. Novo helper: `src/lib/etlCache.ts`
-- `getNextEtlTimestamp()`: retorna o timestamp do próximo 04:30 America/Fortaleza.
-- `getCurrentEtlBucket()`: string `YYYY-MM-DD` representando o "ciclo ETL atual" (usada como cache key e chave de localStorage).
-- `getEtlStaleTime()`: ms até o próximo 04:30.
-- `loadFromLocal<T>(key)` / `saveToLocal<T>(key, data)`: persistência simples por bucket ETL, com expiração automática (chaves antigas ignoradas).
+### 3. Acelerar o flush final (mitigação)
 
-### 2. Configuração global do QueryClient (provavelmente `src/main.tsx` ou `src/App.tsx`)
-Definir defaults globais conservadores:
-```ts
-defaultOptions: {
-  queries: {
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: 1,
-    gcTime: 24 * 60 * 60 * 1000,
-  }
-}
-```
-Isso já elimina a maior fonte de refetchs sem tocar em hook nenhum.
+- Em `nlq-proxy`, aumentar `FINAL_TOKEN_BATCH_SIZE` e/ou remover o `setTimeout(10ms)` entre batches. O streaming token-a-token do conteúdo final é puramente cosmético (o conteúdo já está pronto) — não precisa simular digitação a 10ms/batch para 1100 chars. Reduzir esse loop a uma única emissão (`emitSSE({type:'token', token: content})`) elimina a janela de 1+ segundo onde o cliente pode desconectar.
 
-### 3. Hooks afetados — trocar `staleTime: 5 * 60 * 1000` por `staleTime: getEtlStaleTime()` e adicionar `gcTime` longo + `refetchOnMount: false`:
-- `src/hooks/useFinanceiro.ts` — `useFinanceiroKPIs`, `useCategoriasDespesas`.
-- `src/hooks/usePedidos.ts` — `usePedidosData` (todos os outros hooks derivam dele).
-- `src/hooks/useHomeData.ts` — `useHomeKPIs`, `useRecentOrders`.
+### 4. Não tocar na arquitetura async v4
 
-Incluir o bucket ETL no `queryKey` para garantir invalidação automática à 04:30:
-```ts
-queryKey: ['pedidos', etlBucket, fromDate, toDate]
-```
+- Nenhuma mudança em `nlq-proxy-async`, no flag `VITE_CHAT_ASYNC_MODE`, ou no caminho async de `useChatMessages`. Esta é uma correção cirúrgica no caminho SSE legado.
 
-### 4. Persistência localStorage (somente nesses 3 hooks)
-Antes de chamar a query, tentar `loadFromLocal(key)`; se existir e for do bucket atual, usar como `initialData`. Após sucesso, `saveToLocal`. Isso elimina hit no banco mesmo após F5.
+## Resultado esperado
 
-### 5. Chat NÃO é afetado
-Os hooks `useChatMessages` e `useChatSessions` continuam com Realtime + polling como definido na arquitetura assíncrona. O cache ETL aplica-se SOMENTE a dados de dashboard.
+- Quando o cliente fecha a conexão antes do flush final, o backend **não** cria mais uma assistant message de erro fantasma.
+- O loop de "digitação" do conteúdo final é instantâneo, eliminando a janela de race.
+- Mesmo se a fantasma escapar, o frontend a esconde.
+- A tabela e o insight visíveis na captura continuam aparecendo corretamente; o balão vermelho some.
 
-## Comportamento resultante
+## Não inclui
 
-- Primeira carga do dia: 1 query por hook → cache local + memória.
-- Navegação entre Home/Pedidos/Financeiro: zero queries adicionais.
-- Troca de filtro de data: 1 query nova (cache key diferente), depois cacheada até 04:30.
-- F5 / reabrir aba: lê localStorage, zero hit no banco.
-- 04:30 America/Fortaleza: cache invalida automaticamente; próxima interação refetcha.
-- Botão manual de "Atualizar" (se existir / quando criarmos): chama `queryClient.invalidateQueries` explicitamente — único caminho de refresh forçado durante o dia.
-
-## Riscos e mitigações
-
-- **Usuário deixa aba aberta cruzando 04:30**: invalidação por mudança de `queryKey` (bucket muda) garante refetch na próxima interação.
-- **Mudança de timezone do dispositivo**: cálculo é feito em `America/Fortaleza` via `Intl.DateTimeFormat`, não no fuso local.
-- **localStorage corrompido**: helper faz try/catch e ignora; cai no fetch normal.
-- **Filtros personalizados gerando muitas chaves**: `gcTime` 24h + limite natural de combinações que o usuário usa; aceitável.
-
-## Não incluso (fora de escopo)
-
-- Materialized views ou cache server-side no Postgres.
-- Service Worker / cache HTTP.
-- Refatoração dos hooks de chat.
-
-Confirme para eu executar.
+- Ativar `VITE_CHAT_ASYNC_MODE=true` (ainda depende de você reconfigurar o n8n conforme combinado).
+- Mudanças de schema ou novas migrations.
+- Alteração nos hooks de dashboard (cache ETL recém-implementado).
