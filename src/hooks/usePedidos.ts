@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useDateFilter } from '@/contexts/DateFilterContext';
 import { format } from 'date-fns';
+import { getCurrentEtlBucket, getEtlStaleTime, loadFromLocal, saveToLocal } from '@/lib/etlCache';
 
 export interface PedidoItem {
   pedido_id: string;
