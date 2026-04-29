@@ -54,30 +54,48 @@ export type Database = {
       }
       chat_messages: {
         Row: {
+          client_request_id: string | null
+          completed_at: string | null
           content: string
           created_at: string
+          dispatch_ack_timeout: boolean | null
           error_detail: string | null
           id: string
+          processing_started_at: string | null
+          reply_to_message_id: string | null
+          request_id: string | null
           role: string
           session_id: string
           status: string
           updated_at: string
         }
         Insert: {
+          client_request_id?: string | null
+          completed_at?: string | null
           content?: string
           created_at?: string
+          dispatch_ack_timeout?: boolean | null
           error_detail?: string | null
           id?: string
+          processing_started_at?: string | null
+          reply_to_message_id?: string | null
+          request_id?: string | null
           role: string
           session_id: string
           status?: string
           updated_at?: string
         }
         Update: {
+          client_request_id?: string | null
+          completed_at?: string | null
           content?: string
           created_at?: string
+          dispatch_ack_timeout?: boolean | null
           error_detail?: string | null
           id?: string
+          processing_started_at?: string | null
+          reply_to_message_id?: string | null
+          request_id?: string | null
           role?: string
           session_id?: string
           status?: string
@@ -2026,6 +2044,21 @@ export type Database = {
     }
     Functions: {
       cleanup_text: { Args: { raw_text: string }; Returns: string }
+      create_chat_async_request: {
+        Args: {
+          p_client_request_id: string
+          p_content: string
+          p_session_id: string
+        }
+        Returns: {
+          assistant_message_id: string
+          assistant_status: string
+          is_duplicate: boolean
+          request_id: string
+          user_message_id: string
+        }[]
+      }
+      expire_stuck_processing_messages: { Args: never; Returns: number }
       get_finance_kpis: {
         Args: { end_date: string; start_date: string }
         Returns: Json
@@ -2047,6 +2080,10 @@ export type Database = {
       }
       get_snapshot_meta: { Args: never; Returns: Json }
       is_master: { Args: { p_auth_id: string }; Returns: boolean }
+      report_client_timeout: {
+        Args: { p_assistant_id: string }
+        Returns: undefined
+      }
       try_parse_jsonb: { Args: { p_text: string }; Returns: Json }
     }
     Enums: {
