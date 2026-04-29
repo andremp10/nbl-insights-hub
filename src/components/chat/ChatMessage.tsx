@@ -143,15 +143,17 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
   const isUser = message.role === 'user';
   const isPending = message.status === 'pending';
   const isStreaming = message.status === 'streaming';
+  const isProcessing = message.status === 'processing';
   const isError = message.status === 'error';
   const isComplete = message.status === 'complete';
+  const isInFlight = isPending || isStreaming || isProcessing;
   const [copied, setCopied] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const hasSteps = !!(message.steps && message.steps.length > 0);
   const hasContent = !!message.content;
-  const showSteps = !isUser && hasSteps && !isComplete;
-  const showThinking = !isUser && (isStreaming || isPending) && !hasSteps && !hasContent;
+  const showSteps = !isUser && hasSteps && !isComplete && !isError;
+  const showThinking = !isUser && isInFlight && !hasSteps && !hasContent;
   const startedAt = message.startedAt;
 
   const handleCopy = useCallback(() => {
@@ -192,10 +194,18 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     }
 
     if (showThinking) {
+      const label = isProcessing ? 'Processando sua consulta…' : 'Analisando…';
       return (
-        <div className="flex items-center gap-3 py-3">
-          <div className="chat-shimmer-bar" />
-          <span className="text-xs text-muted-foreground/50 whitespace-nowrap">Analisando…</span>
+        <div className="space-y-2 py-3">
+          <div className="flex items-center gap-3">
+            <div className="chat-shimmer-bar" />
+            <span className="text-xs text-muted-foreground/50 whitespace-nowrap">{label}</span>
+          </div>
+          {message.softTimeout && (
+            <p className="text-[11px] text-muted-foreground/70 pl-1">
+              Esta consulta está demorando mais que o normal — pode levar mais alguns instantes.
+            </p>
+          )}
         </div>
       );
     }
