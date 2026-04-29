@@ -179,6 +179,29 @@ export function useChatMessages(sessionId: string | null) {
               return copy;
             }
           }
+          // Phantom-error suppression: if a 'complete' assistant message landed in the
+          // last 30s, discard any subsequent 'error' for the same session (race from
+          // legacy SSE proxy when the client disconnected mid-flush).
+          if (newMsg.role === 'assistant' && newMsg.status === 'error') {
+            const newTs = new Date(newMsg.created_at).getTime();
+            const hasRecentComplete = prev.some(m =>
+              m.role === 'assistant' &&
+              m.status === 'complete' &&
+              Math.abs(newTs - new Date(m.created_at).getTime()) < 30_000
+            );
+            if (hasRecentComplete) return prev;
+          }
+          // Inverse: if a 'complete' arrives and there is a recent 'error' phantom, drop the phantom.
+          if (newMsg.role === 'assistant' && newMsg.status === 'complete') {
+            const newTs = new Date(newMsg.created_at).getTime();
+            const filtered = prev.filter(m => !(
+              m.role === 'assistant' &&
+              m.status === 'error' &&
+              Math.abs(newTs - new Date(m.created_at).getTime()) < 30_000
+            ));
+            const exists = filtered.some(m => m.id === newMsg.id);
+            return exists ? filtered : [...filtered, newMsg];
+          }
           const exists = prev.some(m => m.id === newMsg.id);
           return exists ? prev : [...prev, newMsg];
         });
