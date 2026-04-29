@@ -467,67 +467,66 @@ Deno.serve(async (req) => {
         const emittedSteps = new Set<string>();
         let agentBeginCount = 0;
         let lastEventTime = Date.now();
+        let controllerClosed = false;
+        let assistantPersisted = false; // tracks if a 'complete' row was already inserted
 
         // Content accumulators (NEVER sent to frontend during processing)
         let canonicalOutput = '';  // from {"output":"..."} found inline
         let finalAgentContent = '';
         let subAgentContent = '';
 
+        function isClosedError(e: unknown): boolean {
+          const msg = (e as Error)?.message || '';
+          return msg.includes('cannot close or enqueue') || msg.includes('controller is closed');
+        }
+
         function emitSSE(data: Record<string, unknown>) {
+          if (controllerClosed) return;
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
             lastEventTime = Date.now();
-          } catch { /* stream closed */ }
-        }
-
-        function emitStep(label: string) {
-          if (!label || emittedSteps.has(label)) return;
-          emittedSteps.add(label);
-          console.log(`[nlq-proxy] STEP: ${label}`);
-          emitSSE({ type: 'step', step: label });
-        }
-
-        // Send user_message_id and first step
-        emitSSE({ user_message_id: userMsg.id });
-        emitStep('Analisando sua pergunta...');
-
-        // ── Keepalive: ping every 10s to prevent connection drops ──
-        const keepaliveTimer = setInterval(() => {
-          if (Date.now() - lastEventTime >= KEEPALIVE_INTERVAL_MS) {
-            try { emitSSE({ type: 'ping' }); } catch { /* closed */ }
+          } catch (e) {
+            if (isClosedError(e)) {
+              controllerClosed = true;
+            }
           }
-        }, KEEPALIVE_INTERVAL_MS);
-
+        }
+...
         // Finalize: deliver content to frontend and DB
         async function finalize(content: string, status: 'complete' | 'error', errorDetail?: string) {
           clearInterval(keepaliveTimer);
 
           if (status === 'complete' && content) {
-            emitStep('Elaborando resposta final...');
-
-            // Stream the final content in batches
-            for (let i = 0; i < content.length; i += FINAL_TOKEN_BATCH_SIZE) {
-              const chunk = content.substring(i, i + FINAL_TOKEN_BATCH_SIZE);
-              emitSSE({ type: 'token', token: chunk });
-              if (i + FINAL_TOKEN_BATCH_SIZE < content.length) {
-                await new Promise(r => setTimeout(r, 10));
-              }
-            }
-
-            await supabase
+            // Persist FIRST so the data is safe even if the client disconnected
+            const { error: insertErr } = await supabase
               .from('chat_messages')
               .insert({ session_id, role: 'assistant', content, status: 'complete' });
+            if (!insertErr) assistantPersisted = true;
+
+            // Then try to flush to client (cosmetic — single shot, no batching delay)
+            emitStep('Elaborando resposta final...');
+            emitSSE({ type: 'token', token: content });
           } else {
-            const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
-            await supabase
-              .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-            emitSSE({ error: errMsg });
+            // Only insert an error row if we have NOT already persisted a complete one
+            if (!assistantPersisted) {
+              const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
+              await supabase
+                .from('chat_messages')
+                .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
+              emitSSE({ error: errMsg });
+            }
           }
 
           emitSSE({ type: 'done' });
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
+          if (!controllerClosed) {
+            try {
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            } catch (e) { if (isClosedError(e)) controllerClosed = true; }
+          }
+          if (!controllerClosed) {
+            try { controller.close(); } catch { /* already closed */ }
+            controllerClosed = true;
+          }
         }
 
         try {
