@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useDateFilter } from '@/contexts/DateFilterContext';
 import { format } from 'date-fns';
+import { getCurrentEtlBucket, getEtlStaleTime, loadFromLocal, saveToLocal } from '@/lib/etlCache';
 
 export interface FinanceiroKPIs {
   receita: number;
@@ -19,9 +20,11 @@ export function useFinanceiroKPIs() {
   const { dateRange } = useDateFilter();
   const fromDate = format(dateRange.from, 'yyyy-MM-dd');
   const toDate = format(dateRange.to, 'yyyy-MM-dd');
+  const etlBucket = getCurrentEtlBucket();
+  const cacheKey = `fin-kpis:${fromDate}:${toDate}`;
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['financeiro-kpis', fromDate, toDate],
+    queryKey: ['financeiro-kpis', etlBucket, fromDate, toDate],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_financeiro_kpis', {
         p_data_inicio: fromDate,
@@ -29,13 +32,20 @@ export function useFinanceiroKPIs() {
       });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      return {
+      const result: FinanceiroKPIs = {
         receita: Number(row?.receita || 0),
         despesas: Number(row?.despesa || 0),
         resultado: Number(row?.resultado || 0),
-      } as FinanceiroKPIs;
+      };
+      saveToLocal(cacheKey, result);
+      return result;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutos
+    initialData: () => loadFromLocal<FinanceiroKPIs>(cacheKey),
+    staleTime: getEtlStaleTime(),
+    gcTime: 24 * 60 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     placeholderData: (previousData) => previousData,
   });
 
@@ -46,9 +56,11 @@ export function useCategoriasDespesas() {
   const { dateRange } = useDateFilter();
   const fromDate = format(dateRange.from, 'yyyy-MM-dd');
   const toDate = format(dateRange.to, 'yyyy-MM-dd');
+  const etlBucket = getCurrentEtlBucket();
+  const cacheKey = `fin-cats:${fromDate}:${toDate}`;
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['financeiro-graficos', fromDate, toDate],
+    queryKey: ['financeiro-graficos', etlBucket, fromDate, toDate],
     queryFn: async () => {
       const { data, error } = await supabase.rpc('get_financeiro_graficos', {
         p_data_inicio: fromDate,
@@ -76,9 +88,15 @@ export function useCategoriasDespesas() {
           percentual: total > 0 ? (otherTotal / total) * 100 : 0,
         });
       }
+      saveToLocal(cacheKey, main);
       return main;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutos
+    initialData: () => loadFromLocal<CategoriaAgrupada[]>(cacheKey),
+    staleTime: getEtlStaleTime(),
+    gcTime: 24 * 60 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     placeholderData: (previousData) => previousData,
   });
 

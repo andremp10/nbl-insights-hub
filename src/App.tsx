@@ -25,11 +25,20 @@ const Pedidos = lazy(() => import("./pages/Pedidos"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+import { pruneEtlCache } from "@/lib/etlCache";
+
+pruneEtlCache();
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      // Padrões conservadores: dashboards usam ETL diário (04:30 Fortaleza),
+      // então não há motivo para refetch automático durante o dia.
       staleTime: 2 * 60 * 1000,
+      gcTime: 24 * 60 * 60 * 1000,
       refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
     },
   },
 });

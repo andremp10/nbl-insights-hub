@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useDateFilter } from '@/contexts/DateFilterContext';
 import { format } from 'date-fns';
+import { getCurrentEtlBucket, getEtlStaleTime, loadFromLocal, saveToLocal } from '@/lib/etlCache';
 
 export interface PedidoItem {
   pedido_id: string;
@@ -46,9 +47,11 @@ export function usePedidosData() {
 
   const fromDate = format(dateRange.from, 'yyyy-MM-dd');
   const toDate = format(dateRange.to, 'yyyy-MM-dd');
+  const etlBucket = getCurrentEtlBucket();
+  const cacheKey = `pedidos:${fromDate}:${toDate}`;
 
   return useQuery({
-    queryKey: ['pedidos', fromDate, toDate],
+    queryKey: ['pedidos', etlBucket, fromDate, toDate],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('vw_dashboard_pedidos')
@@ -59,9 +62,16 @@ export function usePedidosData() {
         .limit(1000);
 
       if (error) throw error;
-      return (data || []) as PedidoItem[];
+      const items = (data || []) as PedidoItem[];
+      saveToLocal(cacheKey, items);
+      return items;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutos
+    initialData: () => loadFromLocal<PedidoItem[]>(cacheKey),
+    staleTime: getEtlStaleTime(),
+    gcTime: 24 * 60 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     placeholderData: (previousData) => previousData,
   });
 }
