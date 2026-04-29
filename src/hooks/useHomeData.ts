@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { getCurrentEtlBucket, getEtlStaleTime, loadFromLocal, saveToLocal } from '@/lib/etlCache';
 
 interface HomeKpis {
   totalPedidos: number;
@@ -25,9 +26,11 @@ function getMonthRange() {
 
 export function useHomeKPIs() {
   const { startOfMonth, endOfMonth } = getMonthRange();
+  const etlBucket = getCurrentEtlBucket();
+  const cacheKey = `home-kpis:${startOfMonth}:${endOfMonth}`;
 
   return useQuery({
-    queryKey: ['home-kpis', startOfMonth, endOfMonth],
+    queryKey: ['home-kpis', etlBucket, startOfMonth, endOfMonth],
     queryFn: async (): Promise<HomeKpis> => {
       const [finRes, pedRes, atrasRes] = await Promise.all([
         supabase.rpc('get_financeiro_kpis', { p_data_inicio: startOfMonth, p_data_fim: endOfMonth }),
@@ -42,20 +45,30 @@ export function useHomeKPIs() {
       const receita = Number(finRow?.receita || 0);
       const despesa = Number(finRow?.despesa || 0);
 
-      return {
+      const result: HomeKpis = {
         totalPedidos: pedRes.count ?? 0,
         atrasados: atrasRes.count ?? 0,
         resultado: receita - despesa,
       };
+      saveToLocal(cacheKey, result);
+      return result;
     },
-    staleTime: 5 * 60 * 1000,
+    initialData: () => loadFromLocal<HomeKpis>(cacheKey),
+    staleTime: getEtlStaleTime(),
+    gcTime: 24 * 60 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     placeholderData: (prev) => prev,
   });
 }
 
 export function useRecentOrders() {
+  const etlBucket = getCurrentEtlBucket();
+  const cacheKey = 'home-recent-orders';
+
   return useQuery({
-    queryKey: ['home-recent-orders'],
+    queryKey: ['home-recent-orders', etlBucket],
     queryFn: async (): Promise<RecentOrder[]> => {
       const { data, error } = await supabase
         .from('vw_dashboard_pedidos')
@@ -64,9 +77,16 @@ export function useRecentOrders() {
         .limit(4);
 
       if (error) throw error;
-      return (data || []) as RecentOrder[];
+      const items = (data || []) as RecentOrder[];
+      saveToLocal(cacheKey, items);
+      return items;
     },
-    staleTime: 5 * 60 * 1000,
+    initialData: () => loadFromLocal<RecentOrder[]>(cacheKey),
+    staleTime: getEtlStaleTime(),
+    gcTime: 24 * 60 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     placeholderData: (prev) => prev,
   });
 }
