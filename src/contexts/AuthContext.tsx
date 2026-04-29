@@ -121,9 +121,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return { error: null };
+    const TIMEOUT_MS = 8000;
+    const MAX_ATTEMPTS = 2;
+
+    const attempt = async (): Promise<{ error: string | null; timedOut?: boolean }> => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+        timeoutId = setTimeout(() => resolve({ timedOut: true }), TIMEOUT_MS);
+      });
+
+      try {
+        const result = await Promise.race([
+          supabase.auth.signInWithPassword({ email, password }),
+          timeoutPromise,
+        ]);
+
+        if ((result as { timedOut?: boolean }).timedOut) {
+          return { error: 'timeout', timedOut: true };
+        }
+
+        const { error } = result as Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
+        if (error) return { error: error.message };
+        return { error: null };
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
+    for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+      const res = await attempt();
+      // Retry only on timeout / 5xx-ish transient failures
+      const transient =
+        res.timedOut ||
+        (res.error && /timeout|504|503|502|network|fetch/i.test(res.error));
+      if (!transient || i === MAX_ATTEMPTS) {
+        if (res.timedOut) {
+          return { error: 'O servidor de autenticação está lento. Tente novamente em instantes.' };
+        }
+        return { error: res.error };
+      }
+    }
+    return { error: 'Falha ao autenticar. Tente novamente.' };
   };
 
   const resetPassword = async (email: string) => {
