@@ -745,14 +745,22 @@ Deno.serve(async (req) => {
         } catch (err) {
           console.error('[nlq-proxy] Stream processing error:', err);
           clearInterval(keepaliveTimer);
-          const errMsg = (err as Error).message || 'Erro inesperado';
-          await supabase
-            .from('chat_messages')
-            .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-          emitSSE({ error: errMsg });
+          // If a complete assistant message was already saved, do NOT create a phantom error row.
+          if (assistantPersisted || isClosedError(err)) {
+            console.warn('[nlq-proxy] Suppressing error row (assistantPersisted=' + assistantPersisted + ', closedErr=' + isClosedError(err) + ')');
+          } else {
+            const errMsg = (err as Error).message || 'Erro inesperado';
+            await supabase
+              .from('chat_messages')
+              .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
+            emitSSE({ error: errMsg });
+          }
           emitSSE({ type: 'done' });
-          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-          controller.close();
+          if (!controllerClosed) {
+            try { controller.enqueue(encoder.encode('data: [DONE]\n\n')); } catch { /* closed */ }
+            try { controller.close(); } catch { /* closed */ }
+            controllerClosed = true;
+          }
         }
       },
     });
