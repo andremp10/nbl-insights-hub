@@ -446,6 +446,25 @@ Deno.serve(async (req) => {
 
     if (userMsgError) throw userMsgError;
 
+    // Pre-create assistant message in 'processing'. This guarantees the user always
+    // has a corresponding row to see (success or error) on the next session load,
+    // even if the SSE connection drops mid-stream.
+    const { data: assistantMsg, error: assistantMsgError } = await supabase
+      .from('chat_messages')
+      .insert({
+        session_id,
+        role: 'assistant',
+        content: '',
+        status: 'processing',
+        reply_to_message_id: userMsg.id,
+        processing_started_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (assistantMsgError) throw assistantMsgError;
+    const assistantMsgId = assistantMsg.id;
+
     // Context
     const { data: history } = await supabase
       .from('chat_messages')
