@@ -61,18 +61,18 @@ const markdownComponents = {
     const text = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : '';
     const textStr = String(text);
     const numeric = isNumericCell(textStr);
-    const truncated = !numeric && textStr.length > 80 ? textStr.slice(0, 77) + '…' : null;
     return (
       <td
         className={cn(
-          "px-3 py-2 align-middle text-sm max-w-[280px]",
-          numeric && "text-right font-mono tabular-nums whitespace-nowrap",
-          !numeric && "truncate"
+          "px-3 py-2 align-middle text-sm",
+          numeric
+            ? "text-right font-mono tabular-nums whitespace-nowrap"
+            : "max-w-[460px] whitespace-normal break-words"
         )}
-        title={truncated ? textStr : undefined}
+        title={!numeric && textStr ? textStr : undefined}
         {...props}
       >
-        {truncated || children}
+        {children}
       </td>
     );
   },

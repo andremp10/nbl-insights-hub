@@ -1,49 +1,30 @@
-## Contexto
+# Correção: nomes truncados em tabelas do chat
 
-Erro observado em produção: `TypeError: The stream controller cannot close or enqueue` em `nlq-proxy/index.ts:509`, seguido de uma "mensagem de erro fantasma" no chat **mesmo com a resposta correta já salva no banco** (visível na captura do usuário: a tabela do ranking de clientes apareceu, e logo abaixo veio um balão vermelho "The stream controller cannot close or enqueue").
+## Diagnóstico
 
-### Causa raiz
+Na imagem, a tabela **"Produtos dos maiores pedidos"** mostra nomes cortados como `Caixas Brilho de Deusa | Tamanho Fechado 12...`. O mesmo acontece com nomes de vendedores em outras respostas.
 
-1. A resposta do n8n demorou ~50s e tinha 1122 chars.
-2. Antes do `finalize()` terminar de fazer streaming token-a-token (loop com `setTimeout(10ms)` por batch), o cliente fechou a conexão SSE (`Http: connection closed before message completed`).
-3. `finalize()` continuou rodando: o `INSERT` da assistant message com `status: complete` foi executado **com sucesso** (linha 519), mas em seguida o `emitSSE({type:'token'})` e o `controller.enqueue([DONE])` explodiram porque o controller já estava fechado.
-4. O catch externo no `start()` chamou novamente o caminho de erro → criou uma **segunda assistant message com `status: error`** no banco. Daí o balão vermelho fantasma.
+A causa está em `src/components/chat/ChatMessage.tsx` (linhas 60–78), no renderer de `<td>` do Markdown:
 
-A arquitetura async v4 já implementada (atrás do flag `VITE_CHAT_ASYNC_MODE`) elimina este cenário, mas ainda não está ativa porque depende do n8n ser reconfigurado para "Respond Immediately". Enquanto isso, precisamos estabilizar o caminho SSE legado.
+1. **Truncamento por JS**: textos com mais de 80 caracteres são cortados para 77 + `…` (linha 64).
+2. **Truncamento por CSS**: classe `truncate` (= `overflow:hidden; text-overflow:ellipsis; white-space:nowrap`) combinada com `max-w-[280px]` (linha 68/70) corta visualmente qualquer célula longa em uma única linha.
+3. O título completo só aparece em hover (`title={textStr}`), o que é ruim de UX para nomes de produtos/vendedores.
+
+A tabela já está dentro de um wrapper com `overflow-x-auto` (linha 44), então não há motivo para forçar truncamento — o scroll horizontal já existe. Para nomes longos, o ideal é **permitir wrap** (quebra de linha) em células de texto, mantendo `whitespace-nowrap` apenas em células numéricas.
 
 ## Mudanças
 
-### 1. `supabase/functions/nlq-proxy/index.ts` — guards defensivos
+**Arquivo: `src/components/chat/ChatMessage.tsx`** (renderer `td`, linhas 60–78)
 
-- Adicionar flag local `controllerClosed = false`. Toda função `emitSSE`, `emitStep` e `finalize` checa essa flag antes de tentar enfileirar.
-- Tratar `TypeError` específico de "controller cannot close or enqueue" como **sinal de cliente desconectado**, não como erro de processamento. Setar `controllerClosed = true` e parar de tentar emitir.
-- Em `finalize()`:
-  - Se `status === 'complete'`, fazer **primeiro** o `INSERT` da assistant message (já é assim) e **depois** tentar o streaming token-a-token. Se o stream falhar, o conteúdo já está persistido — apenas logar e sair sem reentrar no caminho de erro.
-  - Envolver o loop de tokens (linhas 509-515) num try/catch que detecta controller fechado e quebra o loop silenciosamente em vez de propagar.
-  - Mover o `controller.close()` final para um try/catch que não relança.
-- No `catch` externo do `start()` (linha ~699), **antes** de inserir uma assistant message com `status: error`, verificar se já existe uma assistant message com `status: complete` para o mesmo `user_message_id` criada nos últimos 30s. Se existir, suprimir o INSERT de erro (apenas logar).
+- Remover o corte por JS de 80 caracteres.
+- Remover `truncate` das células de texto.
+- Trocar `max-w-[280px]` por um limite mais generoso e permitir quebra: `max-w-[420px] whitespace-normal break-words` para texto; manter `whitespace-nowrap` para numéricos.
+- Manter `align-middle` e `title` (acessibilidade) com o conteúdo completo apenas como fallback opcional.
 
-### 2. `src/hooks/useChatMessages.ts` — dedupe defensivo no cliente
+Resultado: nomes longos de produtos (ex.: `Caixas Brilho de Deusa | Tamanho Fechado 12x8x4`) e nomes completos de vendedores aparecem em 2 linhas dentro da célula, sem `…`. Colunas numéricas (Quantidade, Valor) continuam alinhadas à direita em linha única.
 
-- No subscribe Realtime / refetch, se chegarem duas assistant messages para o mesmo `user_message_id` (ou em janela de <5s) sendo uma `complete` e outra `error`, manter apenas a `complete` na UI. (Defesa em profundidade, caso o backend crie a fantasma mesmo assim.)
+## Fora de escopo
 
-### 3. Acelerar o flush final (mitigação)
-
-- Em `nlq-proxy`, aumentar `FINAL_TOKEN_BATCH_SIZE` e/ou remover o `setTimeout(10ms)` entre batches. O streaming token-a-token do conteúdo final é puramente cosmético (o conteúdo já está pronto) — não precisa simular digitação a 10ms/batch para 1100 chars. Reduzir esse loop a uma única emissão (`emitSSE({type:'token', token: content})`) elimina a janela de 1+ segundo onde o cliente pode desconectar.
-
-### 4. Não tocar na arquitetura async v4
-
-- Nenhuma mudança em `nlq-proxy-async`, no flag `VITE_CHAT_ASYNC_MODE`, ou no caminho async de `useChatMessages`. Esta é uma correção cirúrgica no caminho SSE legado.
-
-## Resultado esperado
-
-- Quando o cliente fecha a conexão antes do flush final, o backend **não** cria mais uma assistant message de erro fantasma.
-- O loop de "digitação" do conteúdo final é instantâneo, eliminando a janela de race.
-- Mesmo se a fantasma escapar, o frontend a esconde.
-- A tabela e o insight visíveis na captura continuam aparecendo corretamente; o balão vermelho some.
-
-## Não inclui
-
-- Ativar `VITE_CHAT_ASYNC_MODE=true` (ainda depende de você reconfigurar o n8n conforme combinado).
-- Mudanças de schema ou novas migrations.
-- Alteração nos hooks de dashboard (cache ETL recém-implementado).
+- Nenhuma mudança em backend/edge functions.
+- Nenhuma mudança em hooks de dados ou views.
+- Nenhuma mudança no agente n8n (a resposta já contém os nomes completos; o problema é puramente de renderização).
