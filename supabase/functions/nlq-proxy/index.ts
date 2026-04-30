@@ -800,17 +800,30 @@ Deno.serve(async (req) => {
         } catch (err) {
           console.error('[nlq-proxy] Stream processing error:', err);
           clearInterval(keepaliveTimer);
-          // If a complete assistant message was already saved, do NOT create a phantom error row.
-          if (assistantPersisted || isClosedError(err)) {
-            console.warn('[nlq-proxy] Suppressing error row (assistantPersisted=' + assistantPersisted + ', closedErr=' + isClosedError(err) + ')');
-          } else {
-            const errMsg = (err as Error).message || 'Erro inesperado';
-            await supabase
-              .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-            emitSSE({ error: errMsg });
+          // If we already finalized (assistantPersisted), nothing to do.
+          // Otherwise ALWAYS finalize as error so the user sees a row instead of silence —
+          // even on client disconnect (isClosedError), we still UPDATE the pre-created row.
+          if (!assistantPersisted) {
+            const errMsg = isClosedError(err)
+              ? 'A conexão foi interrompida antes da resposta ser concluída. Tente novamente.'
+              : ((err as Error).message || 'Erro inesperado');
+            try {
+              await finalize('', 'error', errMsg);
+            } catch (finalizeErr) {
+              console.error('[nlq-proxy] finalize() in catch failed:', finalizeErr);
+              // Last-resort direct UPDATE so the row never stays in 'processing'
+              await supabase
+                .from('chat_messages')
+                .update({
+                  content: '',
+                  status: 'error',
+                  error_detail: errMsg,
+                  completed_at: new Date().toISOString(),
+                })
+                .eq('id', assistantMsgId)
+                .eq('status', 'processing');
+            }
           }
-          emitSSE({ type: 'done' });
           if (!controllerClosed) {
             try { controller.enqueue(encoder.encode('data: [DONE]\n\n')); } catch { /* closed */ }
             try { controller.close(); } catch { /* closed */ }
