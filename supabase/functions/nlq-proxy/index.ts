@@ -491,7 +491,26 @@ Deno.serve(async (req) => {
             }
           }
         }
-...
+        function emitStep(label: string) {
+          if (controllerClosed) return;
+          if (emittedSteps.has(label)) return;
+          emittedSteps.add(label);
+          emitSSE({ type: 'step', label });
+        }
+
+        // Keepalive: send a comment line every 15s to prevent idle disconnect
+        const keepaliveTimer = setInterval(() => {
+          if (controllerClosed) return;
+          if (Date.now() - lastEventTime < 10_000) return;
+          try {
+            controller.enqueue(encoder.encode(`: keepalive
+
+`));
+            lastEventTime = Date.now();
+          } catch (e) {
+            if (isClosedError(e)) controllerClosed = true;
+          }
+        }, 15_000);
         // Finalize: deliver content to frontend and DB
         async function finalize(content: string, status: 'complete' | 'error', errorDetail?: string) {
           clearInterval(keepaliveTimer);
