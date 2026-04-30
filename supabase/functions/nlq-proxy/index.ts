@@ -834,6 +834,28 @@ Deno.serve(async (req) => {
             controllerClosed = true;
           }
         }
+        })();
+
+        // Keep the work alive even if the client disconnects (closes SSE) before completion.
+        // EdgeRuntime.waitUntil prevents the runtime from shutting down the function until
+        // the n8n call is finished and the assistant row has been UPDATEd to complete/error.
+        try {
+          // @ts-ignore — EdgeRuntime is provided by Supabase Edge Runtime
+          if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+            // @ts-ignore
+            EdgeRuntime.waitUntil(workPromise.catch((e) => console.error('[nlq-proxy] background work failed:', e)));
+          }
+        } catch (e) {
+          console.warn('[nlq-proxy] waitUntil unavailable:', e);
+        }
+
+        await workPromise;
+      },
+      cancel(reason) {
+        // Client disconnected. We do NOT abort the n8n work — let it finish and
+        // persist the result via UPDATE so the user sees the answer next time.
+        clientDisconnected = true;
+        console.warn('[nlq-proxy] Client disconnected from SSE — background work continues. Reason:', String(reason ?? ''));
       },
     });
 
