@@ -481,6 +481,9 @@ Deno.serve(async (req) => {
     // ════════════════════════════════════════════════════════════════
     const encoder = new TextEncoder();
 
+    // Shared flag so cancel() can mark disconnection without aborting the work
+    let clientDisconnected = false;
+
     const stream = new ReadableStream({
       async start(controller) {
         const emittedSteps = new Set<string>();
