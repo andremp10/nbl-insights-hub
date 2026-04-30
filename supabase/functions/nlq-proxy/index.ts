@@ -534,25 +534,42 @@ Deno.serve(async (req) => {
         async function finalize(content: string, status: 'complete' | 'error', errorDetail?: string) {
           clearInterval(keepaliveTimer);
 
-          if (status === 'complete' && content) {
-            // Persist FIRST so the data is safe even if the client disconnected
-            const { error: insertErr } = await supabase
+          // Always UPDATE the pre-created assistant row (never INSERT a new one).
+          // This works even if the client has already disconnected.
+          if (assistantPersisted) {
+            // Already finalized once — guard against double-calls
+          } else if (status === 'complete' && content) {
+            const { error: updErr } = await supabase
               .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content, status: 'complete' });
-            if (!insertErr) assistantPersisted = true;
+              .update({
+                content,
+                status: 'complete',
+                completed_at: new Date().toISOString(),
+                error_detail: null,
+              })
+              .eq('id', assistantMsgId)
+              .eq('status', 'processing'); // only transition from processing
+            if (!updErr) assistantPersisted = true;
+            else console.error('[nlq-proxy] finalize update (complete) failed:', updErr);
 
-            // Then try to flush to client (cosmetic — single shot, no batching delay)
+            // Try to flush to client (cosmetic — single shot, no batching delay)
             emitStep('Elaborando resposta final...');
             emitSSE({ type: 'token', token: content });
           } else {
-            // Only insert an error row if we have NOT already persisted a complete one
-            if (!assistantPersisted) {
-              const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
-              await supabase
-                .from('chat_messages')
-                .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-              emitSSE({ error: errMsg });
-            }
+            const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
+            const { error: updErr } = await supabase
+              .from('chat_messages')
+              .update({
+                content: '',
+                status: 'error',
+                error_detail: errMsg,
+                completed_at: new Date().toISOString(),
+              })
+              .eq('id', assistantMsgId)
+              .eq('status', 'processing');
+            if (!updErr) assistantPersisted = true;
+            else console.error('[nlq-proxy] finalize update (error) failed:', updErr);
+            emitSSE({ error: errMsg });
           }
 
           emitSSE({ type: 'done' });
