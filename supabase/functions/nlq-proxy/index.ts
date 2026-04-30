@@ -486,6 +486,7 @@ Deno.serve(async (req) => {
 
     const stream = new ReadableStream({
       async start(controller) {
+        const workPromise = (async () => {
         const emittedSteps = new Set<string>();
         let agentBeginCount = 0;
         let lastEventTime = Date.now();
