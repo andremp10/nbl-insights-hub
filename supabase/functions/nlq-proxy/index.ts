@@ -446,6 +446,25 @@ Deno.serve(async (req) => {
 
     if (userMsgError) throw userMsgError;
 
+    // Pre-create assistant message in 'processing'. This guarantees the user always
+    // has a corresponding row to see (success or error) on the next session load,
+    // even if the SSE connection drops mid-stream.
+    const { data: assistantMsg, error: assistantMsgError } = await supabase
+      .from('chat_messages')
+      .insert({
+        session_id,
+        role: 'assistant',
+        content: '',
+        status: 'processing',
+        reply_to_message_id: userMsg.id,
+        processing_started_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
+
+    if (assistantMsgError) throw assistantMsgError;
+    const assistantMsgId = assistantMsg.id;
+
     // Context
     const { data: history } = await supabase
       .from('chat_messages')
@@ -462,8 +481,12 @@ Deno.serve(async (req) => {
     // ════════════════════════════════════════════════════════════════
     const encoder = new TextEncoder();
 
+    // Shared flag so cancel() can mark disconnection without aborting the work
+    let clientDisconnected = false;
+
     const stream = new ReadableStream({
       async start(controller) {
+        const workPromise = (async () => {
         const emittedSteps = new Set<string>();
         let agentBeginCount = 0;
         let lastEventTime = Date.now();
@@ -515,25 +538,42 @@ Deno.serve(async (req) => {
         async function finalize(content: string, status: 'complete' | 'error', errorDetail?: string) {
           clearInterval(keepaliveTimer);
 
-          if (status === 'complete' && content) {
-            // Persist FIRST so the data is safe even if the client disconnected
-            const { error: insertErr } = await supabase
+          // Always UPDATE the pre-created assistant row (never INSERT a new one).
+          // This works even if the client has already disconnected.
+          if (assistantPersisted) {
+            // Already finalized once — guard against double-calls
+          } else if (status === 'complete' && content) {
+            const { error: updErr } = await supabase
               .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content, status: 'complete' });
-            if (!insertErr) assistantPersisted = true;
+              .update({
+                content,
+                status: 'complete',
+                completed_at: new Date().toISOString(),
+                error_detail: null,
+              })
+              .eq('id', assistantMsgId)
+              .eq('status', 'processing'); // only transition from processing
+            if (!updErr) assistantPersisted = true;
+            else console.error('[nlq-proxy] finalize update (complete) failed:', updErr);
 
-            // Then try to flush to client (cosmetic — single shot, no batching delay)
+            // Try to flush to client (cosmetic — single shot, no batching delay)
             emitStep('Elaborando resposta final...');
             emitSSE({ type: 'token', token: content });
           } else {
-            // Only insert an error row if we have NOT already persisted a complete one
-            if (!assistantPersisted) {
-              const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
-              await supabase
-                .from('chat_messages')
-                .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-              emitSSE({ error: errMsg });
-            }
+            const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
+            const { error: updErr } = await supabase
+              .from('chat_messages')
+              .update({
+                content: '',
+                status: 'error',
+                error_detail: errMsg,
+                completed_at: new Date().toISOString(),
+              })
+              .eq('id', assistantMsgId)
+              .eq('status', 'processing');
+            if (!updErr) assistantPersisted = true;
+            else console.error('[nlq-proxy] finalize update (error) failed:', updErr);
+            emitSSE({ error: errMsg });
           }
 
           emitSSE({ type: 'done' });
@@ -764,23 +804,58 @@ Deno.serve(async (req) => {
         } catch (err) {
           console.error('[nlq-proxy] Stream processing error:', err);
           clearInterval(keepaliveTimer);
-          // If a complete assistant message was already saved, do NOT create a phantom error row.
-          if (assistantPersisted || isClosedError(err)) {
-            console.warn('[nlq-proxy] Suppressing error row (assistantPersisted=' + assistantPersisted + ', closedErr=' + isClosedError(err) + ')');
-          } else {
-            const errMsg = (err as Error).message || 'Erro inesperado';
-            await supabase
-              .from('chat_messages')
-              .insert({ session_id, role: 'assistant', content: '', status: 'error', error_detail: errMsg });
-            emitSSE({ error: errMsg });
+          // If we already finalized (assistantPersisted), nothing to do.
+          // Otherwise ALWAYS finalize as error so the user sees a row instead of silence —
+          // even on client disconnect (isClosedError), we still UPDATE the pre-created row.
+          if (!assistantPersisted) {
+            const errMsg = isClosedError(err)
+              ? 'A conexão foi interrompida antes da resposta ser concluída. Tente novamente.'
+              : ((err as Error).message || 'Erro inesperado');
+            try {
+              await finalize('', 'error', errMsg);
+            } catch (finalizeErr) {
+              console.error('[nlq-proxy] finalize() in catch failed:', finalizeErr);
+              // Last-resort direct UPDATE so the row never stays in 'processing'
+              await supabase
+                .from('chat_messages')
+                .update({
+                  content: '',
+                  status: 'error',
+                  error_detail: errMsg,
+                  completed_at: new Date().toISOString(),
+                })
+                .eq('id', assistantMsgId)
+                .eq('status', 'processing');
+            }
           }
-          emitSSE({ type: 'done' });
           if (!controllerClosed) {
             try { controller.enqueue(encoder.encode('data: [DONE]\n\n')); } catch { /* closed */ }
             try { controller.close(); } catch { /* closed */ }
             controllerClosed = true;
           }
         }
+        })();
+
+        // Keep the work alive even if the client disconnects (closes SSE) before completion.
+        // EdgeRuntime.waitUntil prevents the runtime from shutting down the function until
+        // the n8n call is finished and the assistant row has been UPDATEd to complete/error.
+        try {
+          // @ts-ignore — EdgeRuntime is provided by Supabase Edge Runtime
+          if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime?.waitUntil) {
+            // @ts-ignore
+            EdgeRuntime.waitUntil(workPromise.catch((e) => console.error('[nlq-proxy] background work failed:', e)));
+          }
+        } catch (e) {
+          console.warn('[nlq-proxy] waitUntil unavailable:', e);
+        }
+
+        await workPromise;
+      },
+      cancel(reason) {
+        // Client disconnected. We do NOT abort the n8n work — let it finish and
+        // persist the result via UPDATE so the user sees the answer next time.
+        clientDisconnected = true;
+        console.warn('[nlq-proxy] Client disconnected from SSE — background work continues. Reason:', String(reason ?? ''));
       },
     });
 
