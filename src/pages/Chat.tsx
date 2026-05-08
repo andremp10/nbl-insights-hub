@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
-import { ArrowUp, Loader2, Bot, PanelLeft, Menu } from 'lucide-react';
+import { ArrowUp, Loader2, Bot, PanelLeft } from 'lucide-react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar, type SessionsSidebarHandle, type SidebarMode } from '@/components/chat/SessionsSidebar';
