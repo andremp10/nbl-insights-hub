@@ -1,11 +1,51 @@
-import { memo, useMemo, useState, useCallback } from 'react';
+import { memo, useMemo, useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
-import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info, Clock } from 'lucide-react';
 import { AgentSteps } from './AgentSteps';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
+
+const THINKING_PHRASES = [
+  'Conectando ao agente…',
+  'Interpretando sua pergunta…',
+  'Buscando dados nas views…',
+  'Calculando indicadores…',
+  'Compondo a resposta…',
+];
+
+const AgentThinking = memo(function AgentThinking({ softTimeout }: { softTimeout?: boolean }) {
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setPhraseIdx((i) => (i + 1) % THINKING_PHRASES.length), 2200);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="agent-thinking-card" aria-live="polite">
+      <div className="relative flex items-center gap-3">
+        <span className="agent-dots" aria-hidden>
+          <span /><span /><span />
+        </span>
+        <span
+          key={phraseIdx}
+          className="agent-step-active-text text-xs font-medium animate-in fade-in duration-300"
+        >
+          {THINKING_PHRASES[phraseIdx]}
+        </span>
+      </div>
+      <p className="relative text-[10px] text-muted-foreground/50 mt-1.5">
+        Costuma levar de 3 a 8 segundos.
+      </p>
+      {softTimeout && (
+        <p className="relative mt-2 inline-flex items-center gap-1.5 text-[11px] text-warning">
+          <Clock className="w-3 h-3" />
+          Esta consulta está demorando mais que o normal — aguarde mais alguns instantes.
+        </p>
+      )}
+    </div>
+  );
+});
 
 
 function formatTime(timestamp: string): string {
