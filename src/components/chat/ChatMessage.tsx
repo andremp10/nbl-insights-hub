@@ -34,9 +34,6 @@ const AgentThinking = memo(function AgentThinking({ softTimeout }: { softTimeout
           {THINKING_PHRASES[phraseIdx]}
         </span>
       </div>
-      <p className="relative text-[10px] text-muted-foreground/50 mt-1.5">
-        Costuma levar de 3 a 8 segundos.
-      </p>
       {softTimeout && (
         <p className="relative mt-2 inline-flex items-center gap-1.5 text-[11px] text-warning">
           <Clock className="w-3 h-3" />
@@ -192,8 +189,10 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
 
   const hasSteps = !!(message.steps && message.steps.length > 0);
   const hasContent = !!message.content;
-  const showSteps = !isUser && hasSteps && !isComplete && !isError;
+  // Keep steps visible (collapsed) once content starts so the user sees what happened
+  const showSteps = !isUser && hasSteps && !isError;
   const showThinking = !isUser && isInFlight && !hasSteps && !hasContent;
+  const showSkeleton = !isUser && isInFlight && hasSteps && !hasContent;
   const startedAt = message.startedAt;
 
   const handleCopy = useCallback(() => {
@@ -245,15 +244,28 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       <div className="space-y-3">
         {showSteps && (
           <div className="py-1">
-            <AgentSteps steps={message.steps!} isComplete={hasContent} startedAt={startedAt} />
+            <AgentSteps
+              steps={message.steps!}
+              isComplete={hasContent || isComplete}
+              startedAt={startedAt}
+              collapsed={hasContent}
+            />
+          </div>
+        )}
+
+        {showSkeleton && (
+          <div className="space-y-2 py-1 animate-in fade-in duration-300">
+            <div className="chat-skeleton-line h-3 w-[92%] rounded" />
+            <div className="chat-skeleton-line h-3 w-[78%] rounded" />
+            <div className="chat-skeleton-line h-3 w-[55%] rounded" />
           </div>
         )}
 
         {hasContent && (
           <div className="text-sm leading-relaxed break-words prose-chat">
             <MarkdownBody content={message.content} />
-            {isStreaming && (
-              <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+            {isInFlight && (
+              <span className="streaming-caret" aria-hidden />
             )}
           </div>
         )}

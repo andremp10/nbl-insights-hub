@@ -1,11 +1,12 @@
 import { memo, useState, useEffect, useRef } from 'react';
-import { Check, Timer } from 'lucide-react';
+import { Check, Timer, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AgentStepsProps {
   steps: string[];
   isComplete: boolean;
   startedAt?: number;
+  collapsed?: boolean;
 }
 
 function formatDuration(ms: number): string {
@@ -21,8 +22,9 @@ function formatTotal(ms: number): string {
   return `${s}s`;
 }
 
-export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedAt }: AgentStepsProps) {
+export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedAt, collapsed }: AgentStepsProps) {
   const [now, setNow] = useState(Date.now());
+  const [expanded, setExpanded] = useState(false);
   const stepTimestamps = useRef<number[]>([]);
 
   useEffect(() => {
@@ -43,6 +45,25 @@ export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedA
   if (!steps.length) return null;
 
   const totalElapsed = startedAt ? now - startedAt : 0;
+
+  // Collapsed summary mode (when content has started streaming)
+  if (collapsed && !expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="agent-thinking-card w-full text-left flex items-center gap-2 hover:bg-muted/30 transition-colors group"
+        aria-label="Expandir etapas do agente"
+      >
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
+        </span>
+        <span className="text-[11px] font-medium text-muted-foreground/70">
+          Concluído em {formatTotal(totalElapsed)} · {steps.length} {steps.length === 1 ? 'etapa' : 'etapas'}
+        </span>
+        <ChevronDown className="w-3 h-3 ml-auto text-muted-foreground/50 group-hover:text-muted-foreground transition-colors" />
+      </button>
+    );
+  }
 
   return (
     <div className="agent-thinking-card" aria-live="polite">
