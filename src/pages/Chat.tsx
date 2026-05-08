@@ -274,18 +274,6 @@ function StatusBadge({ status }: { status: 'idle' | 'sending' | 'error' }) {
   );
 }
 
-function HeaderButton({ icon: Icon, label, onClick, disabled }: { icon: React.ElementType; label: string; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:pointer-events-none"
-    >
-      <Icon className="w-4 h-4" />
-    </button>
-  );
-}
 
 const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
   const [input, setInput] = useState('');
