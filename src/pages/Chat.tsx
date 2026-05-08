@@ -131,41 +131,86 @@ export default function Chat() {
       ? 'error'
       : 'idle';
 
+  // Persist sidebar mode
+  useEffect(() => {
+    if (sidebarMode === 'expanded' || sidebarMode === 'rail') {
+      localStorage.setItem(SIDEBAR_MODE_KEY, sidebarMode);
+    }
+  }, [sidebarMode]);
+
+  const visibleSessionIds = useMemo(
+    () => groupedSessions.flatMap(([, items]) => items.map(s => s.id)),
+    [groupedSessions]
+  );
+
+  const navigateRelative = useCallback((delta: number) => {
+    if (visibleSessionIds.length === 0) return;
+    const idx = currentSessionId ? visibleSessionIds.indexOf(currentSessionId) : -1;
+    const nextIdx = idx === -1 ? 0 : Math.max(0, Math.min(visibleSessionIds.length - 1, idx + delta));
+    setCurrentSessionId(visibleSessionIds[nextIdx]);
+  }, [visibleSessionIds, currentSessionId]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarMode(prev => {
+      if (window.innerWidth < 768) return prev === 'hidden' ? 'expanded' : 'hidden';
+      return prev === 'expanded' ? 'rail' : 'expanded';
+    });
+  }, []);
+
+  useChatShortcuts({
+    onFocusSearch: () => sidebarRef.current?.focusSearch(),
+    onNewSession: handleNewSession,
+    onToggleSidebar: toggleSidebar,
+    onPrev: () => navigateRelative(-1),
+    onNext: () => navigateRelative(1),
+  });
+
+  const currentSession = sessions.find(s => s.id === currentSessionId);
+
   return (
     <div className="flex h-full min-h-0 overflow-hidden">
       <SessionsSidebar
+        ref={sidebarRef}
         groupedSessions={groupedSessions}
+        pinnedIds={pinnedIds}
         currentSessionId={currentSessionId}
         onSelectSession={setCurrentSessionId}
         onCreateSession={handleNewSession}
         onDeleteSession={handleDeleteSession}
         onRenameSession={updateSessionTitle}
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(prev => !prev)}
+        onTogglePinSession={togglePinSession}
+        mode={sidebarMode}
+        onModeChange={setSidebarMode}
         loading={sessionsLoading}
       />
 
       <div className="flex flex-col flex-1 min-w-0 h-full">
         {/* ── Header ── */}
         <div className="flex items-center justify-between gap-3 px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
-          <div className="flex items-center gap-2.5">
-            {!sidebarOpen && (
+          <div className="flex items-center gap-2.5 min-w-0">
+            {sidebarMode !== 'expanded' && (
               <button
-                onClick={() => setSidebarOpen(true)}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mr-1"
-                title="Abrir sessões"
+                onClick={toggleSidebar}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Abrir conversas (Ctrl+B)"
+                aria-label="Abrir conversas"
               >
                 <PanelLeft className="w-4 h-4" />
               </button>
             )}
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
               <Bot className="w-4 h-4 text-primary" />
             </div>
-            <span className="text-sm font-semibold text-foreground">Assistente NBL</span>
+            <span className="text-sm font-semibold text-foreground shrink-0">Assistente NBL</span>
+            {currentSession && (
+              <>
+                <span className="text-muted-foreground/40 shrink-0">/</span>
+                <span className="text-sm text-muted-foreground truncate min-w-0">
+                  {currentSession.title || 'Nova conversa'}
+                </span>
+              </>
+            )}
             <StatusBadge status={chatStatus} />
-          </div>
-          <div className="flex items-center gap-1">
-            <HeaderButton icon={Plus} label="Nova conversa" onClick={handleNewSession} />
           </div>
         </div>
 
