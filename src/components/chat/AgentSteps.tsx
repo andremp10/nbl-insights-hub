@@ -1,11 +1,12 @@
 import { memo, useState, useEffect, useRef } from 'react';
-import { Check, Timer } from 'lucide-react';
+import { Check, Timer, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AgentStepsProps {
   steps: string[];
   isComplete: boolean;
   startedAt?: number;
+  collapsed?: boolean;
 }
 
 function formatDuration(ms: number): string {
