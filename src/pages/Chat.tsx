@@ -210,7 +210,7 @@ export default function Chat() {
                 </span>
               </>
             )}
-            <StatusBadge status={chatStatus} />
+            <div className="hidden sm:inline-flex"><StatusBadge status={chatStatus} /></div>
           </div>
         </div>
 
