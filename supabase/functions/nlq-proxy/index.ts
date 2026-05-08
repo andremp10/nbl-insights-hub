@@ -646,7 +646,7 @@ Deno.serve(async (req) => {
           // Only "step" events. Content accumulated silently.
           // Final answer delivered ONLY in finalize().
           // ══════════════════════════════════════════════════════════
-          emitStep('Consultando dados...');
+          // (No generic placeholder step — real steps come from n8n events.)
 
           const reader = n8nResponse.body.getReader();
           const decoder = new TextDecoder();
