@@ -559,7 +559,7 @@ Deno.serve(async (req) => {
             else console.error('[nlq-proxy] finalize update (complete) failed:', updErr);
 
             // Try to flush to client (cosmetic — single shot, no batching delay)
-            emitStep('Elaborando resposta final...');
+            emitStep('Formatando resposta');
             emitSSE({ type: 'token', token: content });
           } else {
             const errMsg = errorDetail || 'Erro ao processar sua solicitação.';
