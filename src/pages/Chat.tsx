@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
-import { ArrowUp, Loader2, Bot, PanelLeft } from 'lucide-react';
+import { ArrowUp, Loader2, Bot, PanelLeft, Menu } from 'lucide-react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar, type SessionsSidebarHandle, type SidebarMode } from '@/components/chat/SessionsSidebar';
@@ -7,6 +7,7 @@ import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useChatShortcuts } from '@/hooks/useChatShortcuts';
 import { Badge } from '@/components/ui/badge';
+import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 
 const SIDEBAR_MODE_KEY = 'nbl_sidebar_mode';
@@ -186,31 +187,38 @@ export default function Chat() {
 
       <div className="flex flex-col flex-1 min-w-0 h-full">
         {/* ── Header ── */}
-        <div className="flex items-center justify-between gap-3 px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
+            {/* Mobile: app navigation trigger */}
+            <SidebarTrigger className="md:hidden text-muted-foreground hover:text-foreground -ml-1 shrink-0" />
+            {/* Conversations trigger (when sidebar not expanded) */}
             {sidebarMode !== 'expanded' && (
               <button
                 onClick={toggleSidebar}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                 title="Abrir conversas (Ctrl+B)"
                 aria-label="Abrir conversas"
               >
                 <PanelLeft className="w-4 h-4" />
               </button>
             )}
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <div className="hidden sm:flex w-7 h-7 rounded-lg bg-primary/10 items-center justify-center shrink-0">
               <Bot className="w-4 h-4 text-primary" />
             </div>
-            <span className="text-sm font-semibold text-foreground shrink-0">Assistente NBL</span>
+            <span className="hidden sm:inline text-sm font-semibold text-foreground shrink-0">Assistente NBL</span>
             {currentSession && (
               <>
-                <span className="text-muted-foreground/40 shrink-0">/</span>
-                <span className="text-sm text-muted-foreground truncate min-w-0">
+                <span className="hidden sm:inline text-muted-foreground/40 shrink-0">/</span>
+                <span className="text-sm text-foreground sm:text-muted-foreground truncate min-w-0">
                   {currentSession.title || 'Nova conversa'}
                 </span>
               </>
             )}
             <div className="hidden sm:inline-flex"><StatusBadge status={chatStatus} /></div>
+          </div>
+          {/* Mobile: status dot only */}
+          <div className="sm:hidden shrink-0">
+            <StatusDot status={chatStatus} />
           </div>
         </div>
 
