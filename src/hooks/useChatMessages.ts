@@ -383,7 +383,7 @@ export function useChatMessages(sessionId: string | null) {
     setMessages(prev => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: [], startedAt: Date.now() },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: ['Conectando ao agente…'], startedAt: Date.now() },
     ]);
 
     const abort = new AbortController();
