@@ -683,7 +683,7 @@ Deno.serve(async (req) => {
                 // Check for inline {"output":"..."} — canonical capture
                 if (obj.output && typeof obj.output === 'string' && obj.output.trim()) {
                   canonicalOutput = obj.output.trim();
-                  emitStep('Processando resultados...');
+                  emitStep('Gerando insights');
                   continue;
                 }
 
@@ -692,8 +692,12 @@ Deno.serve(async (req) => {
 
                 if (obj.type === 'begin') {
                   if (nodeName.toLowerCase().includes('agente')) agentBeginCount++;
-                  const label = nodeToStepLabel(nodeName, agentBeginCount);
-                  if (label) emitStep(label);
+                  if (nodeClass === 'routing') {
+                    emitStep('Identificando o módulo');
+                  } else {
+                    const label = nodeToStepLabel(nodeName, agentBeginCount);
+                    if (label) emitStep(label);
+                  }
 
                 } else if (obj.type === 'item' && obj.content !== undefined) {
                   const content = String(obj.content);
