@@ -140,6 +140,16 @@ export function useChatSessions() {
     await supabase.from('chat_sessions').update({ title: trimmed }).eq('id', sessionId);
   }, []);
 
+  const togglePinSession = useCallback((sessionId: string) => {
+    setPinnedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      try { localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  }, []);
+
   const groupedSessions = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -149,6 +159,7 @@ export function useChatSessions() {
     weekAgo.setDate(weekAgo.getDate() - 7);
 
     const groups: Record<string, ChatSession[]> = {
+      'Fixadas': [],
       'Hoje': [],
       'Ontem': [],
       'Esta semana': [],
@@ -156,6 +167,10 @@ export function useChatSessions() {
     };
 
     sessions.forEach(session => {
+      if (pinnedIds.has(session.id)) {
+        groups['Fixadas'].push(session);
+        return;
+      }
       const date = new Date(session.last_message_at || session.created_at);
       date.setHours(0, 0, 0, 0);
       if (date >= today) groups['Hoje'].push(session);
@@ -165,7 +180,8 @@ export function useChatSessions() {
     });
 
     return Object.entries(groups).filter(([, items]) => items.length > 0);
-  }, [sessions]);
+  }, [sessions, pinnedIds]);
 
-  return { sessions, loading, groupedSessions, createSession, deleteSession, updateSessionTitle, refetch: fetchSessions };
+  return { sessions, loading, groupedSessions, pinnedIds, togglePinSession, createSession, deleteSession, updateSessionTitle, refetch: fetchSessions };
 }
+
