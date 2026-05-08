@@ -269,7 +269,10 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     >
       {/* Label */}
       <div className="flex items-center gap-2 mb-1.5">
-        <div className="w-5 h-5 rounded-md bg-primary/10 flex items-center justify-center">
+        <div className={cn(
+          'w-5 h-5 rounded-md bg-primary/10 flex items-center justify-center',
+          isInFlight && 'agent-halo'
+        )}>
           <span className="text-[10px] font-bold text-primary">N</span>
         </div>
         <span className="text-xs font-medium text-foreground/60">Assistente NBL</span>
