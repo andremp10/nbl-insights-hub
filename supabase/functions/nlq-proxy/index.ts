@@ -19,21 +19,24 @@ const N8N_FETCH_TIMEOUT_MS = 360_000;
 // ════════════════════════════════════════════════════════════════
 
 const INTERNAL_NODES = [
-  'webhook', 'respond to webhook', 'tool', 'supabase', 'execute',
-  'http request', 'code', 'set', 'switch', 'if', 'merge', 'split',
+  'webhook', 'tool', 'supabase', 'execute',
+  'http request', 'code', 'set', 'merge', 'split',
   'function', 'item lists', 'no operation', 'mcp_client', 'mcp client',
   'chat_historico', 'chat historico',
 ];
+
+const ROUTING_NODES = ['switch', 'if'];
 
 const SUB_AGENT_NODES = ['agente_consulta', 'agente_financeiro'];
 
 const FINAL_AGENT_NODE = 'agente_negocio';
 
-export function classifyNode(nodeName: string): 'internal' | 'sub_agent' | 'final_agent' | 'ignored' {
+export function classifyNode(nodeName: string): 'internal' | 'sub_agent' | 'final_agent' | 'routing' | 'ignored' {
   if (!nodeName) return 'internal';
   const lower = nodeName.toLowerCase();
   if (lower.includes(FINAL_AGENT_NODE)) return 'final_agent';
   if (SUB_AGENT_NODES.some(n => lower.includes(n))) return 'sub_agent';
+  if (ROUTING_NODES.some(n => lower.includes(n))) return 'routing';
   if (INTERNAL_NODES.some(n => lower.includes(n))) return 'internal';
   // CRITICAL: unknown nodes are IGNORED — never promoted to final_agent
   return 'ignored';
@@ -45,13 +48,12 @@ export function classifyNode(nodeName: string): 'internal' | 'sub_agent' | 'fina
 
 function nodeToStepLabel(nodeName: string, agentBeginCount: number): string | null {
   const lower = nodeName.toLowerCase();
-  if (lower.includes('agente_consulta')) return 'Consultando dados de pedidos...';
-  if (lower.includes('agente_financeiro')) return 'Consultando dados financeiros...';
-  if (lower.includes('supabase') || lower.includes('tool') || lower.includes('mcp')) return 'Acessando banco de dados...';
+  if (lower.includes('agente_consulta')) return 'Consultando pedidos (vw_dashboard_pedidos)';
+  if (lower.includes('agente_financeiro')) return 'Consultando financeiro (vw_dashboard_financeiro)';
   if (lower.includes('agente_negocio')) {
-    return agentBeginCount <= 1 ? 'Analisando sua pergunta...' : 'Elaborando resposta...';
+    return agentBeginCount <= 1 ? 'Interpretando a pergunta' : 'Analisando dados';
   }
-  if (lower.includes('respond to webhook') || lower.includes('webhook')) return null;
+  // Routing nodes (switch/if) handled separately — emit "Identificando o módulo" once
   return null;
 }
 
