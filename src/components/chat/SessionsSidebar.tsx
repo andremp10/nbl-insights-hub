@@ -115,7 +115,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
                 <Tooltip key={s.id}>
                   <TooltipTrigger asChild>
                     <button
-                      onClick={() => onSelectSession(s.id)}
+                      onClick={() => handleSelect(s.id)}
                       className={cn(
                         'w-9 h-9 rounded-lg flex items-center justify-center transition-colors relative',
                         isActive ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
@@ -266,7 +266,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
                       isActive={session.id === currentSessionId}
                       isPinned={pinnedIds.has(session.id)}
                       query={query}
-                      onSelect={() => onSelectSession(session.id)}
+                      onSelect={() => handleSelect(session.id)}
                       onRename={(t) => onRenameSession(session.id, t)}
                       onDelete={() => setPendingDelete(session)}
                       onTogglePin={() => onTogglePinSession(session.id)}
