@@ -563,7 +563,7 @@ export function useChatMessages(sessionId: string | null) {
       if (err.name === 'AbortError') {
         setMessages(prev => prev.map(m =>
           m.id === optAsstId
-            ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta do agente...'], status: 'streaming' as const }
+            ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta'], status: 'streaming' as const }
             : m
         ));
         startRecovery(sessionId, optAsstId, trimmed);
