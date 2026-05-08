@@ -189,8 +189,10 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
 
   const hasSteps = !!(message.steps && message.steps.length > 0);
   const hasContent = !!message.content;
-  const showSteps = !isUser && hasSteps && !isComplete && !isError;
+  // Keep steps visible (collapsed) once content starts so the user sees what happened
+  const showSteps = !isUser && hasSteps && !isError;
   const showThinking = !isUser && isInFlight && !hasSteps && !hasContent;
+  const showSkeleton = !isUser && isInFlight && hasSteps && !hasContent;
   const startedAt = message.startedAt;
 
   const handleCopy = useCallback(() => {
