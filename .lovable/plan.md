@@ -1,53 +1,63 @@
-# Correção: usuário sem resposta quando o cliente desconecta
+# Plano: Espera Visual Premium no Chat
 
-## Diagnóstico (com base em logs)
+## Diagnóstico do estado atual
+Hoje a espera tem dois estados, ambos pobres visualmente:
 
-A pergunta de 30/04 às 03:10:02 UTC (sessão `17684b8a-...`, "Faça um resumo do status atual de todos os pedidos…") foi salva como mensagem do usuário, mas **nenhuma mensagem do assistente foi criada** — nem em `processing`, nem `complete`, nem `error`. O usuário ficou olhando o chat sem resposta nem aviso de erro.
+1. **`showThinking`** (antes de chegar qualquer step): apenas uma `chat-shimmer-bar` cinza fininha com texto "Analisando…". Visual de loader genérico.
+2. **`AgentSteps`**: caixa cinza (`bg-muted/30`) com lista de steps + spinner `Loader2` + check verde. Funcional mas sem alma — parece debug log.
 
-Logs do edge function `nlq-proxy` mostram:
-- `03:10:04` — n8n iniciou stream (`begin`)
-- `03:10:06` — chunks #2 e #3 chegaram
-- `03:10:03` — `Http: connection closed before message completed` (cliente fechou a conexão SSE antes do n8n terminar)
-- **Nunca apareceu** `Stream done` nem `Final content approved` para essa request
+Não há identidade NBL, nenhuma referência ao tema laranja (#E8501A), nenhum sentido de "agente trabalhando para você".
 
-### Causa raiz
+## Proposta de redesign
 
-A arquitetura atual do `nlq-proxy/index.ts` tem dois defeitos combinados:
+### A. Container "Agente em ação" unificado
+Substituir os dois estados separados por **um único componente** `AgentThinking` que evolui:
+- **Fase 1 (sem steps):** ícone "N" do assistente pulsa com halo laranja + barra de progresso indeterminada animada (gradient laranja → transparente deslizando) + label rotativo ("Conectando ao agente…", "Interpretando sua pergunta…", "Buscando dados…").
+- **Fase 2 (com steps):** transição suave para timeline vertical com os passos reais.
 
-1. **A mensagem do assistente só é inserida em `finalize()`**, que só roda quando o stream termina com sucesso. Se o cliente desconectar antes, o INSERT nunca acontece.
-2. **No `catch`, suprimimos a criação de uma row de erro** quando `isClosedError(err)` é true (linha 768). Isso foi feito antes para evitar "phantom errors", mas combinado com o item 1 deixa a sessão em estado fantasma: pergunta do usuário sem nenhuma resposta correspondente.
+### B. Timeline vertical premium (substitui AgentSteps atual)
+Layout estilo "tracker" com linha vertical conectando os passos:
 
-Resultado: qualquer desconexão (troca de aba, refresh, perda de rede momentânea, navegação) durante o processamento = silêncio total no DB.
+```text
+●─── Interpretando intenção         0.4s
+│
+●─── Consultando vw_dashboard_…     1.2s
+│
+◉─── Compondo resposta              [spinner laranja + shimmer]
+```
 
-## Solução
+- **Step concluído:** bolinha laranja sólida (`bg-primary`) com check branco micro, texto em `foreground/70`, duração à direita em mono.
+- **Step ativo:** bolinha com **ring laranja pulsante** (animate-ping) + texto em `foreground` com **shimmer sutil de gradiente** passando por baixo + cronômetro vivo.
+- **Step futuro (se backend mandar):** bolinha vazada `border-border`.
+- **Linha conectora:** vertical 1px `bg-border/40`, do passo concluído pinta progressivamente em `bg-primary/40`.
+- Sem fundo cinza pesado: usar `bg-card/40` com `border-l-2 border-primary/30` (acento lateral laranja sutil que reforça marca).
 
-Garantir que **toda pergunta tenha uma row de resposta no DB**, independentemente do que aconteça com a conexão SSE.
+### C. Micro-detalhes que fazem diferença
+1. **Halo do avatar "N"** no header do bot pulsa em laranja enquanto está pensando (`animate-pulse` + `shadow-[0_0_20px_hsl(var(--primary)/0.4)]`).
+2. **Shimmer real**: gradient `from-transparent via-primary/20 to-transparent` deslizando 1.5s loop sobre o passo ativo (keyframe `shimmer-slide`).
+3. **Cronômetro total** discreto no topo direito do bloco (`⏱ 3.2s`), tabular-nums, mono — sensação de produto técnico, não loader genérico.
+4. **Mensagem de soft-timeout** (>15s) com ícone clock laranja em vez do texto cinza atual.
+5. **Transição de saída suave**: quando a resposta chega, o bloco de steps faz fade+slide-up (200ms) e o markdown entra com fade-in — nada de "pop" abrupto.
 
-### Mudanças em `supabase/functions/nlq-proxy/index.ts`
+### D. Estado vazio (Fase 1 sem steps ainda)
+Substitui o `chat-shimmer-bar` atual por:
+- Avatar "N" com halo pulsante.
+- 3 dots laranja em sequência (estilo "typing") + label rotativo a cada 2s ciclando frases predefinidas em pt-BR.
+- Microcopy útil: "Costuma levar de 3 a 8 segundos." abaixo, em `text-[10px] muted/50`.
 
-1. **Pré-criar a mensagem do assistente em `status: 'processing'`** logo após inserir a mensagem do usuário (antes de iniciar o stream). Capturar `assistantMsgId`.
-   - Inclui `reply_to_message_id = userMsg.id` e `processing_started_at = now()` para alinhar com o já existente RPC `expire_stuck_processing_messages` (que limpa rows travadas após 12 min).
+## Arquivos a alterar
 
-2. **Trocar INSERT por UPDATE em `finalize()`**: atualizar a row `assistantMsgId` para `complete` (com `content`) ou `error` (com `error_detail`), setando `completed_at = now()`. Isso elimina rows duplicadas e funciona mesmo com cliente desconectado.
+1. **`src/components/chat/AgentSteps.tsx`** — reescrita completa para timeline vertical com bolinhas, linha conectora, shimmer no ativo, cronômetro total.
+2. **`src/components/chat/ChatMessage.tsx`** — substituir o bloco `showThinking` (atualmente `chat-shimmer-bar`) por novo componente `AgentThinking` (dots + label rotativo + halo). Remover `ThinkingBubble` legado se não usado.
+3. **`src/index.css`** — adicionar keyframes `shimmer-slide`, `halo-pulse`, e classes utilitárias `.agent-step-active`, `.agent-timeline-line`.
+4. **`src/components/chat/ThinkingBubble.tsx`** — deletar (não está em uso ativo no fluxo principal).
 
-3. **Tornar o trabalho do n8n resiliente à desconexão**: envolver o processamento principal em uma Promise que continua rodando via `EdgeRuntime.waitUntil(...)`. O `ReadableStream` apenas reflete o progresso para o cliente conectado; quando o cliente fecha, o `controller.enqueue` falha silenciosamente (já tratado por `controllerClosed`), mas o loop de leitura do n8n e o `finalize()` continuam até o fim e atualizam o DB.
+## Aspecto técnico (resumo)
+- Nenhum framework novo; tudo CSS + Tailwind + ícones lucide já presentes.
+- Manter `memo` em ambos os componentes para não rerenderizar a cada token streaming.
+- Cronômetro continua usando `setInterval(1000)` já existente; sem custo extra.
+- Cores 100% via tokens HSL existentes (`--primary`, `--border`, `--muted`) — respeita dark/light automaticamente.
+- Acessibilidade: `aria-live="polite"` no container para leitores de tela narrarem "Consultando dados…".
 
-4. **No `catch` global**: sempre executar `finalize('', 'error', '...')` em vez de suprimir. Como `finalize` agora faz UPDATE, não há risco de "phantom error" duplicada — se o sucesso já rodou, a row já está `complete` e o catch não será atingido.
-
-5. **Implementar `cancel()` no ReadableStream**: marcar `controllerClosed = true` mas NÃO abortar o n8nFetch. O processamento continua até persistir a resposta.
-
-### Frontend (`src/hooks/useChatMessages.ts`)
-
-Já tem dedupe de phantom errors — agora vira inofensivo, pois o backend não cria mais rows duplicadas (faz UPDATE). Manter como defesa adicional, sem mudanças.
-
-### Resultado
-
-- Cliente conectado durante todo o stream: comportamento idêntico ao atual (recebe steps + resposta final via SSE).
-- Cliente desconecta no meio: backend continua, atualiza a row `processing → complete` (ou `error`), e na próxima visita à sessão (via Realtime ou ao recarregar) a resposta aparece.
-- n8n falha / timeout / conexão recusada: row vai para `error` com mensagem amigável — usuário vê o balão de erro em vez de silêncio.
-
-## Fora de escopo
-
-- Não mexer no fluxo async (`nlq-proxy-async`) — esta correção é só do path SSE legado em uso.
-- Não mudar n8n nem views Supabase.
-- Não tocar em hooks de dashboard.
+## Resultado esperado
+A espera deixa de parecer "loading bar de site qualquer" e passa a comunicar: **"um agente especialista está trabalhando para você, em etapas, com transparência"** — coerente com o posicionamento B2B/terminal premium da NBL.

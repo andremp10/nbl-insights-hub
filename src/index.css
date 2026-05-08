@@ -203,7 +203,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Shimmer bar for thinking state */
+/* Shimmer bar for thinking state (legacy, kept for safety) */
 .chat-shimmer-bar {
   width: 120px;
   height: 3px;
@@ -221,6 +221,109 @@
 @keyframes shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AGENT THINKING — premium waiting state
+═══════════════════════════════════════════════════════════════════════════ */
+
+/* Container with subtle orange accent on the left */
+.agent-thinking-card {
+  position: relative;
+  border-radius: 10px;
+  background: linear-gradient(180deg,
+    hsl(var(--card) / 0.6) 0%,
+    hsl(var(--card) / 0.3) 100%);
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-left: 2px solid hsl(var(--primary) / 0.55);
+  padding: 12px 14px;
+  overflow: hidden;
+}
+
+/* Soft moving sheen across the whole card */
+.agent-thinking-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg,
+    transparent 30%,
+    hsl(var(--primary) / 0.06) 50%,
+    transparent 70%);
+  background-size: 200% 100%;
+  animation: agentSheen 3.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes agentSheen {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Avatar halo pulse */
+.agent-halo {
+  box-shadow: 0 0 0 0 hsl(var(--primary) / 0.5);
+  animation: agentHalo 1.6s ease-out infinite;
+}
+@keyframes agentHalo {
+  0%   { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.45); }
+  70%  { box-shadow: 0 0 0 10px hsl(var(--primary) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
+}
+
+/* Typing dots */
+.agent-dots { display: inline-flex; gap: 4px; align-items: center; }
+.agent-dots > span {
+  width: 6px; height: 6px; border-radius: 9999px;
+  background: hsl(var(--primary));
+  opacity: 0.35;
+  animation: agentDot 1.2s ease-in-out infinite;
+}
+.agent-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.agent-dots > span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes agentDot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40%           { opacity: 1;   transform: translateY(-2px); }
+}
+
+/* Vertical timeline */
+.agent-timeline { position: relative; }
+.agent-timeline-line {
+  position: absolute;
+  left: 7px; top: 14px; bottom: 14px;
+  width: 1px;
+  background: linear-gradient(180deg,
+    hsl(var(--primary) / 0.4) 0%,
+    hsl(var(--border) / 0.5) 100%);
+}
+
+/* Active step shimmer over text */
+.agent-step-active-text {
+  position: relative;
+  background: linear-gradient(90deg,
+    hsl(var(--foreground)) 0%,
+    hsl(var(--foreground)) 40%,
+    hsl(var(--primary)) 50%,
+    hsl(var(--foreground)) 60%,
+    hsl(var(--foreground)) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: agentTextShimmer 2.4s linear infinite;
+}
+@keyframes agentTextShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Ring pulse on active step bullet */
+.agent-step-ring {
+  animation: agentRingPulse 1.6s ease-out infinite;
+}
+@keyframes agentRingPulse {
+  0%   { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.5); }
+  70%  { box-shadow: 0 0 0 6px hsl(var(--primary) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
 }
 
 /* ── Chat table polish ── */

@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useRef } from 'react';
-import { Check, Clock, Loader2 } from 'lucide-react';
+import { Check, Timer } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AgentStepsProps {
@@ -16,23 +16,28 @@ function formatDuration(ms: number): string {
   return `${minutes}m${secs > 0 ? ` ${secs}s` : ''}`;
 }
 
+function formatTotal(ms: number): string {
+  const s = (ms / 1000).toFixed(1);
+  return `${s}s`;
+}
+
 export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedAt }: AgentStepsProps) {
   const [now, setNow] = useState(Date.now());
   const stepTimestamps = useRef<number[]>([]);
 
   useEffect(() => {
     if (steps.length > stepTimestamps.current.length) {
-      const currentTime = Date.now();
+      const t = Date.now();
       while (stepTimestamps.current.length < steps.length) {
-        stepTimestamps.current.push(currentTime);
+        stepTimestamps.current.push(t);
       }
     }
   }, [steps.length]);
 
   useEffect(() => {
     if (isComplete) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
+    const id = setInterval(() => setNow(Date.now()), 200);
+    return () => clearInterval(id);
   }, [isComplete]);
 
   if (!steps.length) return null;
@@ -40,62 +45,92 @@ export const AgentSteps = memo(function AgentSteps({ steps, isComplete, startedA
   const totalElapsed = startedAt ? now - startedAt : 0;
 
   return (
-    <div className="rounded-lg bg-muted/30 border border-border/30 px-3 py-2.5 space-y-0.5">
-      {steps.map((step, i) => {
-        const isDone = isComplete || i < steps.length - 1;
-        const isCurrent = !isComplete && i === steps.length - 1;
-        const stepStart = stepTimestamps.current[i] || now;
-        const stepEnd = i < steps.length - 1
-          ? stepTimestamps.current[i + 1] || now
-          : now;
-        const elapsed = isDone && !isComplete
-          ? stepEnd - stepStart
-          : isCurrent
-            ? now - stepStart
-            : isComplete
-              ? (stepTimestamps.current[i + 1] || (startedAt ? startedAt + totalElapsed : now)) - stepStart
-              : 0;
-
-        return (
-          <div
-            key={`${step}-${i}`}
-            className={cn(
-              'flex items-center gap-2.5 py-1 text-xs transition-all duration-300',
-              i === 0 && 'animate-in fade-in slide-in-from-left-2',
-              isDone && 'text-muted-foreground/40',
-              isCurrent && 'text-foreground'
+    <div className="agent-thinking-card" aria-live="polite">
+      {/* Header: status + total timer */}
+      <div className="relative flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2 w-2">
+            {!isComplete && (
+              <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping" />
             )}
-            style={{ animationDelay: `${i * 60}ms` }}
-          >
-            {isDone ? (
-              <div className="w-4 h-4 rounded-full bg-success/15 flex items-center justify-center shrink-0">
-                <Check className="w-2.5 h-2.5 text-success" />
-              </div>
-            ) : (
-              <div className="w-4 h-4 flex items-center justify-center shrink-0">
-                <Loader2 className="w-3 h-3 text-primary animate-spin" />
-              </div>
-            )}
-            <span className="flex-1 truncate">{step}</span>
-            {elapsed > 0 && (
-              <span className={cn(
-                'text-[10px] tabular-nums font-mono shrink-0',
-                isDone ? 'text-muted-foreground/25' : 'text-muted-foreground/50'
-              )}>
-                {formatDuration(elapsed)}
-              </span>
-            )}
-          </div>
-        );
-      })}
-
-
-      {isComplete && startedAt && totalElapsed > 2000 && (
-        <div className="flex items-center gap-2 pt-1 border-t border-border/20 mt-1 text-[10px] text-muted-foreground/35">
-          <Check className="w-3 h-3 shrink-0" />
-          <span>Concluído em {formatDuration(totalElapsed)}</span>
+            <span className={cn(
+              'relative inline-flex rounded-full h-2 w-2',
+              isComplete ? 'bg-success' : 'bg-primary'
+            )} />
+          </span>
+          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
+            {isComplete ? 'Concluído' : 'Agente em ação'}
+          </span>
         </div>
-      )}
+        {startedAt && (
+          <div className="flex items-center gap-1 text-[10px] font-mono tabular-nums text-muted-foreground/60">
+            <Timer className="w-3 h-3" />
+            {formatTotal(totalElapsed)}
+          </div>
+        )}
+      </div>
+
+      {/* Timeline */}
+      <div className="agent-timeline relative pl-1">
+        <div className="agent-timeline-line" aria-hidden />
+        <ul className="space-y-2">
+          {steps.map((step, i) => {
+            const isDone = isComplete || i < steps.length - 1;
+            const isCurrent = !isComplete && i === steps.length - 1;
+            const stepStart = stepTimestamps.current[i] || now;
+            const stepEnd = i < steps.length - 1
+              ? stepTimestamps.current[i + 1] || now
+              : now;
+            const elapsed = isDone && !isComplete
+              ? stepEnd - stepStart
+              : isCurrent
+                ? now - stepStart
+                : isComplete
+                  ? (stepTimestamps.current[i + 1] || now) - stepStart
+                  : 0;
+
+            return (
+              <li
+                key={`${step}-${i}`}
+                className="relative flex items-center gap-3 animate-in fade-in slide-in-from-left-2 duration-300"
+                style={{ animationDelay: `${i * 50}ms` }}
+              >
+                {/* Bullet */}
+                <div className="relative z-10 shrink-0">
+                  {isDone ? (
+                    <div className="w-[15px] h-[15px] rounded-full bg-primary flex items-center justify-center ring-2 ring-background">
+                      <Check className="w-2.5 h-2.5 text-primary-foreground" strokeWidth={3} />
+                    </div>
+                  ) : (
+                    <div className="agent-step-ring w-[15px] h-[15px] rounded-full bg-background border-2 border-primary flex items-center justify-center">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Label */}
+                <span className={cn(
+                  'flex-1 text-xs leading-tight truncate',
+                  isDone && 'text-muted-foreground/55',
+                  isCurrent && 'agent-step-active-text font-medium'
+                )}>
+                  {step}
+                </span>
+
+                {/* Duration */}
+                {elapsed > 0 && (
+                  <span className={cn(
+                    'text-[10px] font-mono tabular-nums shrink-0',
+                    isDone ? 'text-muted-foreground/35' : 'text-primary/70'
+                  )}>
+                    {formatDuration(elapsed)}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 });
