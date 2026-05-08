@@ -2,6 +2,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recha
 import { PieChartIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface DonutChartProps {
   title: string;
@@ -30,7 +31,10 @@ function formatCurrency(value: number): string {
 }
 
 export function DonutChart({ title, data, isLoading }: DonutChartProps) {
+  const isMobile = useIsMobile();
   const total = data.reduce((sum, item) => sum + item.value, 0);
+  const innerR = isMobile ? 38 : 50;
+  const outerR = isMobile ? 62 : 80;
 
   return (
     <Card className="border-border bg-card">
@@ -58,8 +62,8 @@ export function DonutChart({ title, data, isLoading }: DonutChartProps) {
                   data={data}
                   cx="50%"
                   cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
+                  innerRadius={innerR}
+                  outerRadius={outerR}
                   paddingAngle={2}
                   dataKey="value"
                   nameKey="name"

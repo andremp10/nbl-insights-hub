@@ -66,15 +66,15 @@ export function OrdersTable() {
   return (
     <>
       <Card className="border-border bg-card">
-        <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 p-4 sm:p-6">
           <div className="flex flex-col gap-1">
             <CardTitle className="text-base flex items-center gap-2">Pedidos Recentes</CardTitle>
-            <span className="text-sm text-muted-foreground">{totalItems} pedidos encontrados</span>
+            <span className="text-xs sm:text-sm text-muted-foreground">{totalItems} pedidos encontrados</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-muted-foreground" />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
             <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-[180px] h-9 text-xs">
+              <SelectTrigger className="w-full sm:w-[180px] h-9 text-xs">
                 <SelectValue placeholder="Filtrar por status" />
               </SelectTrigger>
               <SelectContent>
