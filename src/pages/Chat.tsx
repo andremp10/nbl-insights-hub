@@ -282,6 +282,14 @@ function StatusBadge({ status }: { status: 'idle' | 'sending' | 'error' }) {
   );
 }
 
+function StatusDot({ status }: { status: 'idle' | 'sending' | 'error' }) {
+  const color =
+    status === 'sending' ? 'bg-warning animate-pulse'
+    : status === 'error' ? 'bg-destructive'
+    : 'bg-success';
+  return <span className={cn('inline-block w-2 h-2 rounded-full', color)} aria-hidden />;
+}
+
 
 const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
   const [input, setInput] = useState('');
