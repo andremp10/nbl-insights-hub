@@ -47,28 +47,29 @@ export function AppSidebar() {
     <>
       <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
         <SidebarHeader className={cn(
-          "border-b border-sidebar-border transition-all duration-200",
-          collapsed ? "p-2" : "p-3"
+          "border-b border-sidebar-border h-14 transition-all duration-200",
+          collapsed ? "px-0 justify-center" : "px-3"
         )}>
-          <div className={cn(
-            "flex items-center",
-            collapsed ? "flex-col gap-2" : "justify-between"
-          )}>
-            <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2.5")}>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
-                <Printer className="h-4 w-4" />
-              </div>
-              {!collapsed && (
-                <div className="flex flex-col">
+          {collapsed ? (
+            <div className="flex items-center justify-center h-full">
+              <SidebarTrigger className="h-8 w-8 text-muted-foreground hover:text-foreground" />
+            </div>
+          ) : (
+            <div className="flex items-center justify-between h-full">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
+                  <Printer className="h-4 w-4" />
+                </div>
+                <div className="flex flex-col min-w-0">
                   <span className="text-[13px] font-semibold text-sidebar-foreground tracking-tight truncate">
                     NBL Gráfica
                   </span>
                   <span className="text-[10px] text-muted-foreground -mt-0.5">Insights Hub</span>
                 </div>
-              )}
+              </div>
+              <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
             </div>
-            <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
-          </div>
+          )}
         </SidebarHeader>
 
         <SidebarContent>
