@@ -90,8 +90,57 @@ export function DateFilterBar() {
     yearOptions.push(y);
   }
 
+  const activePresetLabel = presets.find(p => p.key === preset)?.label
+    ?? (preset === 'custom' ? `${format(dateRange.from, 'dd/MM/yy')}-${format(dateRange.to, 'dd/MM/yy')}` : 'Período');
+
   return (
     <div className="flex items-center gap-1">
+      {/* Mobile: single popover with presets stacked */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="sm:hidden h-8 px-2.5 text-xs font-medium gap-1.5"
+          >
+            <Calendar className="h-3.5 w-3.5" />
+            {activePresetLabel}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-44 p-1.5" align="end">
+          <div className="flex flex-col gap-0.5">
+            {presets.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setPreset(p.key)}
+                className={cn(
+                  'text-left text-xs px-2.5 py-2 rounded-md transition-colors',
+                  preset === p.key
+                    ? 'bg-primary/15 text-primary font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+            <div className="h-px bg-border my-1" />
+            <button
+              onClick={() => { handleOpenChange(true); }}
+              className={cn(
+                'text-left text-xs px-2.5 py-2 rounded-md flex items-center gap-2 transition-colors',
+                preset === 'custom'
+                  ? 'bg-primary/15 text-primary font-medium'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
+              )}
+            >
+              <Calendar className="h-3 w-3" />
+              Personalizado…
+            </button>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {/* Desktop chips */}
       {presets.map((p) => (
         <Button
           key={p.key}
@@ -99,7 +148,7 @@ export function DateFilterBar() {
           size="sm"
           onClick={() => setPreset(p.key)}
           className={cn(
-            'h-7 px-2.5 text-xs font-medium rounded-lg transition-colors',
+            'hidden sm:inline-flex h-7 px-2.5 text-xs font-medium rounded-lg transition-colors',
             preset === p.key
               ? 'bg-primary/15 text-primary'
               : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
@@ -115,7 +164,7 @@ export function DateFilterBar() {
             variant="ghost"
             size="sm"
             className={cn(
-              'h-7 px-2.5 text-xs font-medium rounded-lg gap-1.5',
+              'hidden sm:inline-flex h-7 px-2.5 text-xs font-medium rounded-lg gap-1.5',
               preset === 'custom'
                 ? 'bg-primary/15 text-primary'
                 : 'text-muted-foreground hover:text-foreground'
@@ -127,7 +176,7 @@ export function DateFilterBar() {
               : 'Datas'}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-4 pointer-events-auto" align="end">
+        <PopoverContent className="w-[calc(100vw-2rem)] sm:w-auto max-w-sm p-4 pointer-events-auto" align="end">
           <div className="space-y-4">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Período personalizado</p>
 

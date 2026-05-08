@@ -1,162 +1,125 @@
-# Plano: Sidebar de Sessões + Navegação do Chat
+# Plano: Responsividade Mobile do Sistema NBL
 
-## Diagnóstico crítico do que está ruim hoje
+## Diagnóstico crítico por tela
 
-1. **Sem busca**: com 20+ conversas, não há como encontrar nada — só rolar.
-2. **Sem atalhos**: navegar entre conversas exige mouse para tudo (não há ⌘K, setas, ⌘N).
-3. **Botão "Nova conversa" duplicado e fraco**: aparece dentro da sidebar (tracejado, cinza, "secundário") e também no header do chat — visualmente confuso e nenhum dos dois é destacado.
-4. **Toggle externo estranho**: o botão de fechar/abrir sidebar fica numa coluna `w-8` à direita do painel, criando uma faixa cinza vazia desperdiçando 32px na vertical inteira. Quebra o alinhamento com o header do chat.
-5. **Sidebar usa hack de `marginRight: -260px`**: ao colapsar, ela some por completo. Não há um modo "icon rail" — perde-se contexto.
-6. **Item ativo discreto**: borda lateral 2px laranja + bg muito leve. Em scroll é fácil perder onde está.
-7. **Sem informação útil por conversa**: só mostra título. Falta horário/data relativa, contagem de mensagens, ou preview da última pergunta. Tudo parece igual.
-8. **Sem fixar (pin)** conversas importantes — somem na ordenação por `last_message_at`.
-9. **Renomear via duplo-clique**: descoberta zero. Usuário não sabe que existe.
-10. **Confirmação de exclusão inline** quebra o layout do item (tamanho diferente, parece bug).
-11. **Estado vazio fraco**: "Nenhuma conversa ainda" — não convida nem orienta.
-12. **Mobile**: backdrop existe, mas o swipe-to-close está ausente; toggle externo some.
-13. **Acessibilidade**: sem `aria-current`, sem foco visível claro, ESC fecha mas não há trap de foco.
+### Layout global (`AppLayout` + `AppSidebar`)
+- A `AppSidebar` shadcn em `collapsible="icon"` no mobile vira **off-canvas via Sheet** (já é o padrão), mas **não há nenhum trigger visível no mobile**. Hoje o usuário precisa abrir a barra de endereços lateral e não há hambúrguer no topo das telas. Problema crítico: **nenhuma das telas tem header próprio com botão de menu** — só Pedidos/Financeiro têm header com `<DateFilterBar>`, e o sidebar trigger nunca aparece.
+- `AppHeader.tsx` existe mas **não está em uso** (App usa `AppLayout` sem header). Está morto no projeto e confunde manutenção.
+- `DashboardLayout.tsx` também existe e **não está em uso** (App usa `AppLayout` em todas as rotas). Outro layout morto.
 
-## Princípios de design da nova sidebar
+### Home (`/`)
+- `max-w-4xl mx-auto px-4 md:px-8` — OK
+- Hero `text-2xl md:text-3xl` — OK
+- Botões CTA em `flex flex-wrap gap-3` — funcional, mas no mobile ficam empilhados de forma irregular; precisam ocupar full-width.
+- KPIs em `grid grid-cols-3` (sempre 3 colunas, mesmo mobile) — **quebram no mobile**: rótulo "Pedidos em aberto" + valor não cabem em ~110px de largura. Precisa virar `grid-cols-1 sm:grid-cols-3` ou layout horizontal.
+- Atividade recente: cada linha tem avatar + nome + badge + valor. No mobile <360px, valor + badge somem na direita. Precisa wrap.
+- **Sem botão de menu visível** — usuário não sabe como navegar.
 
-- **Densa e profissional** (consistente com B2B terminal aesthetic já registrado em memória).
-- **Sempre presente**: dois modos — `expanded` (260px) ou `rail` (52px com ícones), nunca totalmente oculta no desktop. Mobile mantém overlay.
-- **Hierarquia clara**: ações primárias em laranja, secundárias em cinza; item ativo com fundo laranja sólido suave + barra à esquerda animada.
-- **Buscável e navegável por teclado**.
+### Chat (`/chat`)
+- Sidebar agora tem modo `hidden` no mobile (já feito). Precisa apenas de **trigger no header** mais visível.
+- Composer `px-3 py-3 sm:px-4 md:px-6` — OK
+- Header do chat com breadcrumb truncado — OK; precisa esconder badge "Conectado" em <380px para ganhar espaço, ou movê-la para baixo.
 
-## Estrutura do novo painel (expanded, 260px)
+### Financeiro / Pedidos
+- Header `flex items-center justify-between px-6 md:px-8` com **`<DateFilterBar>` à direita** — no mobile, a `DateFilterBar` tem 5 chips + botão "Datas" que não cabem. Precisa virar **scroll horizontal** ou colapsar em popover.
+- Padding `p-6 md:p-8` — desperdiça espaço no mobile (24px de cada lado). Reduzir para `p-3 sm:p-6`.
+- KPIs `grid md:grid-cols-3/4` — no mobile vira 1 coluna (OK), mas ocupa muito altura. Melhor `grid-cols-2 md:grid-cols-3/4` no Financeiro/Pedidos.
+- Charts `grid md:grid-cols-2` — vira 1 coluna no mobile (OK), mas a `HorizontalBarChart` tem `width={150}` no YAxis com nomes de clientes longos — fica apertado no mobile (~360px de tela menos padding). Reduzir width dinamicamente.
+- DonutChart legenda em `horizontal` com fontSize 10 — pode quebrar em muitas categorias.
+- OrdersTable já tem versão mobile (`md:hidden`) — OK, mas "Filtrar por status" tem `w-[180px]` fixo, quebra layout em telas estreitas. Tornar `w-full sm:w-[180px]`.
 
-```text
-┌─────────────────────────────────────┐
-│ ▣ Conversas              ⌘K  «     │  ← header com toggle
-├─────────────────────────────────────┤
-│ [+ Nova conversa]                   │  ← botão sólido laranja, full-width
-├─────────────────────────────────────┤
-│ 🔍 Buscar conversas…    ⌘F          │  ← input com filtro client-side
-├─────────────────────────────────────┤
-│ FIXADAS                             │  ← grupo opcional (se houver pins)
-│ ▸ ★ Análise Q1 2026          14:22  │
-│                                      │
-│ HOJE                                │
-│ ▸ ● Faturamento de janeiro    09:15 │  ← ativo: bg-primary/12, ●laranja
-│ ▸   Top clientes último mês   08:40 │
-│                                      │
-│ ONTEM                                │
-│ ▸   Despesas por categoria   18:02  │
-│                                      │
-│ ESTA SEMANA · 4                     │  ← grupo colapsável
-│ ▸   …                                │
-└─────────────────────────────────────┘
-│ user@nbl.com           ⚙             │  ← footer (opcional, fora do escopo)
-```
+### Modais (`ClienteDetailModal`, `PedidoDetailModal`, `CreateUserModal`)
+- Não verifiquei conteúdo, mas dialogs shadcn por padrão são `max-w-lg`. Em mobile precisam ser `max-w-[calc(100vw-2rem)]` para não cortar.
 
-## Estrutura do novo painel (rail, 52px)
+### Auth
+- `Auth.tsx` tem 10 linhas (delega para componente). Verificar se o canvas decorativo não quebra layout em mobile (provavelmente OK pois usa `auth-grid-bg`).
 
-```text
-┌────┐
-│ ▣  │  toggle expand
-│ +  │  nova conversa (laranja)
-│ 🔍 │  abre busca em popover
-├────┤
-│ ●  │  conversa ativa (dot laranja + tooltip com título)
-│ ○  │  conversas recentes (até 8 últimas, dot cinza)
-│ ○  │
-│ …  │  "ver todas" → expande
-└────┘
-```
+## Princípios da adaptação
 
-Hover em qualquer dot mostra **tooltip** com título completo + horário.
-
-## Funcionalidades novas
-
-### F1. Busca client-side (instant filter)
-Input no topo da lista. Filtra `sessions` por `title.toLowerCase().includes(query)`. Highlight do match no texto. Atalho `⌘F` / `Ctrl+F` quando sidebar está focada (sem capturar global). Esc limpa.
-
-### F2. Atalhos de teclado globais (no /chat)
-- `⌘K` (Cmd/Ctrl+K): foca o campo de busca da sidebar
-- `⌘⇧O` (Cmd/Ctrl+Shift+O): nova conversa
-- `⌘B` (Cmd/Ctrl+B): toggle sidebar (expand ↔ rail)
-- `Alt+↑` / `Alt+↓`: navegar conversa anterior/próxima na lista visível
-- `Esc` (apenas em rename/search/confirm): cancela
-- Indicador visual dos atalhos com `<kbd>` no header
-
-### F3. Pin/Fixar conversa
-Botão estrela no hover. Salvo em `localStorage` (`nbl_pinned_sessions: string[]`) — sem migração de DB. Conversas fixadas vão para grupo "FIXADAS" no topo, com ícone ★ laranja. Clique novamente para desfixar. (Alternativa: criar coluna `is_pinned` via migração — incluo como opcional na seção técnica.)
-
-### F4. Item de conversa redesenhado
-```text
-[●] Faturamento de janeiro              14:22
-    sobre janeiro completo                ⋯
-```
-- Linha 1: indicador de status (●ativo laranja sólido / ○inativo) + título truncado (1 linha) + horário relativo direita
-- Linha 2 (opcional, só no item ativo OU hover): preview do último user message (cinza, 1 linha) — exige consultar `chat_messages` por sessão. **Para não custar request extra**, faço lazy: ao montar a sidebar disparo um único `select session_id, content` agrupado pelas top 50 sessões. Cacheado 2min.
-- Direita: menu kebab `⋯` no hover → Renomear / Fixar / Exportar / Excluir (DropdownMenu shadcn em vez de duas iconezinhos perdidos)
-
-### F5. Item ativo enfático
-- `bg-primary/12` (laranja translúcido)
-- Barra esquerda 3px sólida `bg-primary` com cap arredondado, animada (slide-in)
-- Texto `text-foreground` em vez de cinza
-- `aria-current="page"`
-
-### F6. Confirmação de exclusão em modal (não inline)
-Usar `AlertDialog` shadcn. Item da lista não muda de tamanho. Mostra título da conversa para evitar engano.
-
-### F7. Renomear inline acessível
-- Adicionar opção **explícita** "Renomear" no menu kebab (descoberta).
-- Manter duplo-clique como atalho.
-- Input herda exatamente o mesmo tamanho/padding do item (nada de pular layout).
-
-### F8. Grupos colapsáveis
-"Hoje" e "Ontem" sempre abertos. "Esta semana" e "Mais antigas" colapsam (`Collapsible` shadcn) e mostram contagem (`ESTA SEMANA · 4`). Estado salvo em `localStorage`.
-
-### F9. Estado vazio convidativo
-Em vez de "Nenhuma conversa ainda":
-```text
-   💬
-   Comece sua primeira conversa
-   [+ Nova conversa]   ou pressione ⌘⇧O
-```
-
-### F10. Toggle integrado
-Remover a coluna externa `w-8`. O toggle vira:
-- No modo expanded: ícone `«` no canto superior direito do header da sidebar (já existe, mas removo a coluna externa).
-- No modo rail: o próprio header do rail tem o ícone `»` para expandir.
-
-## Mudanças no Chat.tsx (header)
-
-- Remover botão "Nova conversa" do header (já está proeminente na sidebar) **OU** transformar em ícone discreto que reaproveita atalho.
-- Decisão: **manter** mas como ícone simples, sem duplicar a hierarquia.
-- Adicionar breadcrumb leve no header: `Assistente NBL · {título da conversa atual}` (truncado), o que ajuda a saber onde está quando a sidebar está em rail.
+1. **Mobile-first nos paddings**: `p-3 sm:p-6 md:p-8`, `px-4 md:px-6` — reduzir padding em <640px sem perder respiro em desktop.
+2. **Grids adaptativos**: nunca forçar `grid-cols-3/4` sem breakpoint; sempre começar `grid-cols-1` ou `grid-cols-2` e expandir em `sm:`/`md:`.
+3. **Header consistente em todas as rotas**: criar `MobileTopBar` que aparece **só em <md** com hambúrguer + título da rota + ações. No desktop, mantém os headers atuais por página.
+4. **DateFilterBar mobile-friendly**: virar **popover compacto** no mobile (botão "Período" abre painel com presets em coluna).
+5. **Touch targets ≥ 40px**: revisar botões `h-7`, `p-1` em ações principais; manter ações secundárias pequenas.
+6. **Tabelas e charts não rolam horizontalmente** no mobile (OrdersTable já usa cards — bom modelo); aplicar para qualquer outra tabela.
+7. **Tipografia escalável**: `text-2xl md:text-3xl` para headings, `text-sm` mantido para body.
+8. **Limpeza**: remover `AppHeader.tsx` e `DashboardLayout.tsx` mortos para reduzir confusão.
 
 ## Arquivos a modificar/criar
 
-1. **`src/components/chat/SessionsSidebar.tsx`** — reescrita completa.
-2. **`src/components/chat/SessionItem.tsx`** *(novo)* — item de conversa isolado (item ativo, hover, kebab menu, rename inline).
-3. **`src/components/chat/SessionsSearch.tsx`** *(novo)* — input de busca com atalho.
-4. **`src/components/chat/DeleteSessionDialog.tsx`** *(novo)* — AlertDialog de confirmação.
-5. **`src/hooks/useChatSessions.ts`** — adicionar:
-   - `togglePinSession(id)` (localStorage)
-   - retornar `pinnedIds: Set<string>` e re-agrupar com "Fixadas" no topo
-   - `lastPreviews: Record<sessionId, string>` (lazy fetch único agrupado)
-6. **`src/hooks/useChatShortcuts.ts`** *(novo)* — registra os atalhos `⌘K`, `⌘B`, `⌘⇧O`, `Alt+↑/↓`.
-7. **`src/pages/Chat.tsx`** — usar novo modo `sidebarMode: 'expanded' | 'rail'`, ligar atalhos, ajustar header (breadcrumb, remover botão duplicado), passar `mode` à sidebar.
-8. **`src/index.css`** — adicionar utilitário `.session-active-bar` (animação slide-in da barra esquerda) e estilo do `<kbd>` chip.
+### Novo: `src/components/layout/MobileTopBar.tsx`
+Header fixo `<md` que aparece em **todas as rotas protegidas** (exceto /chat que tem o seu próprio). Contém:
+- Hambúrguer (`<SidebarTrigger>` shadcn) à esquerda
+- Logo + nome compacto ao centro
+- Toggle de tema à direita
 
-## Aspecto técnico
+Renderizado dentro de `AppLayout` antes do `<main>`, condicional `md:hidden`.
 
-- **Sem nova dependência**: tudo com componentes shadcn já presentes (`AlertDialog`, `DropdownMenu`, `Collapsible`, `Tooltip`, `Input`).
-- **Sem migração de DB obrigatória** (pin via localStorage). Se o usuário quiser persistência cross-device futuro, podemos adicionar `is_pinned boolean default false` em `chat_sessions` numa segunda etapa.
-- **Performance**: `useMemo` para o `groupedSessions` filtrado; busca debounced 80ms; lista virtualizada **não necessária** até ~200 conversas (manter simples).
-- **Acessibilidade**: `aria-current="page"` no ativo, `role="navigation"`, focus ring visível no item, `aria-keyshortcuts` no botão de busca, ESC fecha popover/rename, foco move-se para item ativo após troca.
-- **Consistência visual**: cores HSL via tokens (`--primary`, `--muted`, `--border`, `--card`), nada hardcoded — respeita dark/light.
-- **Mobile**: rail não aplica (<768px) — mantém overlay full-screen com swipe-close (`onTouchStart/End` simples) + backdrop.
+### `src/components/layout/AppLayout.tsx`
+- Adicionar `<MobileTopBar />` antes de `<main>` (oculto em md+).
+- `<main>` ganha `pt-12 md:pt-0` para compensar o topbar fixo no mobile.
 
-## O que NÃO vou fazer agora (escopo definido)
+### `src/components/layout/DateFilterBar.tsx` — versão mobile compacta
+- Em telas pequenas: esconder os chips de preset, mostrar apenas um botão `[Período: Mês ▾]` que abre um Popover com:
+  - Lista vertical de presets (7d / 30d / Mês / Ano / Tudo)
+  - Seletor de datas customizadas (mantém o que já existe)
+- Detectar via `useIsMobile()` ou via `sm:` classes (sem JS) — preferência por CSS para evitar hidratação.
+- Estratégia: `<div className="hidden sm:flex">` para chips + `<div className="sm:hidden">` para botão único.
 
-- Persistência de pin no DB (fica em localStorage, suficiente).
-- Exportar conversa (pode entrar numa segunda iteração).
-- Drag-and-drop para reordenar pins.
-- Compartilhamento de conversa.
+### `src/pages/Home.tsx`
+- KPIs: `grid grid-cols-1 sm:grid-cols-3 gap-3` (em vez de `grid-cols-3` fixo); cada card vira layout horizontal no mobile (label + valor lado a lado) para densidade.
+- CTAs Hero: no mobile, botões viram `w-full sm:w-auto`.
+- Padding lateral `px-3 sm:px-4 md:px-8`.
+- Atividade recente: linha quebra em duas no mobile — nome no topo, embaixo `data · valor · badge`.
+
+### `src/pages/Pedidos.tsx` e `src/pages/Financeiro.tsx`
+- Header: `px-3 sm:px-6 md:px-8`, título e DateFilter empilham em <sm: `flex-col sm:flex-row gap-2 sm:items-center`.
+- Conteúdo: `p-3 sm:p-6 md:p-8 space-y-4 md:space-y-6`.
+- KPIs: `grid grid-cols-2 md:grid-cols-3` (Financeiro) / `grid grid-cols-2 md:grid-cols-4` (Pedidos).
+- Charts grid: `grid gap-3 md:gap-4 md:grid-cols-2`.
+
+### `src/components/dashboard/OrdersTable.tsx`
+- `Select` filtro: `w-full sm:w-[180px]`.
+- Header do Card: empilhar verticalmente no mobile.
+
+### `src/components/dashboard/HorizontalBarChart.tsx`
+- YAxis `width={150}` → usar `width={typeof window !== 'undefined' && window.innerWidth < 640 ? 90 : 150}` (ou via `useIsMobile`).
+- TickFormatter trunca em mais caracteres no mobile (15 chars).
+
+### `src/components/dashboard/DonutChart.tsx`
+- Reduzir `outerRadius` em mobile (60 em vez de 80) — usar via `useIsMobile`.
+
+### `src/pages/Chat.tsx` (mobile fine-tuning)
+- Esconder `<StatusBadge>` em <380px (`hidden xs:inline-flex`) — ou simplificar para um dot.
+- Garantir que o trigger de sidebar está sempre visível no mobile (já tem, mas conferir).
+
+### `src/components/chat/ChatEmptyState.tsx`
+- `QUICK_MODELS` grid `grid-cols-1 sm:grid-cols-3 gap-2.5` — já tem; manter, mas reduzir padding em mobile.
+- Suggestions chips em `flex-wrap gap-1.5` — OK; reduzir tamanho da fonte para `text-[11px]` no mobile.
+
+### Limpeza
+- Deletar `src/components/layout/AppHeader.tsx` (morto).
+- Deletar `src/components/layout/DashboardLayout.tsx` (morto).
+
+### Modais
+- Localizar `ClienteDetailModal`, `PedidoDetailModal`, `CreateUserModal` e garantir `max-w-[calc(100vw-1rem)] sm:max-w-lg` no `DialogContent`. (Verifico durante implementação.)
+
+## Aspecto técnico (resumo)
+
+- **Sem novas dependências**: tudo Tailwind breakpoints + shadcn.
+- **Hook util**: usar `useIsMobile` (já existe em `src/hooks/use-mobile.tsx`) para JS-driven cases (charts).
+- **Breakpoints Tailwind**: `sm` 640, `md` 768, `lg` 1024 — manter os defaults.
+- **Sem mudança de tokens HSL** — só layout/spacing.
+- **Sem mudança em RPCs/views/dados**.
 
 ## Resultado esperado
 
-A navegação passa a ter: **busca instantânea**, **atalhos de teclado**, **pin de favoritas**, **item ativo claramente visível**, **rail mode preservando contexto**, **menu kebab descoberto** e **breadcrumb no header**. A sidebar deixa de ser uma lista crua e vira um painel de navegação digno de produto B2B premium.
+- Em **mobile <640px**: navegação acessível via hambúrguer no topo de toda rota; padding compacto; KPIs e charts legíveis em 1 coluna; DateFilter colapsado em popover; tabelas viram cards; modais não cortam.
+- Em **tablet 640–1024px**: grids 2 colunas, sidebar collapsed em ícone (já é assim), padding intermediário.
+- Em **desktop ≥1024px**: nenhuma mudança visual em relação ao atual.
+
+## Fora do escopo desta etapa
+
+- PWA / Capacitor (caso queira virar app instalável depois, abordamos em uma 2ª etapa).
+- Gestos de swipe (swipe-to-delete em conversas).
+- Reflow profundo de modais — só ajuste de largura.

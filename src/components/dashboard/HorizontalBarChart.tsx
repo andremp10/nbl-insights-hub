@@ -2,6 +2,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface HorizontalBarChartProps {
   title: string;
@@ -35,8 +36,11 @@ export function HorizontalBarChart({
   color = 'hsl(217, 91%, 60%)',
   onBarClick,
 }: HorizontalBarChartProps) {
+  const isMobile = useIsMobile();
   const displayData = data.slice(0, maxItems);
   const total = data.reduce((sum, item) => sum + item.value, 0);
+  const yAxisWidth = isMobile ? 90 : 150;
+  const truncLen = isMobile ? 14 : 25;
 
   const handleBarClick = (data: any) => {
     if (onBarClick && data?.name) {
@@ -82,12 +86,12 @@ export function HorizontalBarChart({
                 <YAxis
                   type="category"
                   dataKey="name"
-                  width={150}
+                  width={yAxisWidth}
                   tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                   axisLine={false}
                   tickLine={false}
                   tickFormatter={(value) =>
-                    value.length > 25 ? `${value.substring(0, 25)}...` : value
+                    value.length > truncLen ? `${value.substring(0, truncLen)}...` : value
                   }
                 />
                 <Tooltip

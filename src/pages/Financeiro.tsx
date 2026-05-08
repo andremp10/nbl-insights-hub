@@ -18,17 +18,17 @@ export default function Financeiro() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="flex items-center justify-between px-6 md:px-8 py-4 border-b border-border">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 sm:px-6 md:px-8 py-3 sm:py-4 border-b border-border">
         <h1 className="text-lg font-semibold text-foreground tracking-tight">Financeiro</h1>
         <DateFilterBar />
       </div>
-      <div className="p-6 md:p-8 space-y-6">
-        <div className="grid gap-3 md:grid-cols-3">
+      <div className="p-3 sm:p-6 md:p-8 space-y-4 md:space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 md:gap-3 md:grid-cols-3">
           <KPICard title="Receita Total" value={formatCurrency(kpis.receita)} subtitle="Entradas pagas no período" icon={<TrendingUp className="h-4 w-4" />} variant="success" isLoading={kpisLoading} />
           <KPICard title="Despesas Totais" value={formatCurrency(kpis.despesas)} subtitle="Saídas pagas no período" icon={<TrendingDown className="h-4 w-4" />} variant="destructive" isLoading={kpisLoading} />
           <KPICard title="Resultado Líquido" value={formatCurrency(kpis.resultado)} subtitle="Receita - Despesas" icon={<DollarSign className="h-4 w-4" />} variant={kpis.resultado >= 0 ? 'success' : 'destructive'} isLoading={kpisLoading} />
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:gap-4 md:grid-cols-2">
           <DonutChart title="Composição de Custos" data={donutData} isLoading={categoriasLoading} />
           <HorizontalBarChart title="Top Categorias de Despesas" data={barData} isLoading={categoriasLoading} color="hsl(0, 84%, 60%)" />
         </div>

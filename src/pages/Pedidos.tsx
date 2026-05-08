@@ -39,18 +39,18 @@ export default function Pedidos() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="flex items-center justify-between px-6 md:px-8 py-4 border-b border-border">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 sm:px-6 md:px-8 py-3 sm:py-4 border-b border-border">
         <h1 className="text-lg font-semibold text-foreground tracking-tight">Pedidos</h1>
         <DateFilterBar />
       </div>
-      <div className="p-6 md:p-8 space-y-6">
-        <div className="grid gap-3 md:grid-cols-4">
+      <div className="p-3 sm:p-6 md:p-8 space-y-4 md:space-y-6">
+        <div className="grid grid-cols-2 gap-2.5 md:gap-3 md:grid-cols-4">
           <KPICard title="Total de Pedidos" value={kpis.totalPedidos.toString()} subtitle="No período selecionado" icon={<Package className="h-4 w-4" />} variant="default" isLoading={kpisLoading} />
           <KPICard title="Faturamento" value={formatCurrency(kpis.faturamento)} subtitle="Valor total dos pedidos" icon={<DollarSign className="h-4 w-4" />} variant="success" isLoading={kpisLoading} />
           <KPICard title="Em Produção" value={kpis.emProducao.toString()} subtitle="Pedidos ativos" icon={<Factory className="h-4 w-4" />} variant="info" isLoading={kpisLoading} />
           <KPICard title="Atrasados" value={kpis.atrasados.toString()} subtitle="Necessitam atenção" icon={<AlertTriangle className="h-4 w-4" />} variant={kpis.atrasados > 0 ? 'warning' : 'default'} isLoading={kpisLoading} />
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:gap-4 md:grid-cols-2">
           <DonutChart title="Status dos Pedidos" data={statusChartData} isLoading={statusLoading} />
           <HorizontalBarChart
             title="Top 10 Clientes"

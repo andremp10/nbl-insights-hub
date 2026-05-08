@@ -61,26 +61,26 @@ export default function Home() {
 
   return (
     <div className="flex-1 overflow-y-auto auth-grid-bg">
-      <div className="max-w-4xl mx-auto px-4 md:px-8">
+      <div className="max-w-4xl mx-auto px-3 sm:px-4 md:px-8">
 
         {/* ── Hero Institucional ── */}
-        <section className="pt-10 pb-6 md:pt-16 md:pb-8 animate-page-in">
+        <section className="pt-6 pb-5 md:pt-16 md:pb-8 animate-page-in">
           <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight leading-tight">
             Bem-vindo à plataforma de inteligência da NBL
           </h1>
           <p className="text-sm text-muted-foreground mt-2 max-w-lg leading-relaxed">
             Consulte dados operacionais, acompanhe pedidos e visualize o financeiro em um só lugar.
           </p>
-          <div className="flex flex-wrap items-center gap-3 mt-5">
-            <Button onClick={() => navigate('/chat')} size="default" className="gap-2">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-3 mt-5">
+            <Button onClick={() => navigate('/chat')} size="default" className="gap-2 w-full sm:w-auto">
               <Bot className="w-4 h-4" />
               Abrir Assistente
             </Button>
-            <Button onClick={() => navigate('/pedidos')} variant="outline" size="default" className="gap-2">
+            <Button onClick={() => navigate('/pedidos')} variant="outline" size="default" className="gap-2 w-full sm:w-auto">
               <PackageSearch className="w-4 h-4" />
               Ver Pedidos
             </Button>
-            <Button onClick={() => navigate('/financeiro')} variant="outline" size="default" className="gap-2">
+            <Button onClick={() => navigate('/financeiro')} variant="outline" size="default" className="gap-2 w-full sm:w-auto">
               <Wallet className="w-4 h-4" />
               Ver Financeiro
             </Button>
@@ -123,19 +123,19 @@ export default function Home() {
             Indicadores do mês
           </p>
           {hasKpiData ? (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
               {kpiItems.map((k) => {
                 const Icon = k.icon;
                 return (
-                  <div key={k.label} className="rounded-xl border border-border bg-card p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon className={cn('w-3.5 h-3.5', k.color)} />
+                  <div key={k.label} className="rounded-xl border border-border bg-card p-3.5 sm:p-4 flex items-center justify-between sm:block gap-3">
+                    <div className="flex items-center gap-2 sm:mb-2">
+                      <Icon className={cn('w-3.5 h-3.5 shrink-0', k.color)} />
                       <span className="text-[11px] text-muted-foreground">{k.label}</span>
                     </div>
                     {kpisLoading ? (
                       <Skeleton className="h-6 w-16" />
                     ) : (
-                      <span className={cn('text-lg font-semibold tabular-nums', k.color)}>
+                      <span className={cn('text-base sm:text-lg font-semibold tabular-nums whitespace-nowrap', k.color)}>
                         {k.value !== null ? k.format(k.value) : '—'}
                       </span>
                     )}
@@ -143,6 +143,7 @@ export default function Home() {
                 );
               })}
             </div>
+
           ) : (
             <div className="rounded-xl border border-border bg-card p-6 text-center">
               <p className="text-sm text-muted-foreground">
@@ -181,7 +182,7 @@ export default function Home() {
                   {recentOrders.map((order) => {
                     const name = order.cliente_nome || 'Cliente';
                     return (
-                      <div key={order.pedido_id} className="flex items-center gap-3 py-2.5">
+                      <div key={order.pedido_id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5">
                         <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center shrink-0">
                           <span className="text-[9px] font-semibold text-muted-foreground">{getInitials(name)}</span>
                         </div>
@@ -191,7 +192,7 @@ export default function Home() {
                             {format(new Date(order.data_criacao), 'dd/MM/yy', { locale: ptBR })}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2.5 shrink-0">
+                        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 ml-auto">
                           <span className="text-sm font-medium text-foreground tabular-nums">
                             {formatCurrency(order.valor_total)}
                           </span>
