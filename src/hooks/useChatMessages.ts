@@ -297,7 +297,7 @@ export function useChatMessages(sessionId: string | null) {
     stageTimers.push(setTimeout(() => {
       setMessages((prev) => prev.map((m) =>
         m.role === 'assistant' && (m.id === optAsstId || m.client_request_id === clientRequestId) && m.status === 'processing' && (m.steps?.length ?? 0) < 2
-          ? { ...m, steps: [...(m.steps || []), 'Aguardando agente…'] }
+          ? { ...m, steps: [...(m.steps || []), 'Conectando ao agente'] }
           : m
       ));
     }, 1500));
