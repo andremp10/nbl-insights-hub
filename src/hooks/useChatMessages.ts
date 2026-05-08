@@ -289,8 +289,18 @@ export function useChatMessages(sessionId: string | null) {
     setMessages((prev) => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now, client_request_id: clientRequestId },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'processing', created_at: now, processing_started_at: now },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'processing', created_at: now, processing_started_at: now, steps: ['Enfileirando consulta…'], startedAt: Date.now() },
     ]);
+
+    // Staged fake steps for async (no SSE) so user has visual progress
+    const stageTimers: ReturnType<typeof setTimeout>[] = [];
+    stageTimers.push(setTimeout(() => {
+      setMessages((prev) => prev.map((m) =>
+        m.role === 'assistant' && (m.id === optAsstId || m.client_request_id === clientRequestId) && m.status === 'processing' && (m.steps?.length ?? 0) < 2
+          ? { ...m, steps: [...(m.steps || []), 'Aguardando agente…'] }
+          : m
+      ));
+    }, 1500));
 
     try {
       const { data: { session: authSession } } = await supabase.auth.getSession();
