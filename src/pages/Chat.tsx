@@ -1,17 +1,26 @@
-import { useRef, useEffect, useState, useCallback, memo } from 'react';
-import { ArrowUp, Loader2, Bot, Plus, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
+import { ArrowUp, Loader2, Bot, PanelLeft } from 'lucide-react';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
-import { SessionsSidebar } from '@/components/chat/SessionsSidebar';
+import { SessionsSidebar, type SessionsSidebarHandle, type SidebarMode } from '@/components/chat/SessionsSidebar';
 import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
+import { useChatShortcuts } from '@/hooks/useChatShortcuts';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
+const SIDEBAR_MODE_KEY = 'nbl_sidebar_mode';
+
 export default function Chat() {
-  const { sessions, groupedSessions, createSession, deleteSession, updateSessionTitle, loading: sessionsLoading } = useChatSessions();
+  const { sessions, groupedSessions, pinnedIds, togglePinSession, createSession, deleteSession, updateSessionTitle, loading: sessionsLoading } = useChatSessions();
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => {
+    if (typeof window === 'undefined') return 'expanded';
+    if (window.innerWidth < 768) return 'hidden';
+    const saved = localStorage.getItem(SIDEBAR_MODE_KEY);
+    return (saved === 'rail' || saved === 'expanded') ? saved as SidebarMode : 'expanded';
+  });
+  const sidebarRef = useRef<SessionsSidebarHandle>(null);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingHandled = useRef(false);
