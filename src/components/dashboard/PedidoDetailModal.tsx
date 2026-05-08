@@ -44,7 +44,7 @@ export function PedidoDetailModal({ open, onOpenChange, pedido }: PedidoDetailMo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-w-[calc(100vw-1rem)] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold flex items-center gap-2">
             <Package className="h-4 w-4 text-primary" />

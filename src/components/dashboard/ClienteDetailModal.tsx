@@ -46,7 +46,7 @@ export function ClienteDetailModal({ open, onOpenChange, cliente, pedidosDoClien
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-[calc(100vw-1rem)] sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold flex items-center gap-2">
               <User className="h-4 w-4 text-primary" />
