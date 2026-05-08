@@ -328,7 +328,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
   const canSend = !sending && input.trim().length > 0;
 
   return (
-    <div className="shrink-0 border-t border-border/50 bg-background px-3 py-3 sm:px-4 md:px-6">
+    <div className="shrink-0 border-t border-border/50 bg-background px-2 py-2 sm:px-4 sm:py-3 md:px-6">
       <div className="w-full max-w-3xl mx-auto">
         <div className={cn(
           'relative rounded-2xl border bg-card/60 transition-all duration-200',
@@ -345,19 +345,20 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             rows={1}
             className={cn(
               'w-full resize-none bg-transparent border-0',
-              'px-4 pt-3 pb-12 text-sm text-foreground',
+              'px-3 sm:px-4 pt-2.5 sm:pt-3 pb-10 sm:pb-12 text-sm text-foreground',
               'placeholder:text-muted-foreground/40',
               'focus:outline-none focus:ring-0',
               'disabled:cursor-not-allowed disabled:opacity-50',
             )}
-            style={{ minHeight: '52px', maxHeight: '200px' }}
+            style={{ minHeight: '44px', maxHeight: '200px' }}
             aria-label="Campo de mensagem"
           />
           {/* Bottom bar inside the composer */}
-          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2">
-            <span className="text-[10px] text-muted-foreground/30 select-none">
+          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 sm:px-3 py-1.5 sm:py-2">
+            <span className="hidden sm:inline text-[10px] text-muted-foreground/30 select-none">
               Shift+Enter para nova linha
             </span>
+            <span className="sm:hidden" />
             <button
               onClick={handleSubmit}
               disabled={!canSend}
@@ -373,7 +374,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             </button>
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground/30 text-center mt-2 select-none">
+        <p className="text-[9px] sm:text-[10px] text-muted-foreground/30 text-center mt-1 sm:mt-2 select-none">
           O assistente pode cometer erros. Verifique dados importantes.
         </p>
       </div>
