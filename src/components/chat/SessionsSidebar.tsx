@@ -174,12 +174,12 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
             )}
           </div>
           <button
-            onClick={() => onModeChange(window.innerWidth < 768 ? 'hidden' : 'rail')}
+            onClick={() => onModeChange(isMobile ? 'hidden' : 'rail')}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            aria-label="Recolher sidebar"
-            title="Recolher (Ctrl+B)"
+            aria-label={isMobile ? 'Fechar conversas' : 'Recolher sidebar'}
+            title={isMobile ? 'Fechar' : 'Recolher (Ctrl+B)'}
           >
-            <PanelLeftClose className="w-4 h-4" />
+            {isMobile ? <X className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
 
@@ -195,7 +195,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
           >
             <Plus className="w-4 h-4" />
             Nova conversa
-            <kbd className="ml-auto text-[9px] font-mono opacity-70 bg-primary-foreground/15 px-1.5 py-0.5 rounded">
+            <kbd className="hidden md:inline-block ml-auto text-[9px] font-mono opacity-70 bg-primary-foreground/15 px-1.5 py-0.5 rounded">
               ⌘⇧O
             </kbd>
           </button>
