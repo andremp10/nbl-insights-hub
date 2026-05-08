@@ -37,8 +37,8 @@ interface ChatEmptyStateProps {
 
 export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-4 py-12">
-      <div className="text-center max-w-2xl w-full space-y-8">
+    <div className="flex flex-col items-center justify-center h-full px-3 sm:px-4 py-6 sm:py-12">
+      <div className="text-center max-w-2xl w-full space-y-6 sm:space-y-8">
         {/* Header */}
         <div className="space-y-3">
           <div className="relative inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-primary/10 text-primary">
@@ -61,7 +61,7 @@ export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
                 key={m.title}
                 onClick={() => onSuggestionClick(m.query)}
                 className={cn(
-                  'flex flex-col items-start gap-2.5 p-4 rounded-xl border border-border/50 text-left',
+                  'flex flex-col items-start gap-2 sm:gap-2.5 p-3 sm:p-4 rounded-xl border border-border/50 text-left',
                   'hover:border-primary/40 hover:bg-primary/5',
                   'transition-all duration-200 group'
                 )}
@@ -87,7 +87,7 @@ export function ChatEmptyState({ onSuggestionClick }: ChatEmptyStateProps) {
                 key={s.title}
                 onClick={() => onSuggestionClick(s.prompt)}
                 className={cn(
-                  'text-xs px-3 py-1.5 rounded-full border border-border/40',
+                  'text-xs px-3 py-2 sm:py-1.5 rounded-full border border-border/40',
                   'text-muted-foreground/70 hover:text-foreground',
                   'hover:border-primary/30 hover:bg-primary/5',
                   'transition-all duration-150'
