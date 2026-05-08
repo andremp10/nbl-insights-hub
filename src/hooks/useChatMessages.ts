@@ -497,11 +497,15 @@ export function useChatMessages(sessionId: string | null) {
             }
             if (parsed.type === 'step' && parsed.step) {
               const step = parsed.step;
-              setMessages(prev => prev.map(m =>
-                m.id === optAsstId
-                  ? { ...m, steps: [...(m.steps || []), step] }
-                  : m
-              ));
+              setMessages(prev => prev.map(m => {
+                if (m.id !== optAsstId) return m;
+                const cur = m.steps || [];
+                // Replace the connecting placeholder on first real step
+                if (cur.length === 1 && cur[0] === 'Conectando ao agente…') {
+                  return { ...m, steps: [step] };
+                }
+                return { ...m, steps: [...cur, step] };
+              }));
               continue;
             }
             if (parsed.type === 'token' && parsed.token) {
