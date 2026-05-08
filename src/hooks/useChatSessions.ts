@@ -11,9 +11,21 @@ export interface ChatSession {
   user_id: string;
 }
 
+const PIN_STORAGE_KEY = 'nbl_pinned_sessions';
+
+function loadPinned(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PIN_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch { return new Set(); }
+}
+
 export function useChatSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => loadPinned());
   const { user } = useAuth();
   const userId = user?.id;
   const creatingRef = useRef(false);
