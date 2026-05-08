@@ -1,125 +1,76 @@
-# Plano: Responsividade Mobile do Sistema NBL
+# Plano: Refinar navegação e Chat no mobile
 
-## Diagnóstico crítico por tela
+## Diagnóstico (viewport 390px)
 
-### Layout global (`AppLayout` + `AppSidebar`)
-- A `AppSidebar` shadcn em `collapsible="icon"` no mobile vira **off-canvas via Sheet** (já é o padrão), mas **não há nenhum trigger visível no mobile**. Hoje o usuário precisa abrir a barra de endereços lateral e não há hambúrguer no topo das telas. Problema crítico: **nenhuma das telas tem header próprio com botão de menu** — só Pedidos/Financeiro têm header com `<DateFilterBar>`, e o sidebar trigger nunca aparece.
-- `AppHeader.tsx` existe mas **não está em uso** (App usa `AppLayout` sem header). Está morto no projeto e confunde manutenção.
-- `DashboardLayout.tsx` também existe e **não está em uso** (App usa `AppLayout` em todas as rotas). Outro layout morto.
+1. **Headers empilhados no /chat**: `MobileTopBar` (h-12) + Header do Chat (h-12) = 96px de cabeçalho fixo, sobrando pouco espaço útil.
+2. **Duas sidebars + dois triggers diferentes**: o `MobileTopBar` abre a `AppSidebar` (navegação Home/Chat/Financeiro/Pedidos) e o botão `<PanelLeft>` no header do chat abre a `SessionsSidebar` (lista de conversas). No mobile o usuário não distingue qual é qual e o botão de navegação some quando o chat assume o topo (na verdade, hoje **só temos o trigger das conversas** no /chat — o trigger da navegação principal sumiu).
+3. **SessionsSidebar de 280px** em tela de 390px ocupa 71% — funciona, mas pode ir melhor com `min(85vw, 320px)` e melhor backdrop.
+4. **Header do Chat**: badge "Conectado", logo bot, "Assistente NBL", "/", título da sessão — tudo na mesma linha em 390px causa truncamento agressivo do título.
+5. **Composer mobile**: padding `py-3` + textarea `minHeight: 52px` + barra inferior `py-2` = quase 100px só no composer. Pode ser mais compacto.
+6. **Empty state do chat** (`ChatEmptyState`): cartões `QUICK_MODELS` em `grid-cols-1` no mobile ficam grandes; chips de sugestão dispostos em centro com wrap — funciona mas o padding `py-12` empurra tudo pra baixo.
 
-### Home (`/`)
-- `max-w-4xl mx-auto px-4 md:px-8` — OK
-- Hero `text-2xl md:text-3xl` — OK
-- Botões CTA em `flex flex-wrap gap-3` — funcional, mas no mobile ficam empilhados de forma irregular; precisam ocupar full-width.
-- KPIs em `grid grid-cols-3` (sempre 3 colunas, mesmo mobile) — **quebram no mobile**: rótulo "Pedidos em aberto" + valor não cabem em ~110px de largura. Precisa virar `grid-cols-1 sm:grid-cols-3` ou layout horizontal.
-- Atividade recente: cada linha tem avatar + nome + badge + valor. No mobile <360px, valor + badge somem na direita. Precisa wrap.
-- **Sem botão de menu visível** — usuário não sabe como navegar.
+## Solução
 
-### Chat (`/chat`)
-- Sidebar agora tem modo `hidden` no mobile (já feito). Precisa apenas de **trigger no header** mais visível.
-- Composer `px-3 py-3 sm:px-4 md:px-6` — OK
-- Header do chat com breadcrumb truncado — OK; precisa esconder badge "Conectado" em <380px para ganhar espaço, ou movê-la para baixo.
+### A) Header unificado no Chat mobile
+- No mobile, o header do `/chat` ganha **dois triggers**: um para abrir a `AppSidebar` (navegação principal — Home/Financeiro/Pedidos) e outro para abrir as conversas. Não duplica `MobileTopBar`.
+- `MobileTopBar` continua existindo para as outras rotas, mas **não renderiza em /chat** (já tem sua própria barra).
+- Layout do header /chat no mobile (390px):
+  ```
+  [☰ menu] [💬 conversas] | Título da sessão (truncado)        [•dot]
+  ```
+  - Esconder "Assistente NBL / " no mobile (mostra só em sm+).
+  - Status badge vira **bolinha colorida** (3px) sem texto em mobile.
 
-### Financeiro / Pedidos
-- Header `flex items-center justify-between px-6 md:px-8` com **`<DateFilterBar>` à direita** — no mobile, a `DateFilterBar` tem 5 chips + botão "Datas" que não cabem. Precisa virar **scroll horizontal** ou colapsar em popover.
-- Padding `p-6 md:p-8` — desperdiça espaço no mobile (24px de cada lado). Reduzir para `p-3 sm:p-6`.
-- KPIs `grid md:grid-cols-3/4` — no mobile vira 1 coluna (OK), mas ocupa muito altura. Melhor `grid-cols-2 md:grid-cols-3/4` no Financeiro/Pedidos.
-- Charts `grid md:grid-cols-2` — vira 1 coluna no mobile (OK), mas a `HorizontalBarChart` tem `width={150}` no YAxis com nomes de clientes longos — fica apertado no mobile (~360px de tela menos padding). Reduzir width dinamicamente.
-- DonutChart legenda em `horizontal` com fontSize 10 — pode quebrar em muitas categorias.
-- OrdersTable já tem versão mobile (`md:hidden`) — OK, mas "Filtrar por status" tem `w-[180px]` fixo, quebra layout em telas estreitas. Tornar `w-full sm:w-[180px]`.
+### B) SessionsSidebar mobile
+- Largura: `w-[min(85vw,320px)]` em vez de `280px` fixo (melhor em telas 320–414px).
+- Backdrop com `bg-black/60 backdrop-blur-sm` (mais bloqueador, fecha mais óbvio).
+- Botão "Nova conversa" sem o `kbd ⌘⇧O` no mobile (atalho irrelevante) — mais espaço pro texto.
+- Ao tocar uma conversa no mobile, **fechar a sidebar automaticamente** (`onModeChange('hidden')` após `onSelectSession`).
+- Header da sidebar: o botão "Recolher" no mobile vira "✕ fechar" (ícone X mais óbvio que o `PanelLeftClose`).
 
-### Modais (`ClienteDetailModal`, `PedidoDetailModal`, `CreateUserModal`)
-- Não verifiquei conteúdo, mas dialogs shadcn por padrão são `max-w-lg`. Em mobile precisam ser `max-w-[calc(100vw-2rem)]` para não cortar.
+### C) Composer mobile mais compacto
+- `px-3 py-2` (era `py-3`).
+- `minHeight: 44px` (era 52px) — ainda confortável pra toque.
+- Barra inferior do composer: esconder o texto "Shift+Enter para nova linha" em <sm (não há keyboard).
+- Disclaimer "O assistente pode cometer erros" → texto menor `text-[9px]`, menos margem `mt-1`.
 
-### Auth
-- `Auth.tsx` tem 10 linhas (delega para componente). Verificar se o canvas decorativo não quebra layout em mobile (provavelmente OK pois usa `auth-grid-bg`).
+### D) ChatEmptyState mobile
+- Reduzir `py-12` → `py-6 sm:py-12`.
+- Header (sparkles + título): manter.
+- `QUICK_MODELS`: já é `grid-cols-1 sm:grid-cols-3` — manter, mas reduzir padding interno dos cards (`p-3 sm:p-4`).
+- Suggestion chips: aumentar tap target (`py-1.5` → `py-2 sm:py-1.5`).
 
-## Princípios da adaptação
+### E) AppSidebar (navegação) no mobile
+- Verificar que ao abrir via `SidebarTrigger`, o sheet renderiza confortavelmente (já é `Sheet` shadcn = OK por padrão, com `w-[--sidebar-width]`).
+- Garantir que o footer (Toggle tema + Sair) está acessível ao final do sheet.
 
-1. **Mobile-first nos paddings**: `p-3 sm:p-6 md:p-8`, `px-4 md:px-6` — reduzir padding em <640px sem perder respiro em desktop.
-2. **Grids adaptativos**: nunca forçar `grid-cols-3/4` sem breakpoint; sempre começar `grid-cols-1` ou `grid-cols-2` e expandir em `sm:`/`md:`.
-3. **Header consistente em todas as rotas**: criar `MobileTopBar` que aparece **só em <md** com hambúrguer + título da rota + ações. No desktop, mantém os headers atuais por página.
-4. **DateFilterBar mobile-friendly**: virar **popover compacto** no mobile (botão "Período" abre painel com presets em coluna).
-5. **Touch targets ≥ 40px**: revisar botões `h-7`, `p-1` em ações principais; manter ações secundárias pequenas.
-6. **Tabelas e charts não rolam horizontalmente** no mobile (OrdersTable já usa cards — bom modelo); aplicar para qualquer outra tabela.
-7. **Tipografia escalável**: `text-2xl md:text-3xl` para headings, `text-sm` mantido para body.
-8. **Limpeza**: remover `AppHeader.tsx` e `DashboardLayout.tsx` mortos para reduzir confusão.
+## Arquivos a modificar
 
-## Arquivos a modificar/criar
+1. **`src/components/layout/MobileTopBar.tsx`** — não renderizar em `/chat` (return null se path começa com `/chat`).
+2. **`src/pages/Chat.tsx`** — header reorganizado:
+   - Adicionar `<SidebarTrigger>` (do AppSidebar/shadcn) à esquerda do trigger de conversas.
+   - Esconder "Assistente NBL /" em <sm.
+   - StatusBadge → bolinha simples em <sm.
+   - Composer: padding/minHeight reduzidos no mobile, esconder hints irrelevantes.
+3. **`src/components/chat/SessionsSidebar.tsx`**:
+   - Largura `w-[min(85vw,320px)] md:w-[280px]`.
+   - Backdrop reforçado.
+   - Esconder kbd no botão "Nova conversa" em <sm.
+   - Adicionar prop `onSelectAndClose` (ou wrap em handler) para fechar sidebar no mobile ao selecionar.
+   - Ícone X em mobile no botão fechar.
+4. **`src/components/chat/ChatEmptyState.tsx`** — paddings/tap targets responsivos.
 
-### Novo: `src/components/layout/MobileTopBar.tsx`
-Header fixo `<md` que aparece em **todas as rotas protegidas** (exceto /chat que tem o seu próprio). Contém:
-- Hambúrguer (`<SidebarTrigger>` shadcn) à esquerda
-- Logo + nome compacto ao centro
-- Toggle de tema à direita
-
-Renderizado dentro de `AppLayout` antes do `<main>`, condicional `md:hidden`.
-
-### `src/components/layout/AppLayout.tsx`
-- Adicionar `<MobileTopBar />` antes de `<main>` (oculto em md+).
-- `<main>` ganha `pt-12 md:pt-0` para compensar o topbar fixo no mobile.
-
-### `src/components/layout/DateFilterBar.tsx` — versão mobile compacta
-- Em telas pequenas: esconder os chips de preset, mostrar apenas um botão `[Período: Mês ▾]` que abre um Popover com:
-  - Lista vertical de presets (7d / 30d / Mês / Ano / Tudo)
-  - Seletor de datas customizadas (mantém o que já existe)
-- Detectar via `useIsMobile()` ou via `sm:` classes (sem JS) — preferência por CSS para evitar hidratação.
-- Estratégia: `<div className="hidden sm:flex">` para chips + `<div className="sm:hidden">` para botão único.
-
-### `src/pages/Home.tsx`
-- KPIs: `grid grid-cols-1 sm:grid-cols-3 gap-3` (em vez de `grid-cols-3` fixo); cada card vira layout horizontal no mobile (label + valor lado a lado) para densidade.
-- CTAs Hero: no mobile, botões viram `w-full sm:w-auto`.
-- Padding lateral `px-3 sm:px-4 md:px-8`.
-- Atividade recente: linha quebra em duas no mobile — nome no topo, embaixo `data · valor · badge`.
-
-### `src/pages/Pedidos.tsx` e `src/pages/Financeiro.tsx`
-- Header: `px-3 sm:px-6 md:px-8`, título e DateFilter empilham em <sm: `flex-col sm:flex-row gap-2 sm:items-center`.
-- Conteúdo: `p-3 sm:p-6 md:p-8 space-y-4 md:space-y-6`.
-- KPIs: `grid grid-cols-2 md:grid-cols-3` (Financeiro) / `grid grid-cols-2 md:grid-cols-4` (Pedidos).
-- Charts grid: `grid gap-3 md:gap-4 md:grid-cols-2`.
-
-### `src/components/dashboard/OrdersTable.tsx`
-- `Select` filtro: `w-full sm:w-[180px]`.
-- Header do Card: empilhar verticalmente no mobile.
-
-### `src/components/dashboard/HorizontalBarChart.tsx`
-- YAxis `width={150}` → usar `width={typeof window !== 'undefined' && window.innerWidth < 640 ? 90 : 150}` (ou via `useIsMobile`).
-- TickFormatter trunca em mais caracteres no mobile (15 chars).
-
-### `src/components/dashboard/DonutChart.tsx`
-- Reduzir `outerRadius` em mobile (60 em vez de 80) — usar via `useIsMobile`.
-
-### `src/pages/Chat.tsx` (mobile fine-tuning)
-- Esconder `<StatusBadge>` em <380px (`hidden xs:inline-flex`) — ou simplificar para um dot.
-- Garantir que o trigger de sidebar está sempre visível no mobile (já tem, mas conferir).
-
-### `src/components/chat/ChatEmptyState.tsx`
-- `QUICK_MODELS` grid `grid-cols-1 sm:grid-cols-3 gap-2.5` — já tem; manter, mas reduzir padding em mobile.
-- Suggestions chips em `flex-wrap gap-1.5` — OK; reduzir tamanho da fonte para `text-[11px]` no mobile.
-
-### Limpeza
-- Deletar `src/components/layout/AppHeader.tsx` (morto).
-- Deletar `src/components/layout/DashboardLayout.tsx` (morto).
-
-### Modais
-- Localizar `ClienteDetailModal`, `PedidoDetailModal`, `CreateUserModal` e garantir `max-w-[calc(100vw-1rem)] sm:max-w-lg` no `DialogContent`. (Verifico durante implementação.)
-
-## Aspecto técnico (resumo)
-
-- **Sem novas dependências**: tudo Tailwind breakpoints + shadcn.
-- **Hook util**: usar `useIsMobile` (já existe em `src/hooks/use-mobile.tsx`) para JS-driven cases (charts).
-- **Breakpoints Tailwind**: `sm` 640, `md` 768, `lg` 1024 — manter os defaults.
-- **Sem mudança de tokens HSL** — só layout/spacing.
-- **Sem mudança em RPCs/views/dados**.
+## Aspecto técnico
+- Sem mudanças em hooks, dados ou contratos.
+- Sem novas dependências.
+- Usa `useIsMobile()` quando precisar de JS; preferência por classes Tailwind responsivas.
+- `SidebarTrigger` shadcn (já importado em `MobileTopBar`) será reusado no header do Chat mobile.
 
 ## Resultado esperado
+- Em 390px: cabeçalho do chat com **um único nível** (h-12), navegação app + conversas acessíveis via dois ícones claros, título da sessão legível, mais espaço pra mensagens.
+- Composer mais compacto = mais conteúdo visível.
+- Sidebar de conversas adapta largura à tela e fecha sozinha ao escolher conversa.
 
-- Em **mobile <640px**: navegação acessível via hambúrguer no topo de toda rota; padding compacto; KPIs e charts legíveis em 1 coluna; DateFilter colapsado em popover; tabelas viram cards; modais não cortam.
-- Em **tablet 640–1024px**: grids 2 colunas, sidebar collapsed em ícone (já é assim), padding intermediário.
-- Em **desktop ≥1024px**: nenhuma mudança visual em relação ao atual.
-
-## Fora do escopo desta etapa
-
-- PWA / Capacitor (caso queira virar app instalável depois, abordamos em uma 2ª etapa).
-- Gestos de swipe (swipe-to-delete em conversas).
-- Reflow profundo de modais — só ajuste de largura.
+## Fora do escopo
+- Bottom navigation (tab bar) — explorar em iteração futura se necessário.
+- Gestos swipe-to-open.

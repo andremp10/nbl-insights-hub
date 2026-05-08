@@ -7,6 +7,7 @@ import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useChatShortcuts } from '@/hooks/useChatShortcuts';
 import { Badge } from '@/components/ui/badge';
+import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 
 const SIDEBAR_MODE_KEY = 'nbl_sidebar_mode';
@@ -186,31 +187,38 @@ export default function Chat() {
 
       <div className="flex flex-col flex-1 min-w-0 h-full">
         {/* ── Header ── */}
-        <div className="flex items-center justify-between gap-3 px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
+            {/* Mobile: app navigation trigger */}
+            <SidebarTrigger className="md:hidden text-muted-foreground hover:text-foreground -ml-1 shrink-0" />
+            {/* Conversations trigger (when sidebar not expanded) */}
             {sidebarMode !== 'expanded' && (
               <button
                 onClick={toggleSidebar}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                 title="Abrir conversas (Ctrl+B)"
                 aria-label="Abrir conversas"
               >
                 <PanelLeft className="w-4 h-4" />
               </button>
             )}
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <div className="hidden sm:flex w-7 h-7 rounded-lg bg-primary/10 items-center justify-center shrink-0">
               <Bot className="w-4 h-4 text-primary" />
             </div>
-            <span className="text-sm font-semibold text-foreground shrink-0">Assistente NBL</span>
+            <span className="hidden sm:inline text-sm font-semibold text-foreground shrink-0">Assistente NBL</span>
             {currentSession && (
               <>
-                <span className="text-muted-foreground/40 shrink-0">/</span>
-                <span className="text-sm text-muted-foreground truncate min-w-0">
+                <span className="hidden sm:inline text-muted-foreground/40 shrink-0">/</span>
+                <span className="text-sm text-foreground sm:text-muted-foreground truncate min-w-0">
                   {currentSession.title || 'Nova conversa'}
                 </span>
               </>
             )}
             <div className="hidden sm:inline-flex"><StatusBadge status={chatStatus} /></div>
+          </div>
+          {/* Mobile: status dot only */}
+          <div className="sm:hidden shrink-0">
+            <StatusDot status={chatStatus} />
           </div>
         </div>
 
@@ -274,6 +282,14 @@ function StatusBadge({ status }: { status: 'idle' | 'sending' | 'error' }) {
   );
 }
 
+function StatusDot({ status }: { status: 'idle' | 'sending' | 'error' }) {
+  const color =
+    status === 'sending' ? 'bg-warning animate-pulse'
+    : status === 'error' ? 'bg-destructive'
+    : 'bg-success';
+  return <span className={cn('inline-block w-2 h-2 rounded-full', color)} aria-hidden />;
+}
+
 
 const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
   const [input, setInput] = useState('');
@@ -312,7 +328,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
   const canSend = !sending && input.trim().length > 0;
 
   return (
-    <div className="shrink-0 border-t border-border/50 bg-background px-3 py-3 sm:px-4 md:px-6">
+    <div className="shrink-0 border-t border-border/50 bg-background px-2 py-2 sm:px-4 sm:py-3 md:px-6">
       <div className="w-full max-w-3xl mx-auto">
         <div className={cn(
           'relative rounded-2xl border bg-card/60 transition-all duration-200',
@@ -329,19 +345,20 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             rows={1}
             className={cn(
               'w-full resize-none bg-transparent border-0',
-              'px-4 pt-3 pb-12 text-sm text-foreground',
+              'px-3 sm:px-4 pt-2.5 sm:pt-3 pb-10 sm:pb-12 text-sm text-foreground',
               'placeholder:text-muted-foreground/40',
               'focus:outline-none focus:ring-0',
               'disabled:cursor-not-allowed disabled:opacity-50',
             )}
-            style={{ minHeight: '52px', maxHeight: '200px' }}
+            style={{ minHeight: '44px', maxHeight: '200px' }}
             aria-label="Campo de mensagem"
           />
           {/* Bottom bar inside the composer */}
-          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-2">
-            <span className="text-[10px] text-muted-foreground/30 select-none">
+          <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 sm:px-3 py-1.5 sm:py-2">
+            <span className="hidden sm:inline text-[10px] text-muted-foreground/30 select-none">
               Shift+Enter para nova linha
             </span>
+            <span className="sm:hidden" />
             <button
               onClick={handleSubmit}
               disabled={!canSend}
@@ -357,7 +374,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
             </button>
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground/30 text-center mt-2 select-none">
+        <p className="text-[9px] sm:text-[10px] text-muted-foreground/30 text-center mt-1 sm:mt-2 select-none">
           O assistente pode cometer erros. Verifique dados importantes.
         </p>
       </div>

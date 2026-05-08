@@ -1,12 +1,17 @@
 import { Printer } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
 
 /**
  * Top bar exibida apenas em <md (mobile/tablet pequeno).
- * Garante acesso ao menu lateral em todas as rotas protegidas.
+ * Não renderiza em /chat — o Chat tem o seu próprio header com
+ * triggers integrados de navegação e conversas.
  */
 export function MobileTopBar() {
+  const location = useLocation();
+  if (location.pathname.startsWith('/chat')) return null;
+
   return (
     <header className="md:hidden sticky top-0 z-40 flex items-center justify-between h-12 px-3 border-b border-border bg-background/95 backdrop-blur-sm">
       <div className="flex items-center gap-2">

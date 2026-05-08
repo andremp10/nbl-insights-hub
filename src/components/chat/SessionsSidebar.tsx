@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import {
   PanelLeft, PanelLeftClose, Plus, Search, X, MessageSquarePlus, ChevronDown, MessageSquare,
 } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
@@ -47,10 +48,16 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
   groupedSessions, pinnedIds, currentSessionId, onSelectSession, onCreateSession,
   onDeleteSession, onRenameSession, onTogglePinSession, mode, onModeChange, loading,
 }, ref) {
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
   const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const handleSelect = (id: string) => {
+    onSelectSession(id);
+    if (isMobile) onModeChange('hidden');
+  };
 
   useImperativeHandle(ref, () => ({
     focusSearch: () => {
@@ -108,7 +115,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
                 <Tooltip key={s.id}>
                   <TooltipTrigger asChild>
                     <button
-                      onClick={() => onSelectSession(s.id)}
+                      onClick={() => handleSelect(s.id)}
                       className={cn(
                         'w-9 h-9 rounded-lg flex items-center justify-center transition-colors relative',
                         isActive ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
@@ -138,7 +145,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
       {/* Mobile backdrop */}
       <div
         className={cn(
-          'fixed inset-0 z-30 bg-black/40 md:hidden transition-opacity duration-200',
+          'fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden transition-opacity duration-200',
           !isHidden ? 'opacity-100' : 'opacity-0 pointer-events-none'
         )}
         onClick={() => onModeChange('hidden')}
@@ -147,7 +154,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
 
       <aside
         className={cn(
-          'fixed md:relative z-40 md:z-auto h-full w-[280px] shrink-0',
+          'fixed md:relative z-40 md:z-auto h-full w-[min(85vw,320px)] md:w-[280px] shrink-0',
           'border-r border-border bg-sidebar-background flex flex-col',
           'transition-transform duration-200 ease-out will-change-transform',
           !isHidden ? 'translate-x-0' : '-translate-x-full md:hidden',
@@ -167,12 +174,12 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
             )}
           </div>
           <button
-            onClick={() => onModeChange(window.innerWidth < 768 ? 'hidden' : 'rail')}
+            onClick={() => onModeChange(isMobile ? 'hidden' : 'rail')}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            aria-label="Recolher sidebar"
-            title="Recolher (Ctrl+B)"
+            aria-label={isMobile ? 'Fechar conversas' : 'Recolher sidebar'}
+            title={isMobile ? 'Fechar' : 'Recolher (Ctrl+B)'}
           >
-            <PanelLeftClose className="w-4 h-4" />
+            {isMobile ? <X className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
 
@@ -188,7 +195,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
           >
             <Plus className="w-4 h-4" />
             Nova conversa
-            <kbd className="ml-auto text-[9px] font-mono opacity-70 bg-primary-foreground/15 px-1.5 py-0.5 rounded">
+            <kbd className="hidden md:inline-block ml-auto text-[9px] font-mono opacity-70 bg-primary-foreground/15 px-1.5 py-0.5 rounded">
               ⌘⇧O
             </kbd>
           </button>
@@ -259,7 +266,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
                       isActive={session.id === currentSessionId}
                       isPinned={pinnedIds.has(session.id)}
                       query={query}
-                      onSelect={() => onSelectSession(session.id)}
+                      onSelect={() => handleSelect(session.id)}
                       onRename={(t) => onRenameSession(session.id, t)}
                       onDelete={() => setPendingDelete(session)}
                       onTogglePin={() => onTogglePinSession(session.id)}
