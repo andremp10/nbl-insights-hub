@@ -3,26 +3,15 @@ import { LayoutDashboard, Bot, Wallet, PackageSearch, LogOut, Printer, UserPlus 
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemeToggle } from '@/components/theme/ThemeToggle';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { useSidebar } from '@/components/ui/sidebar';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
 const CreateUserModal = lazy(() =>
   import('@/components/admin/CreateUserModal').then(m => ({ default: m.CreateUserModal }))
 );
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarFooter,
-  SidebarTrigger,
-  SidebarRail,
-  useSidebar,
-} from '@/components/ui/sidebar';
-import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/utils';
 
 const menuItems = [
   { title: 'Home', url: '/', icon: LayoutDashboard },
@@ -31,128 +20,57 @@ const menuItems = [
   { title: 'Pedidos', url: '/pedidos', icon: PackageSearch },
 ];
 
+const RAIL_W = 56;   // collapsed rail width in px
+const FULL_W = 220;  // hover-expanded width in px
+
 export function AppSidebar() {
-  const { signOut, isMaster } = useAuth();
-  const { state } = useSidebar();
-  const location = useLocation();
-  const collapsed = state === 'collapsed';
+  const isMobile = useIsMobile();
+  const { openMobile, setOpenMobile } = useSidebar();
   const [showCreateUser, setShowCreateUser] = useState(false);
 
-  const isActive = (url: string) => {
-    if (url === '/') return location.pathname === '/';
-    return location.pathname.startsWith(url);
-  };
+  if (isMobile) {
+    return (
+      <>
+        <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+          <SheetContent
+            side="left"
+            className="p-0 w-[260px] bg-sidebar border-r border-sidebar-border [&>button]:hidden"
+          >
+            <SidebarInner
+              expanded
+              onItemClick={() => setOpenMobile(false)}
+              onCreateUser={() => { setOpenMobile(false); setShowCreateUser(true); }}
+            />
+          </SheetContent>
+        </Sheet>
+        {showCreateUser && (
+          <Suspense fallback={null}>
+            <CreateUserModal open={showCreateUser} onOpenChange={setShowCreateUser} />
+          </Suspense>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
-      <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar">
-        <SidebarHeader className={cn(
-          "border-b border-sidebar-border h-14 transition-all duration-200",
-          collapsed ? "px-0 justify-center" : "px-3"
-        )}>
-          {collapsed ? (
-            <div className="flex items-center justify-center h-full">
-              <SidebarTrigger className="h-8 w-8 text-muted-foreground hover:text-foreground" />
-            </div>
-          ) : (
-            <div className="flex items-center justify-between h-full">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
-                  <Printer className="h-4 w-4" />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[13px] font-semibold text-sidebar-foreground tracking-tight truncate">
-                    NBL Gráfica
-                  </span>
-                  <span className="text-[10px] text-muted-foreground -mt-0.5">Insights Hub</span>
-                </div>
-              </div>
-              <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
-            </div>
-          )}
-        </SidebarHeader>
+      {/* Spacer that reserves the rail width in the flex layout */}
+      <div style={{ width: RAIL_W }} className="hidden md:block shrink-0 h-full" aria-hidden />
 
-        <SidebarContent>
-          <SidebarGroup className={cn(collapsed ? "px-1 py-2" : "px-2 py-3")}>
-            {!collapsed && (
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-medium px-3 mb-1.5">Menu</span>
-            )}
-            <SidebarGroupContent>
-              <SidebarMenu className="space-y-0.5">
-                {menuItems.map((item) => {
-                  const active = isActive(item.url);
-                  return (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton asChild isActive={active} tooltip={item.title}>
-                        <NavLink
-                          to={item.url}
-                          end={item.url === '/'}
-                          className={cn(
-                            'relative flex items-center rounded-md transition-all duration-150',
-                            collapsed ? 'justify-center p-2' : 'gap-2.5 px-3 py-2',
-                            active
-                              ? 'bg-primary/12 text-primary font-medium'
-                              : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                          )}
-                        >
-                          {active && !collapsed && (
-                            <div
-                              className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-primary rounded-full transition-all duration-200"
-                            />
-                          )}
-                          <item.icon className={cn("h-[18px] w-[18px] shrink-0", active && "text-primary")} />
-                          {!collapsed && <span className="text-[13px]">{item.title}</span>}
-                        </NavLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </SidebarContent>
-
-        <SidebarFooter className={cn("border-t border-sidebar-border", collapsed ? "p-1.5" : "p-2")}>
-          <SidebarMenu>
-            {isMaster && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={() => setShowCreateUser(true)}
-                  tooltip="Novo Usuário"
-                  className={cn(
-                    'flex items-center rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all duration-150',
-                    collapsed ? 'justify-center p-2' : 'gap-2.5 px-3 py-2'
-                  )}
-                >
-                  <UserPlus className="h-[18px] w-[18px] shrink-0" />
-                  {!collapsed && <span className="text-[13px]">Novo Usuário</span>}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
-            <SidebarMenuItem>
-              <div className={cn(
-                "flex items-center",
-                collapsed ? "flex-col gap-1" : "gap-1 justify-between"
-              )}>
-                <ThemeToggle />
-                <Separator orientation={collapsed ? "horizontal" : "vertical"} className={collapsed ? "w-6" : "h-5"} />
-                <SidebarMenuButton
-                  onClick={signOut}
-                  tooltip="Sair"
-                  className={cn(
-                    'flex items-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-150',
-                    collapsed ? 'justify-center p-2' : 'gap-2.5 px-3 py-2'
-                  )}
-                >
-                  <LogOut className="h-[18px] w-[18px] shrink-0" />
-                  {!collapsed && <span className="text-[13px]">Sair</span>}
-                </SidebarMenuButton>
-              </div>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
-        <SidebarRail />
-      </Sidebar>
+      {/* Floating sidebar — expands on hover OVER content */}
+      <aside
+        className={cn(
+          'group/sidebar fixed left-0 top-0 bottom-0 z-40 hidden md:flex flex-col',
+          'bg-sidebar border-r border-sidebar-border',
+          'transition-[width] duration-200 ease-out overflow-hidden',
+          'hover:shadow-[6px_0_24px_-12px_rgba(0,0,0,0.35)]',
+        )}
+        style={{ width: RAIL_W }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.width = `${FULL_W}px`; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.width = `${RAIL_W}px`; }}
+      >
+        <SidebarInner onCreateUser={() => setShowCreateUser(true)} />
+      </aside>
 
       {showCreateUser && (
         <Suspense fallback={null}>
@@ -160,5 +78,141 @@ export function AppSidebar() {
         </Suspense>
       )}
     </>
+  );
+}
+
+interface InnerProps {
+  expanded?: boolean;
+  onItemClick?: () => void;
+  onCreateUser: () => void;
+}
+
+function SidebarInner({ expanded, onItemClick, onCreateUser }: InnerProps) {
+  const { signOut, isMaster } = useAuth();
+  const { pathname } = useLocation();
+
+  const isActive = (url: string) =>
+    url === '/' ? pathname === '/' : pathname.startsWith(url);
+
+  const labelClass = expanded
+    ? 'opacity-100'
+    : 'opacity-0 group-hover/sidebar:opacity-100 transition-opacity duration-150';
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div className="flex flex-col h-full w-full overflow-hidden">
+        {/* Header */}
+        <div className="h-14 flex items-center gap-2.5 px-3 border-b border-sidebar-border shrink-0">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shrink-0">
+            <Printer className="h-4 w-4" />
+          </div>
+          <div className={cn('flex flex-col min-w-0 whitespace-nowrap', labelClass)}>
+            <span className="text-[13px] font-semibold tracking-tight text-sidebar-foreground truncate">
+              NBL Gráfica
+            </span>
+            <span className="text-[10px] text-muted-foreground -mt-0.5">Insights Hub</span>
+          </div>
+        </div>
+
+        {/* Menu */}
+        <nav className="flex-1 overflow-y-auto scrollbar-thin py-2 px-1.5">
+          <ul className="space-y-0.5">
+            {menuItems.map((item) => {
+              const active = isActive(item.url);
+              const link = (
+                <NavLink
+                  to={item.url}
+                  end={item.url === '/'}
+                  onClick={onItemClick}
+                  className={cn(
+                    'relative flex items-center gap-3 h-9 rounded-md px-2.5 transition-colors',
+                    active
+                      ? 'bg-primary/12 text-primary'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  {active && (
+                    <span aria-hidden className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-primary" />
+                  )}
+                  <item.icon className={cn('h-[18px] w-[18px] shrink-0', active && 'text-primary')} />
+                  <span className={cn('text-[13px] whitespace-nowrap', labelClass, active ? 'font-semibold' : 'font-medium')}>
+                    {item.title}
+                  </span>
+                </NavLink>
+              );
+              return (
+                <li key={item.title}>
+                  {expanded ? link : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>{link}</TooltipTrigger>
+                      <TooltipContent side="right" className="text-xs">{item.title}</TooltipContent>
+                    </Tooltip>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        {/* Footer */}
+        <div className="border-t border-sidebar-border p-1.5 shrink-0 space-y-0.5">
+          {isMaster && (
+            <FooterAction
+              expanded={expanded}
+              onClick={onCreateUser}
+              icon={<UserPlus className="h-[18px] w-[18px]" />}
+              label="Novo usuário"
+              labelClass={labelClass}
+            />
+          )}
+          <FooterAction
+            expanded={expanded}
+            onClick={() => { signOut(); onItemClick?.(); }}
+            icon={<LogOut className="h-[18px] w-[18px]" />}
+            label="Sair"
+            labelClass={labelClass}
+            danger
+          />
+          <div className={cn(
+            'flex items-center h-9 px-2.5 rounded-md text-muted-foreground',
+            expanded ? 'justify-between' : 'justify-center group-hover/sidebar:justify-between'
+          )}>
+            <span className={cn('text-[11px] uppercase tracking-wider', labelClass)}>Tema</span>
+            <ThemeToggle />
+          </div>
+        </div>
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function FooterAction({
+  icon, label, onClick, expanded, labelClass, danger,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  expanded?: boolean;
+  labelClass: string;
+  danger?: boolean;
+}) {
+  const btn = (
+    <button
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center gap-3 h-9 px-2.5 rounded-md transition-colors text-muted-foreground',
+        danger ? 'hover:bg-destructive/10 hover:text-destructive' : 'hover:bg-muted hover:text-foreground'
+      )}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className={cn('text-[13px] whitespace-nowrap', labelClass)}>{label}</span>
+    </button>
+  );
+  if (expanded) return btn;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{btn}</TooltipTrigger>
+      <TooltipContent side="right" className="text-xs">{label}</TooltipContent>
+    </Tooltip>
   );
 }
