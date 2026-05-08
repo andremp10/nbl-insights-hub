@@ -52,9 +52,7 @@ export function AppSidebar() {
         )}>
           {collapsed ? (
             <div className="flex items-center justify-center h-full">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Printer className="h-4 w-4" />
-              </div>
+              <SidebarTrigger className="h-8 w-8 text-muted-foreground hover:text-foreground" />
             </div>
           ) : (
             <div className="flex items-center justify-between h-full">
