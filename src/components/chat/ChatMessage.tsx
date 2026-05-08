@@ -244,15 +244,28 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       <div className="space-y-3">
         {showSteps && (
           <div className="py-1">
-            <AgentSteps steps={message.steps!} isComplete={hasContent} startedAt={startedAt} />
+            <AgentSteps
+              steps={message.steps!}
+              isComplete={hasContent || isComplete}
+              startedAt={startedAt}
+              collapsed={hasContent}
+            />
+          </div>
+        )}
+
+        {showSkeleton && (
+          <div className="space-y-2 py-1 animate-in fade-in duration-300">
+            <div className="chat-skeleton-line h-3 w-[92%] rounded" />
+            <div className="chat-skeleton-line h-3 w-[78%] rounded" />
+            <div className="chat-skeleton-line h-3 w-[55%] rounded" />
           </div>
         )}
 
         {hasContent && (
           <div className="text-sm leading-relaxed break-words prose-chat">
             <MarkdownBody content={message.content} />
-            {isStreaming && (
-              <span className="inline-block w-0.5 h-4 bg-primary animate-pulse ml-0.5 align-middle" />
+            {isInFlight && (
+              <span className="streaming-caret" aria-hidden />
             )}
           </div>
         )}
