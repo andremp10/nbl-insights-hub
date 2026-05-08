@@ -285,6 +285,37 @@
   40%           { opacity: 1;   transform: translateY(-2px); }
 }
 
+/* Streaming caret — solid blink at end of last line */
+.streaming-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: hsl(var(--primary));
+  border-radius: 1px;
+  animation: caretBlink 1s steps(2, start) infinite;
+}
+@keyframes caretBlink {
+  to { opacity: 0; }
+}
+
+/* Skeleton shimmer line for "writing response" state */
+.chat-skeleton-line {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted) / 0.25) 0%,
+    hsl(var(--muted) / 0.5) 50%,
+    hsl(var(--muted) / 0.25) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 /* Vertical timeline */
 .agent-timeline { position: relative; }
 .agent-timeline-line {
