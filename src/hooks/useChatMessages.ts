@@ -289,7 +289,7 @@ export function useChatMessages(sessionId: string | null) {
     setMessages((prev) => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now, client_request_id: clientRequestId },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'processing', created_at: now, processing_started_at: now, steps: ['Enfileirando consulta…'], startedAt: Date.now() },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'processing', created_at: now, processing_started_at: now, steps: ['Preparando consulta'], startedAt: Date.now() },
     ]);
 
     // Staged fake steps for async (no SSE) so user has visual progress
