@@ -34,9 +34,6 @@ const AgentThinking = memo(function AgentThinking({ softTimeout }: { softTimeout
           {THINKING_PHRASES[phraseIdx]}
         </span>
       </div>
-      <p className="relative text-[10px] text-muted-foreground/50 mt-1.5">
-        Costuma levar de 3 a 8 segundos.
-      </p>
       {softTimeout && (
         <p className="relative mt-2 inline-flex items-center gap-1.5 text-[11px] text-warning">
           <Clock className="w-3 h-3" />
