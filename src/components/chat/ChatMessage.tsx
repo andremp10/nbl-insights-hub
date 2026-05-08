@@ -234,18 +234,9 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     }
 
     if (showThinking) {
-      const label = isProcessing ? 'Processando sua consulta…' : 'Analisando…';
       return (
-        <div className="space-y-2 py-3">
-          <div className="flex items-center gap-3">
-            <div className="chat-shimmer-bar" />
-            <span className="text-xs text-muted-foreground/50 whitespace-nowrap">{label}</span>
-          </div>
-          {message.softTimeout && (
-            <p className="text-[11px] text-muted-foreground/70 pl-1">
-              Esta consulta está demorando mais que o normal — pode levar mais alguns instantes.
-            </p>
-          )}
+        <div className="py-1">
+          <AgentThinking softTimeout={message.softTimeout} />
         </div>
       );
     }
