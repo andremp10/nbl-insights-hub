@@ -511,7 +511,7 @@ export function useChatMessages(sessionId: string | null) {
                 if (m.id !== optAsstId) return m;
                 const cur = m.steps || [];
                 // Replace the connecting placeholder on first real step
-                if (cur.length === 1 && cur[0] === 'Conectando ao agente…') {
+                if (cur.length === 1 && cur[0] === 'Conectando ao agente') {
                   return { ...m, steps: [step] };
                 }
                 return { ...m, steps: [...cur, step] };
