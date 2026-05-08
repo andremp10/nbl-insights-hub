@@ -289,7 +289,7 @@ export function useChatMessages(sessionId: string | null) {
     setMessages((prev) => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now, client_request_id: clientRequestId },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'processing', created_at: now, processing_started_at: now, steps: ['Enfileirando consulta…'], startedAt: Date.now() },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'processing', created_at: now, processing_started_at: now, steps: ['Preparando consulta'], startedAt: Date.now() },
     ]);
 
     // Staged fake steps for async (no SSE) so user has visual progress
@@ -297,7 +297,7 @@ export function useChatMessages(sessionId: string | null) {
     stageTimers.push(setTimeout(() => {
       setMessages((prev) => prev.map((m) =>
         m.role === 'assistant' && (m.id === optAsstId || m.client_request_id === clientRequestId) && m.status === 'processing' && (m.steps?.length ?? 0) < 2
-          ? { ...m, steps: [...(m.steps || []), 'Aguardando agente…'] }
+          ? { ...m, steps: [...(m.steps || []), 'Conectando ao agente'] }
           : m
       ));
     }, 1500));
@@ -393,7 +393,7 @@ export function useChatMessages(sessionId: string | null) {
     setMessages(prev => [
       ...prev,
       { id: optUserId, session_id: sessionId, role: 'user', content: trimmed, status: 'complete', created_at: now },
-      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: ['Conectando ao agente…'], startedAt: Date.now() },
+      { id: optAsstId, session_id: sessionId, role: 'assistant', content: '', status: 'streaming', created_at: now, steps: ['Conectando ao agente'], startedAt: Date.now() },
     ]);
 
     const abort = new AbortController();
@@ -511,7 +511,7 @@ export function useChatMessages(sessionId: string | null) {
                 if (m.id !== optAsstId) return m;
                 const cur = m.steps || [];
                 // Replace the connecting placeholder on first real step
-                if (cur.length === 1 && cur[0] === 'Conectando ao agente…') {
+                if (cur.length === 1 && cur[0] === 'Conectando ao agente') {
                   return { ...m, steps: [step] };
                 }
                 return { ...m, steps: [...cur, step] };
@@ -545,7 +545,7 @@ export function useChatMessages(sessionId: string | null) {
         } else {
           setMessages(prev => prev.map(m =>
             m.id === optAsstId
-              ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta do agente...'], status: 'streaming' as const }
+              ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta'], status: 'streaming' as const }
               : m
           ));
           startRecovery(sessionId, optAsstId, trimmed);
@@ -563,7 +563,7 @@ export function useChatMessages(sessionId: string | null) {
       if (err.name === 'AbortError') {
         setMessages(prev => prev.map(m =>
           m.id === optAsstId
-            ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta do agente...'], status: 'streaming' as const }
+            ? { ...m, steps: [...(m.steps || []), 'Aguardando resposta'], status: 'streaming' as const }
             : m
         ));
         startRecovery(sessionId, optAsstId, trimmed);
