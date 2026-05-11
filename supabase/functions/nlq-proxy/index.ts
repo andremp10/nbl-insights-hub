@@ -88,16 +88,62 @@ export function normalizeChunkLine(raw: string): string[] {
 // LAYER 4: EXTRACT {"output":"..."} FROM BUFFER (robust)
 // ════════════════════════════════════════════════════════════════
 
+function extractTextFromKnownShape(value: unknown, depth = 0): string | null {
+  if (!value || depth > 5) return null;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (Array.isArray(value)) {
+    for (let i = value.length - 1; i >= 0; i--) {
+      const found = extractTextFromKnownShape(value[i], depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+
+  const directKeys = ['output', 'text', 'message', 'answer', 'final_answer', 'finalAnswer'];
+  for (const key of directKeys) {
+    if (typeof obj[key] === 'string' && obj[key].trim()) return obj[key].trim();
+  }
+
+  if (obj.ok === false && obj.error && typeof obj.error === 'object') {
+    const errorMessage = (obj.error as Record<string, unknown>).message;
+    if (typeof errorMessage === 'string' && errorMessage.trim()) return errorMessage.trim();
+  }
+
+  const nestedKeys = ['reply', 'data', 'body', 'result', 'response', 'json'];
+  for (const key of nestedKeys) {
+    const found = extractTextFromKnownShape(obj[key], depth + 1);
+    if (found) return found;
+  }
+
+  return null;
+}
+
 export function extractFinalOutput(fullBuffer: string): string | null {
+  const trimmed = fullBuffer.trim();
+  if (trimmed) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const known = extractTextFromKnownShape(parsed);
+      if (known) return known;
+    } catch { /* buffer may include stream/log lines; continue */ }
+  }
+
   // Strategy 1: Try to find array wrapper [{"output":"..."}]
   const arrayMatch = fullBuffer.match(/\[\s*\{\s*"output"\s*:/);
   if (arrayMatch && arrayMatch.index !== undefined) {
     const substr = fullBuffer.substring(arrayMatch.index);
     try {
       const arr = JSON.parse(substr);
-      if (Array.isArray(arr) && arr[0]?.output?.trim()) {
-        return arr[0].output.trim();
-      }
+      const known = extractTextFromKnownShape(arr);
+      if (known) return known;
     } catch { /* try object below */ }
   }
 
@@ -108,9 +154,8 @@ export function extractFinalOutput(fullBuffer: string): string | null {
 
   try {
     const parsed = JSON.parse(substr);
-    if (typeof parsed.output === 'string' && parsed.output.trim()) {
-      return parsed.output.trim();
-    }
+    const known = extractTextFromKnownShape(parsed);
+    if (known) return known;
   } catch {
     // Strategy 3: Regex fallback for malformed JSON
     const match = substr.match(/\{"output"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/);
@@ -665,7 +710,8 @@ Deno.serve(async (req) => {
             let content = text.trim();
             const extracted = extractFinalOutput(content);
             if (extracted) content = extracted;
-            await finalize(content || 'Sem resposta do agente.', content ? 'complete' : 'error');
+            const cleaned = sanitizeFallbackContent(content) ?? extractLastCleanBlock(content) ?? content;
+            await finalize(cleaned || 'Sem resposta do agente.', cleaned ? 'complete' : 'error');
             return;
           }
 
@@ -710,8 +756,9 @@ Deno.serve(async (req) => {
                 try { obj = JSON.parse(jsonStr); } catch { continue; }
 
                 // Check for inline {"output":"..."} — canonical capture
-                if (obj.output && typeof obj.output === 'string' && obj.output.trim()) {
-                  canonicalOutput = obj.output.trim();
+                const shapedText = extractTextFromKnownShape(obj);
+                if (shapedText) {
+                  canonicalOutput = shapedText;
                   emitStep('Gerando insights');
                   continue;
                 }
@@ -753,8 +800,9 @@ Deno.serve(async (req) => {
             for (const jsonStr of normalized) {
               try {
                 const obj = JSON.parse(jsonStr);
-                if (obj.output && typeof obj.output === 'string' && obj.output.trim()) {
-                  canonicalOutput = obj.output.trim();
+                const shapedText = extractTextFromKnownShape(obj);
+                if (shapedText) {
+                  canonicalOutput = shapedText;
                 } else if (obj.type === 'item' && obj.content) {
                   const nodeClass = classifyNode(obj.metadata?.nodeName || '');
                   if (nodeClass === 'final_agent') {

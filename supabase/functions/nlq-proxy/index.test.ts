@@ -43,13 +43,47 @@ function normalizeChunkLine(raw: string): string[] {
 
 // ── extractFinalOutput ──
 
+function extractTextFromKnownShape(value: unknown, depth = 0): string | null {
+  if (!value || depth > 5) return null;
+  if (typeof value === 'string') return value.trim() || null;
+  if (Array.isArray(value)) {
+    for (let i = value.length - 1; i >= 0; i--) {
+      const found = extractTextFromKnownShape(value[i], depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value !== 'object') return null;
+  const obj = value as Record<string, unknown>;
+  for (const key of ['output', 'text', 'message', 'answer', 'final_answer', 'finalAnswer']) {
+    if (typeof obj[key] === 'string' && obj[key].trim()) return obj[key].trim();
+  }
+  if (obj.ok === false && obj.error && typeof obj.error === 'object') {
+    const errorMessage = (obj.error as Record<string, unknown>).message;
+    if (typeof errorMessage === 'string' && errorMessage.trim()) return errorMessage.trim();
+  }
+  for (const key of ['reply', 'data', 'body', 'result', 'response', 'json']) {
+    const found = extractTextFromKnownShape(obj[key], depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 function extractFinalOutput(fullBuffer: string): string | null {
+  const trimmed = fullBuffer.trim();
+  if (trimmed) {
+    try {
+      const known = extractTextFromKnownShape(JSON.parse(trimmed));
+      if (known) return known;
+    } catch { /* continue */ }
+  }
   const arrayMatch = fullBuffer.match(/\[\s*\{\s*"output"\s*:/);
   if (arrayMatch && arrayMatch.index !== undefined) {
     const substr = fullBuffer.substring(arrayMatch.index);
     try {
       const arr = JSON.parse(substr);
-      if (Array.isArray(arr) && arr[0]?.output?.trim()) return arr[0].output.trim();
+      const known = extractTextFromKnownShape(arr);
+      if (known) return known;
     } catch { /* try object */ }
   }
   const lastBrace = fullBuffer.lastIndexOf('{"output"');
@@ -57,7 +91,8 @@ function extractFinalOutput(fullBuffer: string): string | null {
   const substr = fullBuffer.substring(lastBrace);
   try {
     const parsed = JSON.parse(substr);
-    if (typeof parsed.output === 'string' && parsed.output.trim()) return parsed.output.trim();
+    const known = extractTextFromKnownShape(parsed);
+    if (known) return known;
   } catch {
     const match = substr.match(/\{"output"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/);
     if (match) {
@@ -293,6 +328,16 @@ Deno.test("extractFinalOutput — picks last output in buffer", () => {
 Deno.test("extractFinalOutput — handles array wrapper [{'output':'...'}]", () => {
   const buffer = 'noise\n[{"output":"Array result here"}]\n';
   assertEquals(extractFinalOutput(buffer), "Array result here");
+});
+
+Deno.test("extractFinalOutput — handles n8n reply.text contract", () => {
+  const buffer = '{"ok":true,"reply":{"text":"**Resumo**\\nEncontrei materiais com caderno."}}';
+  assertEquals(extractFinalOutput(buffer), "**Resumo**\nEncontrei materiais com caderno.");
+});
+
+Deno.test("extractFinalOutput — handles n8n array reply.text contract", () => {
+  const buffer = '[{"ok":true,"reply":{"text":"Encontrei 3 materiais com caderno nos últimos 60 dias."}}]';
+  assertEquals(extractFinalOutput(buffer), "Encontrei 3 materiais com caderno nos últimos 60 dias.");
 });
 
 Deno.test("extractFinalOutput — handles array with spaces", () => {
