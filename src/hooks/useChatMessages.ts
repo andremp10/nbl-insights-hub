@@ -27,10 +27,10 @@ const STREAM_TIMEOUT_MS = 6 * 60 * 1000; // legacy SSE
 const RECOVERY_POLL_MS = 10_000;
 const RECOVERY_MAX_MS = 5 * 60 * 1000;
 
-// async v4 timeouts
+// async v4 timeouts (alinhados com watchdog DB de 15min, com heartbeat via updated_at)
 const ASYNC_POLL_MS = 8_000;
-const ASYNC_SOFT_TIMEOUT_MS = 6 * 60 * 1000;
-const ASYNC_HARD_TIMEOUT_MS = 12 * 60 * 1000;
+const ASYNC_SOFT_TIMEOUT_MS = 8 * 60 * 1000;
+const ASYNC_HARD_TIMEOUT_MS = 15 * 60 * 1000;
 
 export function useChatMessages(sessionId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
