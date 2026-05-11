@@ -331,7 +331,7 @@ Deno.test("extractFinalOutput — handles array wrapper [{'output':'...'}]", () 
 });
 
 Deno.test("extractFinalOutput — handles n8n reply.text contract", () => {
-  const buffer = '{"ok":true,"reply":{"text":"**Resumo**\nEncontrei materiais com caderno."}}';
+  const buffer = '{"ok":true,"reply":{"text":"**Resumo**\\nEncontrei materiais com caderno."}}';
   assertEquals(extractFinalOutput(buffer), "**Resumo**\nEncontrei materiais com caderno.");
 });
 
