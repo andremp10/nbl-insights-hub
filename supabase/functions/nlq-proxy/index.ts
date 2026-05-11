@@ -136,8 +136,8 @@ const LEAKAGE_PATTERNS = [
   /\{"Prompt_/,
   /\{"Batch_Size"/,
   /\{"action_input"/,
-  /MCP_Client/i,
-  /nodeName.*agente/i,
+  /MCP_Client/,
+  /"nodeName"\s*:/,
 ];
 
 // SQL leakage: full statements only, not fragments in prose
@@ -182,16 +182,25 @@ const NOISE_MARKERS = [
 
 const RESPONSE_START_PATTERNS = [
   /^_Períodos?:/m,
-  /^\*\*Resumo\*\*/m,
-  /^#{1,3}\s+/m,
+  /^\*\*[A-ZÀ-Ý]/m,                // **Resumo**, **Dados**, **Insight** etc.
+  /^#{1,3}\s+/m,                   // markdown headings
   /^📊/m,
   /^📋/m,
-  /^\|[^|]+\|/m,
-  /^>\s+/m,
+  /^\|[^|]+\|/m,                   // markdown tables
+  /^>\s+/m,                        // blockquotes
   /^Em\s+\w+\s+de\s+\d{4}/m,
   /^No\s+período/m,
   /^Resumo/m,
+  /^Encontr(?:ei|amos|ado)/m,      // "Encontrei 3 materiais..."
+  /^N[ãa]o\s+(?:foram|foi|encontr|há)/m, // "Não encontrei...", "Não há..."
+  /^(?:Os|As|O|A)\s+\w+/m,         // "Os materiais...", "O cliente..."
+  /^Resultado/m,
+  /^Material/m,
+  /^Pedido/m,
+  /^\d+[.)]\s+/m,                  // numbered lists
+  /^[-•*]\s+/m,                    // bullet lists
 ];
+
 
 export function sanitizeFallbackContent(raw: string): string | null {
   if (!raw || raw.trim().length < 20) return null;
