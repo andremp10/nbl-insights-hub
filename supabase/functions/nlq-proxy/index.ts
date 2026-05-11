@@ -710,7 +710,8 @@ Deno.serve(async (req) => {
             let content = text.trim();
             const extracted = extractFinalOutput(content);
             if (extracted) content = extracted;
-            await finalize(content || 'Sem resposta do agente.', content ? 'complete' : 'error');
+            const cleaned = sanitizeFallbackContent(content) ?? extractLastCleanBlock(content) ?? content;
+            await finalize(cleaned || 'Sem resposta do agente.', cleaned ? 'complete' : 'error');
             return;
           }
 
@@ -755,8 +756,9 @@ Deno.serve(async (req) => {
                 try { obj = JSON.parse(jsonStr); } catch { continue; }
 
                 // Check for inline {"output":"..."} — canonical capture
-                if (obj.output && typeof obj.output === 'string' && obj.output.trim()) {
-                  canonicalOutput = obj.output.trim();
+                const shapedText = extractTextFromKnownShape(obj);
+                if (shapedText) {
+                  canonicalOutput = shapedText;
                   emitStep('Gerando insights');
                   continue;
                 }
@@ -798,8 +800,9 @@ Deno.serve(async (req) => {
             for (const jsonStr of normalized) {
               try {
                 const obj = JSON.parse(jsonStr);
-                if (obj.output && typeof obj.output === 'string' && obj.output.trim()) {
-                  canonicalOutput = obj.output.trim();
+                const shapedText = extractTextFromKnownShape(obj);
+                if (shapedText) {
+                  canonicalOutput = shapedText;
                 } else if (obj.type === 'item' && obj.content) {
                   const nodeClass = classifyNode(obj.metadata?.nodeName || '');
                   if (nodeClass === 'final_agent') {
