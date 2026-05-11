@@ -136,8 +136,8 @@ const LEAKAGE_PATTERNS = [
   /\{"Prompt_/,
   /\{"Batch_Size"/,
   /\{"action_input"/,
-  /MCP_Client/i,
-  /nodeName.*agente/i,
+  /MCP_Client/,
+  /"nodeName"\s*:/,
 ];
 
 // SQL leakage: full statements only, not fragments in prose
@@ -182,16 +182,25 @@ const NOISE_MARKERS = [
 
 const RESPONSE_START_PATTERNS = [
   /^_Períodos?:/m,
-  /^\*\*Resumo\*\*/m,
-  /^#{1,3}\s+/m,
+  /^\*\*[A-ZÀ-Ý]/m,                // **Resumo**, **Dados**, **Insight** etc.
+  /^#{1,3}\s+/m,                   // markdown headings
   /^📊/m,
   /^📋/m,
-  /^\|[^|]+\|/m,
-  /^>\s+/m,
+  /^\|[^|]+\|/m,                   // markdown tables
+  /^>\s+/m,                        // blockquotes
   /^Em\s+\w+\s+de\s+\d{4}/m,
   /^No\s+período/m,
   /^Resumo/m,
+  /^Encontr(?:ei|amos|ado)/m,      // "Encontrei 3 materiais..."
+  /^N[ãa]o\s+(?:foram|foi|encontr|há)/m, // "Não encontrei...", "Não há..."
+  /^(?:Os|As|O|A)\s+\w+/m,         // "Os materiais...", "O cliente..."
+  /^Resultado/m,
+  /^Material/m,
+  /^Pedido/m,
+  /^\d+[.)]\s+/m,                  // numbered lists
+  /^[-•*]\s+/m,                    // bullet lists
 ];
+
 
 export function sanitizeFallbackContent(raw: string): string | null {
   if (!raw || raw.trim().length < 20) return null;
@@ -340,9 +349,29 @@ export function extractLastCleanBlock(raw: string): string | null {
   }
 
   if (bestStart === -1) {
-    // No clean response after noise. Maybe no noise at all? Try sanitize fallback.
+    // No clean response markers found after noise.
     if (lastNoiseEnd === -1) return sanitizeFallbackContent(raw);
-    return null;
+
+    // Try to salvage the post-noise tail: skip leading noise lines, keep prose.
+    const tail = raw.substring(lastNoiseEnd).trim();
+    if (tail.length < 40) return null;
+    const tailLines = tail.split('\n');
+    // Drop leading lines that still look noisy (json/sql/tracing)
+    let firstClean = 0;
+    while (firstClean < tailLines.length) {
+      const l = tailLines[firstClean].trim();
+      const looksNoisy = !l || l.startsWith('{') || l.startsWith('"') || l.startsWith('}') ||
+        NOISE_MARKERS.some(p => p.test(l));
+      if (!looksNoisy) break;
+      firstClean++;
+    }
+    const salvage = tailLines.slice(firstClean).join('\n').trim();
+    if (salvage.length < 40) return null;
+    if (hasSafetyLeakage(salvage)) return null;
+    const sLines = salvage.split('\n');
+    const sJson = sLines.filter(l => l.trim().startsWith('{') || l.trim().startsWith('"type"'));
+    if (sJson.length > sLines.length * 0.3) return null;
+    return deduplicateResponse(salvage);
   }
 
   let candidate = raw.substring(bestStart).trim();
