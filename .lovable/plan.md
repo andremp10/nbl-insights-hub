@@ -1,79 +1,66 @@
-## Objetivo
+# Correção do timeout no chat ("A consulta excedeu o tempo limite")
 
-Tornar os passos exibidos no chat (componente `AgentSteps`) mais precisos e fiéis ao que o agente está realmente executando, em vez dos rótulos genéricos atuais ("Consultando dados...", "Acessando banco de dados...", "Elaborando resposta...").
+## Diagnóstico (passo a passo)
 
-## Diagnóstico
+A mensagem exata exibida no chat é:
+> "A consulta excedeu o tempo limite. Tente reformular ou reduzir o período."
 
-Os steps são emitidos pelo proxy `supabase/functions/nlq-proxy/index.ts` (função `nodeToStepLabel`, linhas 46–56 e `emitStep` ao longo do stream) e renderizados por `src/components/chat/AgentSteps.tsx`. Hoje:
+Essa string está **apenas** em um lugar do projeto: a função SQL `public.expire_stuck_processing_messages` (migration `20260429193647…`), executada por `pg_cron` a cada 1 minuto.
 
-- O label inicial fixo é "Enfileirando consulta…" / "Conectando ao agente…" (vindo de `useChatMessages.ts`).
-- O proxy emite no máximo 4–5 rótulos genéricos, sem distinguir entre interpretação, escolha de view, consulta SQL e síntese.
-- Não há diferenciação entre "sub-agente de pedidos" e "sub-agente financeiro" no texto exibido — ambos viram "Consultando dados...".
-- Step "Acessando banco de dados..." é emitido para qualquer nó Supabase/Tool/MCP, gerando ruído repetitivo.
-
-## Mudanças propostas
-
-### 1. Novo conjunto de labels (proxy `nlq-proxy/index.ts`)
-
-Substituir `nodeToStepLabel` por uma máquina de estados mais granular, com estes passos canônicos e em ordem natural:
-
-```text
-1. Interpretando a pergunta
-2. Identificando o módulo (Pedidos | Financeiro | Misto)
-3. Consultando vw_dashboard_pedidos        (se sub-agente de pedidos)
-3'. Consultando vw_dashboard_financeiro    (se sub-agente financeiro)
-4. Cruzando resultados                     (quando ambos sub-agentes rodam)
-5. Analisando dados
-6. Gerando insights
-7. Formatando resposta
+```sql
+WHERE status = 'processing'
+  AND processing_started_at < now() - interval '12 minutes';
 ```
 
-Mapeamento por nó do n8n:
-- `agente_negocio` (1ª `begin`) → "Interpretando a pergunta"
-- `switch`/`if` no início (primeiro nó de roteamento) → "Identificando o módulo" (novo: hoje é tratado como `internal` e ignorado; permitir 1 emissão única)
-- `agente_consulta` `begin` → "Consultando pedidos (vw_dashboard_pedidos)"
-- `agente_financeiro` `begin` → "Consultando financeiro (vw_dashboard_financeiro)"
-- Quando `agentBeginCount >= 2` em `agente_negocio` → "Analisando dados" (em vez de "Elaborando resposta...")
-- Captura do `{"output":"..."}` → "Gerando insights"
-- `finalize()` → "Formatando resposta" (em vez de "Elaborando resposta final...")
+Ou seja: o watchdog matou a `assistant_message` por ficar **mais de 12 min em `processing`**, sem nunca observar se o agente continuava ativo.
 
-Remover/silenciar:
-- "Acessando banco de dados..." (atual gatilho `supabase|tool|mcp`) → não emitir como step próprio; vira parte implícita do passo de consulta do sub-agente correspondente.
-- "Consultando dados..." fixo emitido em `emitStep('Consultando dados...')` antes do stream — remover, deixando apenas os passos reais derivados dos eventos.
+Por que disparou na pergunta "prossiga":
+- A pergunta original ("faturamento atual + comparar com 10 primeiros dias dos últimos 3 meses + projeção de maio") explodiu em N iterações no n8n (vários `agente_consulta` + `agente_financeiro` + `agente_negocio`).
+- Cada chamada de tool/Supabase/LLM custa segundos. A soma estourou 12 min.
+- O cliente (`ASYNC_HARD_TIMEOUT_MS = 12min`) e o servidor (watchdog 12min) coincidem → não há margem nem heartbeat.
+- Resultado: o n8n ainda estava trabalhando quando o watchdog marcou `error` e o usuário viu a mensagem.
 
-### 2. Labels iniciais no front (`src/hooks/useChatMessages.ts`)
+Ponto crítico de design: o watchdog hoje **ignora** `updated_at`. Mesmo se o n8n estivesse fazendo progresso (escrevendo steps/conteúdo parcial), seria morto.
 
-- Trocar `'Enfileirando consulta…'` → `'Preparando consulta'`
-- Trocar `'Aguardando agente…'` / `'Conectando ao agente…'` → `'Conectando ao agente'`
-- Trocar `'Aguardando resposta do agente...'` (fallback de timeout) → `'Aguardando resposta…'`
-- Padronizar: sem reticências unicode "…" em alguns e "..." em outros — usar sempre sem reticências (estilo terminal/B2B já adotado).
+## Correções
 
-### 3. Ordem e deduplicação
+### 1. Watchdog baseado em atividade (DB)
+Migration nova alterando duas funções:
 
-A `emittedSteps: Set<string>` atual garante unicidade por label exato. Como agora os labels de sub-agente são distintos (pedidos vs financeiro), a deduplicação continua válida e ambos podem aparecer na mesma sessão quando aplicável. Manter o `Set`.
+- `expire_stuck_processing_messages`: trocar a condição para
+  `GREATEST(processing_started_at, updated_at) < now() - interval '15 minutes'`.
+- `report_client_timeout`: mesma lógica + janela de 15 min.
 
-### 4. Componente `AgentSteps.tsx`
+Efeito: qualquer UPDATE feito pelo n8n (heartbeat, parcial, step) zera o relógio. Mensagens realmente travadas continuam sendo limpas.
 
-Sem mudanças visuais. Apenas se beneficia dos labels novos, mais curtos e específicos. Manter:
-- Cronômetro total e por step
-- Estado "Concluído em Xs · N etapas" colapsado
-- Animação ping no step ativo
+### 2. Alinhar timeouts no cliente
+`src/hooks/useChatMessages.ts`:
+- `ASYNC_SOFT_TIMEOUT_MS`: 6min → 8min (aviso "demorando mais que o normal").
+- `ASYNC_HARD_TIMEOUT_MS`: 12min → 15min (bate com o watchdog).
 
-## Arquivos a editar
+### 3. Mensagem de erro mais útil
+Atualizar o texto do watchdog e do `report_client_timeout` para:
+> "A consulta ficou sem resposta por muito tempo. Tente dividir em partes (ex.: peça um módulo ou um período por vez)."
 
-- `supabase/functions/nlq-proxy/index.ts` — função `nodeToStepLabel`, classificação de switch/if como roteamento (1 vez), remover `emitStep('Consultando dados...')` e `emitStep('Elaborando resposta final...')`, trocar para os novos labels.
-- `src/hooks/useChatMessages.ts` — strings iniciais nas linhas ~292, ~300, ~396, ~548, ~566.
+E em `ChatMessage.tsx`, o subtítulo do estado de erro continua sugerindo reformular — manter consistente.
 
-## Fora de escopo
+### 4. Recomendação para o n8n (fora do código, instrução ao agente)
+Ajustar o system prompt do `agente_negocio` para, em planos com 3+ etapas:
+- responder em **chunks** (atualizar a `chat_message` parcialmente via Supabase tool a cada etapa concluída) — isso ativa o heartbeat e impede o watchdog de matar.
+- Quando o plano for muito grande, devolver primeiro a Visão Geral + Análise do mês atual e perguntar se quer continuar com a comparação histórica.
 
-- Prompt do agente n8n (não tocar).
-- Visual/CSS do componente de steps.
-- Lógica de timeout/keepalive.
+Essa parte não exige código no front, mas eu deixo a instrução pronta para colar no n8n.
 
-## Validação
+## Arquivos afetados
 
-Após deploy:
-1. Fazer pergunta só de pedidos → ver "Interpretando a pergunta → Identificando módulo → Consultando pedidos → Analisando dados → Gerando insights → Formatando resposta".
-2. Pergunta financeira → idem com "Consultando financeiro".
-3. Pergunta cruzada → ver ambos sub-agentes.
-4. Confirmar que não aparece mais "Acessando banco de dados..." nem "Consultando dados..." genérico.
+- `supabase/migrations/<nova>.sql` — atualizar `expire_stuck_processing_messages` e `report_client_timeout`.
+- `src/hooks/useChatMessages.ts` — bump dos dois timeouts.
+- (opcional) Texto de erro centralizado.
+
+## Verificação após aplicar
+
+1. Conferir no SQL editor que as duas funções têm `GREATEST(...) < now() - interval '15 minutes'`.
+2. Rodar `select cron.job` e confirmar que o job continua agendado.
+3. Repetir o pedido "prossiga" no chat com a pergunta complexa; observar:
+   - barra de steps continua avançando além de 6 min sem virar erro;
+   - se chegar a 15 min sem qualquer UPDATE, o erro aparece com a nova mensagem.
