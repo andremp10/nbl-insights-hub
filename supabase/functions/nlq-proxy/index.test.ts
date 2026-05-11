@@ -330,6 +330,16 @@ Deno.test("extractFinalOutput — handles array wrapper [{'output':'...'}]", () 
   assertEquals(extractFinalOutput(buffer), "Array result here");
 });
 
+Deno.test("extractFinalOutput — handles n8n reply.text contract", () => {
+  const buffer = '{"ok":true,"reply":{"text":"**Resumo**\nEncontrei materiais com caderno."}}';
+  assertEquals(extractFinalOutput(buffer), "**Resumo**\nEncontrei materiais com caderno.");
+});
+
+Deno.test("extractFinalOutput — handles n8n array reply.text contract", () => {
+  const buffer = '[{"ok":true,"reply":{"text":"Encontrei 3 materiais com caderno nos últimos 60 dias."}}]';
+  assertEquals(extractFinalOutput(buffer), "Encontrei 3 materiais com caderno nos últimos 60 dias.");
+});
+
 Deno.test("extractFinalOutput — handles array with spaces", () => {
   const buffer = '[ { "output": "Spaced array" } ]';
   assertEquals(extractFinalOutput(buffer), "Spaced array");
