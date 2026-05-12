@@ -206,13 +206,15 @@ export function useChatMessages(sessionId: string | null) {
       supabase.removeChannel(ch);
       channelRef.current = null;
     };
-  }, [sessionId, clearSafetyTimer]);
+  }, [sessionId, clearSafetyTimer, clearPoller]);
 
-  // Cleanup all safety timers on unmount
+  // Cleanup all safety timers and pollers on unmount
   useEffect(() => {
     return () => {
       safetyTimersRef.current.forEach((t) => clearTimeout(t));
       safetyTimersRef.current.clear();
+      pollersRef.current.forEach((p) => clearInterval(p));
+      pollersRef.current.clear();
     };
   }, []);
 
