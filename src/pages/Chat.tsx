@@ -247,6 +247,16 @@ export default function Chat() {
         </div>
 
         {/* ── Composer ── */}
+        {messages.filter((m) => m.status === 'error').length >= 2 && (
+          <div className="shrink-0 border-t border-border/40 bg-background/60 px-4 py-2 flex justify-center">
+            <button
+              onClick={clearErrors}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors px-3 py-1 rounded-md border border-border/40 hover:border-border"
+            >
+              Limpar respostas com erro
+            </button>
+          </div>
+        )}
         <ChatComposer onSend={handleSend} sending={sending} />
       </div>
     </div>
