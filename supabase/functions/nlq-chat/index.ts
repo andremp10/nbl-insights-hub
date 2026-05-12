@@ -124,10 +124,14 @@ Deno.serve(async (req) => {
   let assistantStatus: 'complete' | 'error' = 'complete';
   let errorDetail: string | null = null;
   let extras: Record<string, unknown> = {};
+  const startedAt = Date.now();
+
+  console.log(`[nlq-chat] request_in session=${sessionId} user=${userId} crid=${clientRequestId ?? '-'}`);
 
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), N8N_TIMEOUT_MS);
+    console.log(`[nlq-chat] n8n_post url=${N8N_WEBHOOK_URL}`);
     const resp = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -142,6 +146,9 @@ Deno.serve(async (req) => {
       signal: ctrl.signal,
     }).finally(() => clearTimeout(t));
 
+    const elapsed = Date.now() - startedAt;
+    console.log(`[nlq-chat] n8n_done status=${resp.status} elapsed=${elapsed}ms`);
+
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '');
       throw new Error(`n8n ${resp.status}: ${txt.slice(0, 200)}`);
@@ -152,7 +159,6 @@ Deno.serve(async (req) => {
     try {
       payload = JSON.parse(raw);
     } catch {
-      // Allow plain text response
       replyText = raw.trim();
     }
 
@@ -162,7 +168,6 @@ Deno.serve(async (req) => {
         errorDetail = payload?.error?.message || 'Resposta inválida do agente.';
         replyText = errorDetail!;
       } else {
-        // Try common shapes
         replyText =
           payload?.reply?.text ??
           payload?.output ??
@@ -181,13 +186,15 @@ Deno.serve(async (req) => {
       replyText = errorDetail;
     }
   } catch (e: any) {
+    const elapsed = Date.now() - startedAt;
     assistantStatus = 'error';
-    errorDetail =
-      e?.name === 'AbortError'
-        ? 'Tempo limite excedido. Tente novamente em alguns instantes.'
-        : `Falha ao consultar o agente: ${e?.message ?? 'erro desconhecido'}`;
+    if (e?.name === 'AbortError') {
+      errorDetail = `O agente do n8n não respondeu em ${Math.round(N8N_TIMEOUT_MS / 1000)}s. Verifique se o workflow está ativo no n8n.`;
+    } else {
+      errorDetail = `Falha ao consultar o agente: ${e?.message ?? 'erro desconhecido'}`;
+    }
     replyText = errorDetail;
-    console.error('n8n call failed', e);
+    console.error(`[nlq-chat] n8n_fail elapsed=${elapsed}ms err=${e?.name ?? ''} msg=${e?.message ?? ''}`);
   }
 
   // Insert assistant message
