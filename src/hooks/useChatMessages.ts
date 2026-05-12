@@ -130,9 +130,12 @@ export function useChatMessages(sessionId: string | null) {
         } else {
           const list = ((data ?? []) as ChatMessage[]).map(withStartedAt);
           setMessages(list);
-          // re-arm safety nets for any in-flight assistant messages
+          // re-arm safety nets and pollers for any in-flight assistant messages
           list.forEach((m) => {
-            if (m.role === 'assistant' && m.status === 'processing') armSafetyTimer(m.id);
+            if (m.role === 'assistant' && m.status === 'processing') {
+              armSafetyTimer(m.id);
+              armPoller(m.id);
+            }
           });
         }
         setLoading(false);
