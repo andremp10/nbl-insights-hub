@@ -163,12 +163,12 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
         aria-label="Conversas"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-3 h-12 border-b border-border shrink-0">
-          <div className="flex items-center gap-2">
-            <MessageSquarePlus className="w-4 h-4 text-primary" />
-            <span className="text-sm font-semibold text-foreground">Conversas</span>
+        <div className="flex items-center justify-between px-3 h-12 border-b border-border/70 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)]" />
+            <span className="text-[13px] font-semibold text-foreground tracking-tight">Conversas</span>
             {totalSessions > 0 && (
-              <span className="text-[10px] tabular-nums text-muted-foreground/60 font-mono">
+              <span className="text-[10px] tabular-nums font-mono px-1.5 py-px rounded-sm bg-muted/60 text-muted-foreground/80 border border-border/60">
                 {totalSessions}
               </span>
             )}
@@ -188,14 +188,19 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
           <button
             onClick={onCreateSession}
             className={cn(
-              'flex items-center justify-center gap-2 w-full h-9 rounded-lg text-sm font-medium',
-              'bg-primary text-primary-foreground shadow-sm shadow-primary/20',
-              'hover:bg-primary/90 active:scale-[0.98] transition-all duration-150',
+              'group/cta relative flex items-center gap-2 w-full h-10 px-3 rounded-lg text-[13px] font-semibold',
+              'bg-gradient-to-b from-primary to-[hsl(var(--primary)/0.92)] text-primary-foreground',
+              'border border-primary/40 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.18),0_1px_2px_hsl(var(--primary)/0.35)]',
+              'hover:from-primary hover:to-primary hover:shadow-[inset_0_1px_0_hsl(0_0%_100%/0.22),0_4px_14px_-2px_hsl(var(--primary)/0.45)]',
+              'active:scale-[0.985] transition-all duration-150',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-background',
             )}
           >
-            <Plus className="w-4 h-4" />
-            Nova conversa
-            <kbd className="hidden md:inline-block ml-auto text-[9px] font-mono opacity-70 bg-primary-foreground/15 px-1.5 py-0.5 rounded">
+            <span className="flex items-center justify-center w-5 h-5 rounded-md bg-primary-foreground/15 group-hover/cta:bg-primary-foreground/25 transition-colors">
+              <Plus className="w-3.5 h-3.5 transition-transform duration-200 group-hover/cta:rotate-90" />
+            </span>
+            <span>Nova conversa</span>
+            <kbd className="hidden md:inline-flex items-center ml-auto text-[9px] font-mono tracking-wide opacity-80 bg-primary-foreground/15 px-1.5 py-0.5 rounded border border-primary-foreground/15">
               ⌘⇧O
             </kbd>
           </button>
