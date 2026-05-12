@@ -12,7 +12,7 @@ const corsHeaders = {
 const N8N_WEBHOOK_URL =
   'https://webhook-nbl.golfine.com.br/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
 
-const N8N_TIMEOUT_MS = 110_000; // below edge runtime hard limit
+const N8N_TIMEOUT_MS = 55_000; // <60s para responder antes do timeout do supabase-js
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
