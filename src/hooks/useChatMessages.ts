@@ -358,7 +358,7 @@ export function useChatMessages(sessionId: string | null) {
         setSending(false);
       }
     },
-    [sessionId, armSafetyTimer],
+    [sessionId, armSafetyTimer, armPoller],
   );
 
   const retryMessage = useCallback(
