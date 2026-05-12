@@ -1,5 +1,6 @@
-// Synchronous chat proxy: front -> this function -> n8n webhook -> response
-// No streaming, no async/polling. Returns final assistant message.
+// Async chat proxy: returns 202 immediately, processes n8n in background.
+// The assistant message starts as 'processing' and is UPDATEd via Realtime
+// when the n8n webhook responds (can take up to ~9 minutes).
 import { createClient } from 'npm:@supabase/supabase-js@2.45.0';
 
 const corsHeaders = {
@@ -12,13 +13,111 @@ const corsHeaders = {
 const N8N_WEBHOOK_URL =
   'https://webhook-nbl.golfine.com.br/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
 
-const N8N_TIMEOUT_MS = 55_000; // <60s para responder antes do timeout do supabase-js
+// n8n agent can take up to ~5 min; allow generous headroom (9 min).
+const N8N_TIMEOUT_MS = 9 * 60_000;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
+}
+
+// Background: call n8n and update the assistant message in DB when done.
+async function processInBackground(params: {
+  admin: ReturnType<typeof createClient>;
+  assistantId: string;
+  sessionId: string;
+  userId: string;
+  message: string;
+  context: unknown;
+  timezone: string;
+}) {
+  const { admin, assistantId, sessionId, userId, message, context, timezone } = params;
+  const startedAt = Date.now();
+  console.log(`[nlq-chat] bg_start assistant=${assistantId} session=${sessionId}`);
+
+  let replyText = '';
+  let status: 'complete' | 'error' = 'complete';
+  let errorDetail: string | null = null;
+
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), N8N_TIMEOUT_MS);
+    const resp = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app: 'grafica_nbl_lovable',
+        session_id: sessionId,
+        user_id: userId,
+        timezone,
+        message,
+        context,
+        assistant_id: assistantId,
+      }),
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
+
+    const elapsed = Date.now() - startedAt;
+    console.log(`[nlq-chat] bg_done status=${resp.status} elapsed=${elapsed}ms`);
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => '');
+      throw new Error(`n8n ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+
+    const raw = await resp.text();
+    let payload: any = null;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      replyText = raw.trim();
+    }
+
+    if (payload) {
+      if (payload.ok === false) {
+        status = 'error';
+        errorDetail = payload?.error?.message || 'Resposta inválida do agente.';
+        replyText = errorDetail!;
+      } else {
+        replyText =
+          payload?.reply?.text ??
+          payload?.output ??
+          payload?.text ??
+          payload?.message ??
+          (typeof payload === 'string' ? payload : '');
+      }
+    }
+
+    if (!replyText || replyText.trim().length === 0) {
+      status = 'error';
+      errorDetail = 'O agente não retornou conteúdo.';
+      replyText = errorDetail;
+    }
+  } catch (e: any) {
+    const elapsed = Date.now() - startedAt;
+    status = 'error';
+    if (e?.name === 'AbortError') {
+      errorDetail = `O agente não respondeu em ${Math.round(N8N_TIMEOUT_MS / 60_000)} min. Tente novamente.`;
+    } else {
+      errorDetail = `Falha ao consultar o agente: ${e?.message ?? 'erro desconhecido'}`;
+    }
+    replyText = errorDetail;
+    console.error(`[nlq-chat] bg_fail elapsed=${elapsed}ms err=${e?.name ?? ''} msg=${e?.message ?? ''}`);
+  }
+
+  const { error: updErr } = await admin
+    .from('chat_messages')
+    .update({
+      content: replyText,
+      status,
+      error_detail: errorDetail,
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', assistantId);
+
+  if (updErr) console.error('[nlq-chat] update_assistant_failed', updErr);
 }
 
 Deno.serve(async (req) => {
@@ -41,7 +140,7 @@ Deno.serve(async (req) => {
   if (userErr || !userData?.user?.id) return json({ error: 'Unauthorized' }, 401);
   const userId = userData.user.id;
 
-  // ---- Parse & validate body ----
+  // ---- Body ----
   let body: any;
   try {
     body = await req.json();
@@ -60,7 +159,6 @@ Deno.serve(async (req) => {
   if (!sessionId || !message) return json({ error: 'session_id and message are required' }, 400);
   if (message.length > 4000) return json({ error: 'message too long' }, 400);
 
-  // service-role client for privileged DB ops (validated against userId manually)
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
   // Validate session ownership
@@ -73,11 +171,13 @@ Deno.serve(async (req) => {
     return json({ error: 'Session not found' }, 404);
   }
 
+  console.log(`[nlq-chat] request_in session=${sessionId} user=${userId} crid=${clientRequestId ?? '-'}`);
+
   // Idempotency: if user message with same client_request_id exists, return existing pair
   if (clientRequestId) {
     const { data: existing } = await admin
       .from('chat_messages')
-      .select('id, content')
+      .select('id')
       .eq('session_id', sessionId)
       .eq('client_request_id', clientRequestId)
       .eq('role', 'user')
@@ -95,14 +195,14 @@ Deno.serve(async (req) => {
           duplicate: true,
           user_message_id: existing.id,
           assistant_id: assistantExisting.id,
-          reply: { text: assistantExisting.content },
           status: assistantExisting.status,
+          reply: { text: assistantExisting.content },
         });
       }
     }
   }
 
-  // Insert user message (complete)
+  // Insert user message
   const { data: userMsg, error: userMsgErr } = await admin
     .from('chat_messages')
     .insert({
@@ -119,109 +219,45 @@ Deno.serve(async (req) => {
     return json({ error: 'Failed to save user message' }, 500);
   }
 
-  // Call n8n synchronously
-  let replyText = '';
-  let assistantStatus: 'complete' | 'error' = 'complete';
-  let errorDetail: string | null = null;
-  let extras: Record<string, unknown> = {};
-  const startedAt = Date.now();
-
-  console.log(`[nlq-chat] request_in session=${sessionId} user=${userId} crid=${clientRequestId ?? '-'}`);
-
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), N8N_TIMEOUT_MS);
-    console.log(`[nlq-chat] n8n_post url=${N8N_WEBHOOK_URL}`);
-    const resp = await fetch(N8N_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        app: 'grafica_nbl_lovable',
-        session_id: sessionId,
-        user_id: userId,
-        timezone,
-        message,
-        context,
-      }),
-      signal: ctrl.signal,
-    }).finally(() => clearTimeout(t));
-
-    const elapsed = Date.now() - startedAt;
-    console.log(`[nlq-chat] n8n_done status=${resp.status} elapsed=${elapsed}ms`);
-
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => '');
-      throw new Error(`n8n ${resp.status}: ${txt.slice(0, 200)}`);
-    }
-
-    const raw = await resp.text();
-    let payload: any = null;
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      replyText = raw.trim();
-    }
-
-    if (payload) {
-      if (payload.ok === false) {
-        assistantStatus = 'error';
-        errorDetail = payload?.error?.message || 'Resposta inválida do agente.';
-        replyText = errorDetail!;
-      } else {
-        replyText =
-          payload?.reply?.text ??
-          payload?.output ??
-          payload?.text ??
-          payload?.message ??
-          (typeof payload === 'string' ? payload : '');
-        if (payload?.reply?.highlights) extras.highlights = payload.reply.highlights;
-        if (payload?.reply?.suggested_actions) extras.suggested_actions = payload.reply.suggested_actions;
-        if (payload?.reply?.chart_payloads) extras.chart_payloads = payload.reply.chart_payloads;
-      }
-    }
-
-    if (!replyText || replyText.trim().length === 0) {
-      assistantStatus = 'error';
-      errorDetail = 'O agente não retornou conteúdo.';
-      replyText = errorDetail;
-    }
-  } catch (e: any) {
-    const elapsed = Date.now() - startedAt;
-    assistantStatus = 'error';
-    if (e?.name === 'AbortError') {
-      errorDetail = `O agente do n8n não respondeu em ${Math.round(N8N_TIMEOUT_MS / 1000)}s. Verifique se o workflow está ativo no n8n.`;
-    } else {
-      errorDetail = `Falha ao consultar o agente: ${e?.message ?? 'erro desconhecido'}`;
-    }
-    replyText = errorDetail;
-    console.error(`[nlq-chat] n8n_fail elapsed=${elapsed}ms err=${e?.name ?? ''} msg=${e?.message ?? ''}`);
-  }
-
-  // Insert assistant message
+  // Insert assistant placeholder (processing)
   const { data: assistantMsg, error: aErr } = await admin
     .from('chat_messages')
     .insert({
       session_id: sessionId,
       role: 'assistant',
-      content: replyText,
-      status: assistantStatus,
-      error_detail: errorDetail,
+      content: '',
+      status: 'processing',
       reply_to_message_id: userMsg.id,
-      completed_at: new Date().toISOString(),
+      processing_started_at: new Date().toISOString(),
     })
-    .select('id, content, status, error_detail, created_at')
+    .select('id, processing_started_at')
     .single();
-
   if (aErr || !assistantMsg) {
-    console.error('insert assistant message failed', aErr);
-    return json({ error: 'Failed to save assistant message' }, 500);
+    console.error('insert assistant placeholder failed', aErr);
+    return json({ error: 'Failed to create assistant placeholder' }, 500);
   }
 
-  return json({
-    user_message_id: userMsg.id,
-    assistant_id: assistantMsg.id,
-    reply: { text: replyText, ...extras },
-    status: assistantStatus,
-    error_detail: errorDetail,
-  });
+  // Fire-and-forget: background n8n call
+  // @ts-ignore EdgeRuntime is provided by Supabase Edge runtime
+  EdgeRuntime.waitUntil(
+    processInBackground({
+      admin,
+      assistantId: assistantMsg.id,
+      sessionId,
+      userId,
+      message,
+      context,
+      timezone,
+    }),
+  );
+
+  return json(
+    {
+      user_message_id: userMsg.id,
+      assistant_id: assistantMsg.id,
+      status: 'processing',
+      processing_started_at: assistantMsg.processing_started_at,
+    },
+    202,
+  );
 });

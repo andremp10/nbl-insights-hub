@@ -10,7 +10,6 @@ export interface ChatMessage {
   status: 'pending' | 'streaming' | 'processing' | 'complete' | 'error';
   error_detail?: string | null;
   created_at: string;
-  // legacy/unused fields kept for compat
   steps?: string[];
   startedAt?: number;
   request_id?: string | null;
@@ -23,11 +22,21 @@ export interface ChatMessage {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 const NLQ_CHAT_URL = `${SUPABASE_URL}/functions/v1/nlq-chat`;
-const CLIENT_TIMEOUT_MS = 70_000;
+const INITIAL_ACK_TIMEOUT_MS = 15_000; // edge function should ack in <2s
+const CLIENT_HARD_TIMEOUT_MS = 12 * 60_000; // safety net
 
 function makeRequestId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function withStartedAt(m: ChatMessage): ChatMessage {
+  if (m.role !== 'assistant') return m;
+  if (m.status !== 'processing' && m.status !== 'pending' && m.status !== 'streaming') return m;
+  if (m.startedAt) return m;
+  const ts = m.processing_started_at ?? m.created_at;
+  const parsed = ts ? Date.parse(ts) : NaN;
+  return { ...m, startedAt: Number.isFinite(parsed) ? parsed : Date.now() };
 }
 
 export function useChatMessages(sessionId: string | null) {
@@ -36,6 +45,40 @@ export function useChatMessages(sessionId: string | null) {
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const safetyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const armSafetyTimer = useCallback((assistantId: string) => {
+    const timers = safetyTimersRef.current;
+    const existing = timers.get(assistantId);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId && (m.status === 'processing' || m.status === 'pending')
+            ? {
+                ...m,
+                status: 'error',
+                error_detail:
+                  'A consulta demorou mais que o esperado. Tente reformular ou reduzir o período.',
+                content:
+                  'A consulta demorou mais que o esperado. Tente reformular ou reduzir o período.',
+              }
+            : m,
+        ),
+      );
+      timers.delete(assistantId);
+    }, CLIENT_HARD_TIMEOUT_MS);
+    timers.set(assistantId, t);
+  }, []);
+
+  const clearSafetyTimer = useCallback((assistantId: string) => {
+    const timers = safetyTimersRef.current;
+    const t = timers.get(assistantId);
+    if (t) {
+      clearTimeout(t);
+      timers.delete(assistantId);
+    }
+  }, []);
 
   // ── Load history ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -56,16 +99,21 @@ export function useChatMessages(sessionId: string | null) {
           console.error('load messages failed', error);
           setMessages([]);
         } else {
-          setMessages((data ?? []) as ChatMessage[]);
+          const list = ((data ?? []) as ChatMessage[]).map(withStartedAt);
+          setMessages(list);
+          // re-arm safety nets for any in-flight assistant messages
+          list.forEach((m) => {
+            if (m.role === 'assistant' && m.status === 'processing') armSafetyTimer(m.id);
+          });
         }
         setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, armSafetyTimer]);
 
-  // ── Realtime sync between tabs ─────────────────────────────────────────────
+  // ── Realtime sync ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!sessionId) return;
     if (channelRef.current) {
@@ -78,7 +126,7 @@ export function useChatMessages(sessionId: string | null) {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `session_id=eq.${sessionId}` },
         (payload) => {
-          const m = payload.new as ChatMessage;
+          const m = withStartedAt(payload.new as ChatMessage);
           setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
         },
       )
@@ -87,7 +135,8 @@ export function useChatMessages(sessionId: string | null) {
         { event: 'UPDATE', schema: 'public', table: 'chat_messages', filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = payload.new as ChatMessage;
-          setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...m } : x)));
+          setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...m, startedAt: x.startedAt } : x)));
+          if (m.status === 'complete' || m.status === 'error') clearSafetyTimer(m.id);
         },
       )
       .subscribe();
@@ -96,14 +145,21 @@ export function useChatMessages(sessionId: string | null) {
       supabase.removeChannel(ch);
       channelRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, clearSafetyTimer]);
 
-  // ── Remove only ERROR messages (used before retry / on demand) ────────────
+  // Cleanup all safety timers on unmount
+  useEffect(() => {
+    return () => {
+      safetyTimersRef.current.forEach((t) => clearTimeout(t));
+      safetyTimersRef.current.clear();
+    };
+  }, []);
+
   const clearErrors = useCallback(() => {
     setMessages((prev) => prev.filter((m) => m.status !== 'error'));
   }, []);
 
-  // ── Send message via direct fetch (full control over timeout) ─────────────
+  // ── Send: fire-and-forget; resposta vem via Realtime ──────────────────────
   const sendMessage = useCallback(
     async (content: string): Promise<boolean> => {
       const text = content.trim();
@@ -117,7 +173,6 @@ export function useChatMessages(sessionId: string | null) {
       const startTs = Date.now();
       const now = new Date(startTs).toISOString();
 
-      // Limpa erros do estado local (lixo visual) ANTES de enviar
       setMessages((prev) => {
         const filtered = prev.filter((m) => m.status !== 'error');
         return [
@@ -136,9 +191,10 @@ export function useChatMessages(sessionId: string | null) {
             session_id: sessionId,
             role: 'assistant',
             content: '',
-            status: 'pending',
+            status: 'processing',
             created_at: now,
             startedAt: startTs,
+            processing_started_at: now,
           },
         ];
       });
@@ -146,7 +202,7 @@ export function useChatMessages(sessionId: string | null) {
       toast('Pergunta enviada ao agente', { duration: 1800 });
 
       const ctrl = new AbortController();
-      const timeoutId = setTimeout(() => ctrl.abort(), CLIENT_TIMEOUT_MS);
+      const timeoutId = setTimeout(() => ctrl.abort(), INITIAL_ACK_TIMEOUT_MS);
 
       try {
         const { data: sess } = await supabase.auth.getSession();
@@ -170,15 +226,34 @@ export function useChatMessages(sessionId: string | null) {
         });
 
         const data = await resp.json().catch(() => null);
-        if (!resp.ok) {
+        if (!resp.ok && resp.status !== 202) {
           throw new Error(data?.error || `HTTP ${resp.status}`);
         }
 
-        const replyText: string = data?.reply?.text ?? '';
-        const status: 'complete' | 'error' = data?.status === 'error' ? 'error' : 'complete';
-        const errorDetail: string | null = data?.error_detail ?? null;
         const realAssistantId: string = data?.assistant_id ?? tempAssistantId;
         const realUserId: string = data?.user_message_id ?? tempUserId;
+        const procStartedAt: string | undefined = data?.processing_started_at;
+        const procStartTs = procStartedAt ? Date.parse(procStartedAt) : startTs;
+
+        // Duplicate (idempotency hit) — backend already has the answer
+        if (data?.duplicate && data?.reply?.text) {
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id === tempUserId) return { ...m, id: realUserId };
+              if (m.id === tempAssistantId) {
+                return {
+                  ...m,
+                  id: realAssistantId,
+                  content: data.reply.text,
+                  status: data.status ?? 'complete',
+                  error_detail: data.error_detail ?? null,
+                };
+              }
+              return m;
+            }),
+          );
+          return true;
+        }
 
         setMessages((prev) =>
           prev.map((m) => {
@@ -187,20 +262,20 @@ export function useChatMessages(sessionId: string | null) {
               return {
                 ...m,
                 id: realAssistantId,
-                content: replyText,
-                status,
-                error_detail: errorDetail,
+                status: 'processing',
+                startedAt: Number.isFinite(procStartTs) ? procStartTs : startTs,
+                processing_started_at: procStartedAt ?? now,
               };
             }
             return m;
           }),
         );
-        return status === 'complete';
+        armSafetyTimer(realAssistantId);
+        return true;
       } catch (e: any) {
-        const elapsed = Math.round((Date.now() - startTs) / 1000);
         const aborted = e?.name === 'AbortError';
         const detail = aborted
-          ? `Sem resposta após ${elapsed}s. Verifique se o workflow do n8n está ativo.`
+          ? 'Não foi possível confirmar o envio (timeout). Tente novamente.'
           : e?.message?.includes('Failed to fetch')
             ? 'Não foi possível alcançar o servidor. Verifique sua conexão.'
             : `Falha ao enviar: ${e?.message ?? 'erro desconhecido'}`;
@@ -208,12 +283,7 @@ export function useChatMessages(sessionId: string | null) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === tempAssistantId
-              ? {
-                  ...m,
-                  status: 'error',
-                  content: detail,
-                  error_detail: detail,
-                }
+              ? { ...m, status: 'error', content: detail, error_detail: detail }
               : m,
           ),
         );
@@ -224,10 +294,9 @@ export function useChatMessages(sessionId: string | null) {
         setSending(false);
       }
     },
-    [sessionId],
+    [sessionId, armSafetyTimer],
   );
 
-  // ── Retry: resend the user message that precedes a failed assistant ───────
   const retryMessage = useCallback(
     async (assistantId: string): Promise<boolean> => {
       const idx = messages.findIndex((m) => m.id === assistantId);
