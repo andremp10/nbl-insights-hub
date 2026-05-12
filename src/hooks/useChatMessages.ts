@@ -127,7 +127,33 @@ export function useChatMessages(sessionId: string | null) {
         { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `session_id=eq.${sessionId}` },
         (payload) => {
           const m = withStartedAt(payload.new as ChatMessage);
-          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+          setMessages((prev) => {
+            // Dedupe by id
+            if (prev.some((x) => x.id === m.id)) return prev;
+            // Dedupe by client_request_id (replaces optimistic temp message)
+            if (m.client_request_id) {
+              const tempIdx = prev.findIndex(
+                (x) => x.client_request_id === m.client_request_id && x.role === m.role && x.id.startsWith('temp-'),
+              );
+              if (tempIdx !== -1) {
+                const next = prev.slice();
+                next[tempIdx] = { ...prev[tempIdx], ...m, startedAt: prev[tempIdx].startedAt };
+                return next;
+              }
+            }
+            // Dedupe assistant by reply_to_message_id matching a temp assistant
+            if (m.role === 'assistant' && m.reply_to_message_id) {
+              const tempIdx = prev.findIndex(
+                (x) => x.role === 'assistant' && x.id.startsWith('temp-asst-'),
+              );
+              if (tempIdx !== -1) {
+                const next = prev.slice();
+                next[tempIdx] = { ...prev[tempIdx], ...m, startedAt: prev[tempIdx].startedAt };
+                return next;
+              }
+            }
+            return [...prev, m];
+          });
         },
       )
       .on(
