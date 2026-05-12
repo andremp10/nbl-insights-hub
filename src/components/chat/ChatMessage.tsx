@@ -246,7 +246,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     if (showThinking) {
       return (
         <div className="py-1">
-          <AgentThinking softTimeout={message.softTimeout} />
+          <AgentThinking startedAt={startedAt} softTimeout={message.softTimeout} />
         </div>
       );
     }
