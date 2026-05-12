@@ -218,9 +218,10 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
               onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); searchRef.current?.blur(); } }}
               placeholder="Buscar conversas..."
               className={cn(
-                'w-full h-8 pl-8 pr-8 rounded-md bg-muted/40 border border-border/60',
+                'w-full h-9 pl-8 pr-9 rounded-md bg-muted/30 border border-border/60',
                 'text-[12px] text-foreground placeholder:text-muted-foreground/50',
-                'focus:outline-none focus:border-primary/50 focus:bg-background transition-colors',
+                'hover:bg-muted/50 hover:border-border',
+                'focus:outline-none focus:border-primary/50 focus:bg-background focus:ring-2 focus:ring-primary/15 transition-all',
               )}
             />
             {query ? (
