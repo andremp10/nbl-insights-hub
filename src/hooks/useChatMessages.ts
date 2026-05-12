@@ -46,6 +46,35 @@ export function useChatMessages(sessionId: string | null) {
   const sendingRef = useRef(false);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const safetyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pollersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+  const clearPoller = useCallback((assistantId: string) => {
+    const p = pollersRef.current.get(assistantId);
+    if (p) {
+      clearInterval(p);
+      pollersRef.current.delete(assistantId);
+    }
+  }, []);
+
+  const armPoller = useCallback((assistantId: string) => {
+    if (pollersRef.current.has(assistantId)) return;
+    const interval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('id, content, status, error_detail, completed_at, processing_started_at')
+        .eq('id', assistantId)
+        .maybeSingle();
+      if (error) return;
+      if (!data) return;
+      if (data.status === 'complete' || data.status === 'error') {
+        setMessages((prev) =>
+          prev.map((x) => (x.id === assistantId ? { ...x, ...(data as Partial<ChatMessage>) } : x)),
+        );
+        clearPoller(assistantId);
+      }
+    }, 5000);
+    pollersRef.current.set(assistantId, interval);
+  }, [clearPoller]);
 
   const armSafetyTimer = useCallback((assistantId: string) => {
     const timers = safetyTimersRef.current;
