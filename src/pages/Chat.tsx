@@ -22,7 +22,7 @@ export default function Chat() {
     return (saved === 'rail' || saved === 'expanded') ? saved as SidebarMode : 'expanded';
   });
   const sidebarRef = useRef<SessionsSidebarHandle>(null);
-  const { messages, loading: messagesLoading, sending, sendMessage, retryMessage } = useChatMessages(currentSessionId);
+  const { messages, loading: messagesLoading, sending, sendMessage, retryMessage, clearErrors } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
