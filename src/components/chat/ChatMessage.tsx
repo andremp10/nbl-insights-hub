@@ -140,24 +140,44 @@ function isNumericCell(text: string): boolean {
   return /^\d+$/.test(cleaned);
 }
 
+/* Detect a strong containing a numeric/value highlight (e.g. "339 pedidos", "R$ 1.200,00", "12%") */
+function isNumericHighlight(text: string): boolean {
+  if (!text) return false;
+  return /\d/.test(text) && /^(R\$\s?)?[\d.,]+(\s?(pedidos?|unidades?|clientes?|itens?|reais?|%|mil|k|M))?\s*$/i.test(text.trim())
+    || /^R\$\s?[\d.,]+/i.test(text.trim())
+    || /\d[\d.,]*\s*(pedidos?|unidades?|clientes?|itens?|%)/i.test(text.trim());
+}
+
+/* Render a section heading as a B2B section label (vertical primary bar + uppercase tracking) */
+function SectionLabel({ children }: { children: any }) {
+  return (
+    <div className="flex items-center gap-3 mt-6 mb-3 first:mt-0">
+      <div className="h-4 w-[2px] bg-primary shrink-0" />
+      <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+        {children}
+      </span>
+    </div>
+  );
+}
+
 /* ── Markdown components ── */
 const markdownComponents = {
   table: ({ children, ...props }: any) => (
-    <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-lg border border-border/60 scrollbar-thin">
+    <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-sm border border-border scrollbar-thin">
       <table className="w-full text-sm border-collapse" {...props}>{children}</table>
     </div>
   ),
   thead: ({ children, ...props }: any) => (
-    <thead className="bg-primary/8 border-b border-border/60 sticky top-0" {...props}>{children}</thead>
+    <thead className="bg-muted/40 border-b border-border sticky top-0" {...props}>{children}</thead>
   ),
   tbody: ({ children, ...props }: any) => (
-    <tbody className="[&_tr:nth-child(even)]:bg-muted/15 [&_tr:last-child]:border-0" {...props}>{children}</tbody>
+    <tbody className="divide-y divide-border/50" {...props}>{children}</tbody>
   ),
   tr: ({ children, ...props }: any) => (
-    <tr className="border-b border-border/30 hover:bg-muted/20 transition-colors" {...props}>{children}</tr>
+    <tr className="hover:bg-muted/20 transition-colors" {...props}>{children}</tr>
   ),
   th: ({ children, ...props }: any) => (
-    <th className="h-9 px-3 text-left align-middle font-semibold text-muted-foreground text-[11px] uppercase tracking-wider whitespace-nowrap" {...props}>{children}</th>
+    <th className="h-8 px-3 text-left align-middle font-semibold text-muted-foreground text-[11px] uppercase tracking-wider whitespace-nowrap" {...props}>{children}</th>
   ),
   td: ({ children, ...props }: any) => {
     const text = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : '';
@@ -168,8 +188,8 @@ const markdownComponents = {
         className={cn(
           "px-3 py-2 align-middle text-sm",
           numeric
-            ? "text-right font-mono tabular-nums whitespace-nowrap"
-            : "max-w-[460px] whitespace-normal break-words"
+            ? "text-right font-mono tabular-nums whitespace-nowrap text-foreground"
+            : "max-w-[460px] whitespace-normal break-words text-foreground/90"
         )}
         title={!numeric && textStr ? textStr : undefined}
         {...props}
@@ -178,10 +198,27 @@ const markdownComponents = {
       </td>
     );
   },
-  p: ({ children, ...props }: any) => <p className="mb-2.5 last:mb-0 leading-relaxed" {...props}>{children}</p>,
-  ul: ({ children, ...props }: any) => <ul className="my-2 ml-4 list-disc [&>li]:mt-1 marker:text-primary/60" {...props}>{children}</ul>,
-  ol: ({ children, ...props }: any) => <ol className="my-2 ml-4 list-decimal [&>li]:mt-1 marker:text-primary/60" {...props}>{children}</ol>,
-  strong: ({ children, ...props }: any) => <strong className="font-semibold text-foreground" {...props}>{children}</strong>,
+  p: ({ children, ...props }: any) => <p className="mb-2.5 last:mb-0 leading-relaxed text-foreground/85" {...props}>{children}</p>,
+  ul: ({ children, ...props }: any) => <ul className="my-2 ml-4 list-disc [&>li]:mt-1 marker:text-primary/60 text-foreground/85" {...props}>{children}</ul>,
+  ol: ({ children, ...props }: any) => <ol className="my-2 ml-4 list-decimal [&>li]:mt-1 marker:text-primary/60 text-foreground/85" {...props}>{children}</ol>,
+  strong: ({ children, ...props }: any) => {
+    const text = typeof children === 'string'
+      ? children
+      : Array.isArray(children) ? children.map((c: any) => typeof c === 'string' ? c : '').join('') : '';
+    if (isNumericHighlight(String(text))) {
+      return (
+        <span className="inline-flex items-baseline font-semibold text-primary bg-primary/10 px-1.5 py-0 rounded-sm font-mono tabular-nums" {...props}>
+          {children}
+        </span>
+      );
+    }
+    return <strong className="font-semibold text-foreground" {...props}>{children}</strong>;
+  },
+  blockquote: ({ children, ...props }: any) => (
+    <blockquote className="my-3 bg-muted/30 border-l-2 border-primary px-4 py-3 italic text-foreground/90 leading-relaxed [&>p]:mb-0 [&>p]:text-foreground/90" {...props}>
+      {children}
+    </blockquote>
+  ),
   em: ({ children, ...props }: any) => {
     const text = typeof children === 'string' ? children : Array.isArray(children) ? children.map((c: any) => typeof c === 'string' ? c : '').join('') : '';
     const isMetadata = /Períodos?:|Escopo:|Período:/i.test(text);
@@ -189,19 +226,30 @@ const markdownComponents = {
     if (isMetadata) {
       const parts = text.split('·').map((s: string) => s.trim()).filter(Boolean);
       return (
-        <span className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border/20">
-          {parts.map((part: string, i: number) => (
-            <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/40 border border-border/30 text-[11px] text-muted-foreground">
-              {i === 0 ? <Calendar className="w-3 h-3 shrink-0 text-primary/60" /> : <Info className="w-3 h-3 shrink-0 text-primary/60" />}
-              {part}
-            </span>
-          ))}
+        <span className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-border/30">
+          {parts.map((part: string, i: number) => {
+            const isScope = /^Escopo:/i.test(part);
+            return (
+              <span
+                key={i}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border text-[10px] font-bold uppercase tracking-wider",
+                  isScope
+                    ? "bg-primary/5 border-primary/25 text-primary"
+                    : "bg-muted/40 border-border text-muted-foreground"
+                )}
+              >
+                {i === 0 ? <Calendar className="w-3 h-3 shrink-0" /> : <Info className="w-3 h-3 shrink-0" />}
+                {part}
+              </span>
+            );
+          })}
         </span>
       );
     }
     if (isWarning) {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 my-1 rounded-md bg-warning/10 border border-warning/20 text-[11px] text-warning">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 my-1 rounded-sm bg-warning/10 border border-warning/20 text-[11px] text-warning">
           <AlertTriangle className="w-3 h-3 shrink-0" />
           {children}
         </span>
@@ -209,14 +257,14 @@ const markdownComponents = {
     }
     return <em {...props}>{children}</em>;
   },
-  h1: ({ children, ...props }: any) => <h1 className="text-lg font-semibold text-foreground mb-2 mt-4 first:mt-0" {...props}>{children}</h1>,
-  h2: ({ children, ...props }: any) => <h2 className="text-base font-semibold text-foreground mb-2 mt-3 first:mt-0" {...props}>{children}</h2>,
-  h3: ({ children, ...props }: any) => <h3 className="text-sm font-semibold text-foreground mb-1.5 mt-2 first:mt-0" {...props}>{children}</h3>,
+  h1: ({ children }: any) => <SectionLabel>{children}</SectionLabel>,
+  h2: ({ children }: any) => <SectionLabel>{children}</SectionLabel>,
+  h3: ({ children }: any) => <SectionLabel>{children}</SectionLabel>,
   code: ({ className, children, ...props }: any) => {
     const isInline = !className;
     return isInline
-      ? <code className="px-1.5 py-0.5 rounded bg-muted text-xs font-mono" {...props}>{children}</code>
-      : <code className={cn('block p-3 rounded-lg bg-muted text-xs font-mono overflow-x-auto', className)} {...props}>{children}</code>;
+      ? <code className="px-1.5 py-0.5 rounded-sm bg-muted text-xs font-mono text-foreground" {...props}>{children}</code>
+      : <code className={cn('block p-3 rounded-sm bg-muted text-xs font-mono overflow-x-auto', className)} {...props}>{children}</code>;
   },
 };
 
