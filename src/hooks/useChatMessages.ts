@@ -143,7 +143,7 @@ export function useChatMessages(sessionId: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, armSafetyTimer]);
+  }, [sessionId, armSafetyTimer, armPoller]);
 
   // ── Realtime sync ──────────────────────────────────────────────────────────
   useEffect(() => {
