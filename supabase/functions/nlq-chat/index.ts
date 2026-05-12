@@ -36,11 +36,8 @@ async function processInBackground(params: {
 }) {
   const { admin, assistantId, sessionId, userId, message, context, timezone } = params;
   const startedAt = Date.now();
+  const callbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/nlq-callback`;
   console.log(`[nlq-chat] bg_start assistant=${assistantId} session=${sessionId}`);
-
-  let replyText = '';
-  let status: 'complete' | 'error' = 'complete';
-  let errorDetail: string | null = null;
 
   try {
     const ctrl = new AbortController();
@@ -56,69 +53,43 @@ async function processInBackground(params: {
         message,
         context,
         assistant_id: assistantId,
+        // n8n must POST the final answer here when the agent finishes.
+        callback_url: callbackUrl,
       }),
       signal: ctrl.signal,
     }).finally(() => clearTimeout(t));
 
     const elapsed = Date.now() - startedAt;
-    console.log(`[nlq-chat] bg_done status=${resp.status} elapsed=${elapsed}ms`);
+    console.log(`[nlq-chat] bg_ack status=${resp.status} elapsed=${elapsed}ms`);
+
+    // Drain body to free the connection; we don't use the immediate reply.
+    await resp.text().catch(() => '');
 
     if (!resp.ok) {
-      const txt = await resp.text().catch(() => '');
-      throw new Error(`n8n ${resp.status}: ${txt.slice(0, 200)}`);
+      throw new Error(`n8n webhook returned ${resp.status}`);
     }
-
-    const raw = await resp.text();
-    let payload: any = null;
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      replyText = raw.trim();
-    }
-
-    if (payload) {
-      if (payload.ok === false) {
-        status = 'error';
-        errorDetail = payload?.error?.message || 'Resposta inválida do agente.';
-        replyText = errorDetail!;
-      } else {
-        replyText =
-          payload?.reply?.text ??
-          payload?.output ??
-          payload?.text ??
-          payload?.message ??
-          (typeof payload === 'string' ? payload : '');
-      }
-    }
-
-    if (!replyText || replyText.trim().length === 0) {
-      status = 'error';
-      errorDetail = 'O agente não retornou conteúdo.';
-      replyText = errorDetail;
-    }
+    // Success: leave the assistant message in 'processing'. The n8n
+    // workflow will hit nlq-callback when it has the final answer.
   } catch (e: any) {
     const elapsed = Date.now() - startedAt;
-    status = 'error';
-    if (e?.name === 'AbortError') {
-      errorDetail = `O agente não respondeu em ${Math.round(N8N_TIMEOUT_MS / 60_000)} min. Tente novamente.`;
-    } else {
-      errorDetail = `Falha ao consultar o agente: ${e?.message ?? 'erro desconhecido'}`;
-    }
-    replyText = errorDetail;
+    const errorDetail =
+      e?.name === 'AbortError'
+        ? 'Não foi possível disparar o agente (timeout no acknowledge).'
+        : `Falha ao disparar o agente: ${e?.message ?? 'erro desconhecido'}`;
     console.error(`[nlq-chat] bg_fail elapsed=${elapsed}ms err=${e?.name ?? ''} msg=${e?.message ?? ''}`);
+
+    const { error: updErr } = await admin
+      .from('chat_messages')
+      .update({
+        content: errorDetail,
+        status: 'error',
+        error_detail: errorDetail,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', assistantId)
+      .eq('status', 'processing');
+    if (updErr) console.error('[nlq-chat] update_assistant_failed', updErr);
   }
-
-  const { error: updErr } = await admin
-    .from('chat_messages')
-    .update({
-      content: replyText,
-      status,
-      error_detail: errorDetail,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', assistantId);
-
-  if (updErr) console.error('[nlq-chat] update_assistant_failed', updErr);
 }
 
 Deno.serve(async (req) => {
