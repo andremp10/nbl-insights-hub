@@ -334,6 +334,7 @@ export function useChatMessages(sessionId: string | null) {
           }),
         );
         armSafetyTimer(realAssistantId);
+        armPoller(realAssistantId);
         return true;
       } catch (e: any) {
         const aborted = e?.name === 'AbortError';
