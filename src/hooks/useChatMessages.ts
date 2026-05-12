@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 export interface ChatMessage {
   id: string;
@@ -9,7 +10,7 @@ export interface ChatMessage {
   status: 'pending' | 'streaming' | 'processing' | 'complete' | 'error';
   error_detail?: string | null;
   created_at: string;
-  // legacy fields kept for type compatibility (unused in sync mode)
+  // legacy/unused fields kept for compat
   steps?: string[];
   startedAt?: number;
   request_id?: string | null;
@@ -18,6 +19,11 @@ export interface ChatMessage {
   processing_started_at?: string | null;
   softTimeout?: boolean;
 }
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+const NLQ_CHAT_URL = `${SUPABASE_URL}/functions/v1/nlq-chat`;
+const CLIENT_TIMEOUT_MS = 70_000;
 
 function makeRequestId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -31,7 +37,7 @@ export function useChatMessages(sessionId: string | null) {
   const sendingRef = useRef(false);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // ── Load history when session changes ──────────────────────────────────────
+  // ── Load history ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
@@ -59,7 +65,7 @@ export function useChatMessages(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  // ── Realtime: keep multi-tab in sync, ignore duplicates ────────────────────
+  // ── Realtime sync between tabs ─────────────────────────────────────────────
   useEffect(() => {
     if (!sessionId) return;
     if (channelRef.current) {
@@ -92,7 +98,12 @@ export function useChatMessages(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  // ── Send message synchronously through nlq-chat ────────────────────────────
+  // ── Remove only ERROR messages (used before retry / on demand) ────────────
+  const clearErrors = useCallback(() => {
+    setMessages((prev) => prev.filter((m) => m.status !== 'error'));
+  }, []);
+
+  // ── Send message via direct fetch (full control over timeout) ─────────────
   const sendMessage = useCallback(
     async (content: string): Promise<boolean> => {
       const text = content.trim();
@@ -103,41 +114,65 @@ export function useChatMessages(sessionId: string | null) {
       const clientRequestId = makeRequestId();
       const tempUserId = `temp-user-${clientRequestId}`;
       const tempAssistantId = `temp-asst-${clientRequestId}`;
-      const now = new Date().toISOString();
+      const startTs = Date.now();
+      const now = new Date(startTs).toISOString();
 
-      // Optimistic UI: user + assistant placeholder
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: tempUserId,
-          session_id: sessionId,
-          role: 'user',
-          content: text,
-          status: 'complete',
-          created_at: now,
-          client_request_id: clientRequestId,
-        },
-        {
-          id: tempAssistantId,
-          session_id: sessionId,
-          role: 'assistant',
-          content: '',
-          status: 'pending',
-          created_at: now,
-        },
-      ]);
+      // Limpa erros do estado local (lixo visual) ANTES de enviar
+      setMessages((prev) => {
+        const filtered = prev.filter((m) => m.status !== 'error');
+        return [
+          ...filtered,
+          {
+            id: tempUserId,
+            session_id: sessionId,
+            role: 'user',
+            content: text,
+            status: 'complete',
+            created_at: now,
+            client_request_id: clientRequestId,
+          },
+          {
+            id: tempAssistantId,
+            session_id: sessionId,
+            role: 'assistant',
+            content: '',
+            status: 'pending',
+            created_at: now,
+            startedAt: startTs,
+          },
+        ];
+      });
+
+      toast('Pergunta enviada ao agente', { duration: 1800 });
+
+      const ctrl = new AbortController();
+      const timeoutId = setTimeout(() => ctrl.abort(), CLIENT_TIMEOUT_MS);
 
       try {
-        const { data, error } = await supabase.functions.invoke('nlq-chat', {
-          body: {
+        const { data: sess } = await supabase.auth.getSession();
+        const accessToken = sess?.session?.access_token;
+        if (!accessToken) throw new Error('Não autenticado');
+
+        const resp = await fetch(NLQ_CHAT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SUPABASE_ANON,
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
             session_id: sessionId,
             message: text,
             client_request_id: clientRequestId,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Fortaleza',
-          },
+          }),
+          signal: ctrl.signal,
         });
 
-        if (error) throw error;
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok) {
+          throw new Error(data?.error || `HTTP ${resp.status}`);
+        }
 
         const replyText: string = data?.reply?.text ?? '';
         const status: 'complete' | 'error' = data?.status === 'error' ? 'error' : 'complete';
@@ -162,6 +197,13 @@ export function useChatMessages(sessionId: string | null) {
         );
         return status === 'complete';
       } catch (e: any) {
+        const elapsed = Math.round((Date.now() - startTs) / 1000);
+        const aborted = e?.name === 'AbortError';
+        const detail = aborted
+          ? `Sem resposta após ${elapsed}s. Verifique se o workflow do n8n está ativo.`
+          : e?.message?.includes('Failed to fetch')
+            ? 'Não foi possível alcançar o servidor. Verifique sua conexão.'
+            : `Falha ao enviar: ${e?.message ?? 'erro desconhecido'}`;
         console.error('sendMessage failed', e);
         setMessages((prev) =>
           prev.map((m) =>
@@ -169,14 +211,15 @@ export function useChatMessages(sessionId: string | null) {
               ? {
                   ...m,
                   status: 'error',
-                  content: 'Não foi possível obter a resposta. Tente novamente.',
-                  error_detail: e?.message ?? 'unknown error',
+                  content: detail,
+                  error_detail: detail,
                 }
               : m,
           ),
         );
         return false;
       } finally {
+        clearTimeout(timeoutId);
         sendingRef.current = false;
         setSending(false);
       }
@@ -189,7 +232,6 @@ export function useChatMessages(sessionId: string | null) {
     async (assistantId: string): Promise<boolean> => {
       const idx = messages.findIndex((m) => m.id === assistantId);
       if (idx <= 0) return false;
-      // find preceding user message
       let userMsg: ChatMessage | null = null;
       for (let i = idx - 1; i >= 0; i--) {
         if (messages[i].role === 'user') {
@@ -198,12 +240,11 @@ export function useChatMessages(sessionId: string | null) {
         }
       }
       if (!userMsg) return false;
-      // remove the failed assistant + its user (we'll re-create both)
       setMessages((prev) => prev.filter((m) => m.id !== assistantId && m.id !== userMsg!.id));
       return sendMessage(userMsg.content);
     },
     [messages, sendMessage],
   );
 
-  return { messages, loading, sending, sendMessage, retryMessage };
+  return { messages, loading, sending, sendMessage, retryMessage, clearErrors };
 }

@@ -1,86 +1,87 @@
-## Objetivo
+## Diagnóstico
 
-Eliminar toda a complexidade atual de streaming SSE e fila assíncrona (status `processing`, polling, watchdog, soft/hard timeout) que está causando mensagens travadas no Supabase. Voltar ao padrão simples: o front chama o edge function → o edge function chama o webhook do n8n (`respondToWebhook`) e aguarda a resposta final → grava `assistant` com `status='complete'` e devolve o texto. Sem SSE, sem polling, sem `nlq-proxy-async`.
+Confirmei nos logs do edge function que **o erro `userClient.auth.getClaims is not a function` parou após o último deploy (01:47)** — então a função autentica corretamente agora. O que ainda falha vem de **três causas distintas**:
 
-## Causa do problema atual
+### 1. Workflow do n8n está INATIVO (causa principal do "Failed")
+Sua segunda screenshot mostra o nó "Respond to Webhook" com **"No input data"** no editor do n8n. Isso significa que nenhuma execução chegou até esse nó. Em n8n, um Webhook em modo Production só responde se o **workflow estiver ativado** (toggle "Active" no canto superior direito). Em modo Test, ele só responde uma vez após clicar "Listen for test event".
 
-O fluxo async grava `assistant` em `status='processing'` esperando que o n8n confirme depois via outro canal. Quando algo falha no meio (timeout do edge runtime, n8n não confirma, perda de conexão), a mensagem fica presa em `processing` e o usuário nunca vê a resposta. Há ainda dois proxies (`nlq-proxy` SSE + `nlq-proxy-async`) e múltiplos timers no front que se sobrepõem.
+➜ Resultado: nossa edge function fica esperando até o `AbortController` disparar em 110s e o cliente do supabase-js cai em "Failed to send a request to the Edge Function" (timeout interno do `functions.invoke`, ~60s).
 
-## Arquitetura nova (simples)
+### 2. Mensagens duplicadas no chat
+Cada vez que o usuário aperta enviar, criamos um novo placeholder. Os erros antigos ficam na tela formando "lixo visual" (3 bolhas laranjas idênticas + 3 erros). Não estamos limpando tentativas anteriores nem desativando reenvios em sequência.
 
-```text
-Front (ChatInput)
-   │  supabase.functions.invoke('nlq-chat', { message, session_id, context })
-   ▼
-Edge Function nlq-chat (síncrono)
-   │  valida JWT + ownership da sessão
-   │  insere user message (status='complete')
-   │  POST n8n webhook (await fetch)  ← respondToWebhook devolve JSON final
-   │  insere assistant message (status='complete', content=reply.text)
-   ▼
-Retorna { reply, assistant_id } pro front
-   │
-   ▼
-Front exibe imediatamente (Realtime já replica em outras abas)
-```
+### 3. Confirmação visual fraca
+Hoje aparece um chip "Consultando…" no header e o `AgentThinking` no corpo, mas **sem cronômetro** e sem distinguir "fila" de "agente respondendo". Quando o agente demora, o usuário não sabe se algo está acontecendo.
 
-Sem `processing`, sem `streaming`, sem `request_id`, sem polling.
+---
 
-## Mudanças
+## Plano
 
-### Backend (Supabase)
+### A) Ação manual (do seu lado, no n8n)
 
-1. Criar edge function `nlq-chat` (síncrona):
-   - Valida JWT via `getClaims`.
-   - Valida que a sessão pertence ao usuário.
-   - Insere mensagem do usuário (`role='user'`, `status='complete'`).
-   - Faz `await fetch(N8N_WEBHOOK_URL, { method:'POST', body: { app, session_id, timezone, message, context } })` com timeout de ~120s.
-   - Lê JSON `{ ok, reply: { text, highlights?, suggested_actions?, chart_payloads? }, error? }`.
-   - Insere mensagem do assistente (`role='assistant'`, `status='complete'` ou `status='error'` se `ok=false`), `content = reply.text`.
-   - Atualiza `last_message_at` da sessão (já existe trigger `sync_session_on_message`).
-   - Retorna `{ assistant_id, reply }`.
-   - CORS padrão; `verify_jwt=false` (validação manual no código).
+1. Abrir o workflow `nbl_agente` em `flows-nbl.golfine.com.br`.
+2. Garantir que o **toggle "Active"** (canto superior direito) está LIGADO. Sem isso, o webhook de produção (`webhook-nbl.golfine.com.br/...`) sempre vai ficar pendurado.
+3. Confirmar que o nó Webhook inicial está em modo **POST** e que existe um caminho até o nó "Respond to Webhook" para TODOS os branches (sucesso e erro).
+4. Após ativar, refazer o teste no chat.
 
-2. Remover edge functions: `nlq-proxy` e `nlq-proxy-async`.
+### B) Edge function `nlq-chat` (mais resiliente e instrumentada)
 
-3. Migration de limpeza:
-   - `UPDATE chat_messages SET status='error', error_detail='Mensagem migrada para novo modelo síncrono' WHERE status IN ('processing','streaming','pending');` para destravar histórico.
-   - Manter as colunas `request_id`, `client_request_id`, `processing_started_at`, `reply_to_message_id` por enquanto (não quebra tipos), mas deixar de usar.
-   - Manter funções `expire_stuck_processing_messages` e `report_client_timeout` (sem uso ativo, mas não removemos para evitar quebra).
+1. **Reduzir timeout do fetch ao n8n para 55s** (em vez de 110s) — assim a função sempre responde antes do `wall_clock_timeout` (150s) e antes do timeout interno do `supabase-js invoke` (~60s no client). Se o n8n estiver inativo, o usuário vê o erro em <1min em vez de "Failed to fetch" cego.
+2. **Logs estruturados** (`console.log`) marcando: chegada da request, início do POST ao n8n, recebimento da resposta, status final. Facilita debug futuro.
+3. **Sempre retornar HTTP 200** com `{status:'error', error_detail:'...'}` em qualquer falha do n8n — assim o `supabase.functions.invoke` no front não cai no caminho `error` por non-2xx, recebe a mensagem amigável.
+4. Mensagem de erro de timeout específica: *"O agente do n8n não respondeu em 55s. Verifique se o workflow está ativo."* (visível para o usuário no card de erro).
 
-### Frontend
+### C) Hook `useChatMessages` (anti-duplicata e UX)
 
-4. Reescrever `src/hooks/useChatMessages.ts` (versão enxuta, ~150 linhas):
-   - `loadMessages(sessionId)` — `select * from chat_messages` ordenado.
-   - `sendMessage(text)`:
-     - Optimistic insert no estado local de `user` + `assistant` placeholder com `status='pending'`.
-     - `supabase.functions.invoke('nlq-chat', { body })`.
-     - Substitui placeholder pelo retorno; em erro, marca o placeholder como `status='error'` com mensagem amigável.
-   - Realtime subscription mantida (apenas para sincronizar entre abas; insere se id ainda não existe).
-   - Remover: `ASYNC_MODE`, `STREAM_TIMEOUT_MS`, `RECOVERY_POLL_MS`, todos os timers/poll/SSE, `startAsyncTracking`, `recoveryTimer`, `EventSource`, etc.
+1. Trocar `supabase.functions.invoke` por `fetch` direto ao endpoint da função, com `AbortController` próprio de **70s** no cliente — assim não dependemos do timeout misterioso do supabase-js e podemos mostrar mensagem de erro consistente.
+2. Antes de enviar nova mensagem, **remover automaticamente do estado local as últimas mensagens com `status='error'` consecutivas** (limpa o lixo visual sem apagar do banco).
+3. Quando `status='error'` aparece, **desabilitar o reenvio automático** e exigir clique explícito em "Tentar novamente". O botão fica em estado "loading" enquanto o request anterior estiver vivo.
+4. `client_request_id` já garante idempotência no servidor; vamos garantir que se o front re-tentar com o mesmo id, atualiza o placeholder existente em vez de criar outro.
 
-5. Simplificar `src/components/chat/ChatMessage.tsx` e `AgentSteps.tsx`:
-   - Remover estados `streaming`/`processing`/`steps`/cronômetro.
-   - Manter apenas `pending` (spinner curto enquanto `invoke` não retorna), `complete`, `error`.
+### D) Confirmação visual no `ChatMessage` / `AgentThinking`
 
-6. `src/pages/Chat.tsx`: remover qualquer referência a `VITE_CHAT_ASYNC_MODE`, banners de "processando…", recovery, etc.
+1. Adicionar **cronômetro elapsed** ("Aguardando o agente · 12s") dentro do AgentThinking, atualizando a cada segundo. Isso prova que o sistema está vivo.
+2. Estados claros em sequência:
+   - `0–2s`: "Enviando para o agente…"
+   - `2–10s`: "Agente processando sua consulta…"
+   - `10–30s`: "Buscando dados nas views…"
+   - `>30s`: "Consulta complexa, ainda processando ({n}s)…"
+3. Toast curto **"Pergunta enviada ao agente"** logo após o submit, dando feedback imediato.
+4. No card de erro, mostrar o **tempo decorrido até falhar** ("Sem resposta após 55s") + botão "Tentar novamente" com mesma `client_request_id` para idempotência.
+5. Adicionar pequeno botão **"Limpar erros anteriores"** acima do input quando há ≥2 erros na sessão, para o usuário não precisar criar conversa nova.
 
-7. Variável `VITE_CHAT_ASYNC_MODE` deixa de ser usada (ignorada).
-
-### Secrets
-
-- Confirmar `N8N_WEBHOOK_URL` como secret no Supabase. Se já existir em código fixo, mover para secret. (Vou pedir para você adicionar/confirmar antes de implementar.)
+---
 
 ## Detalhes técnicos
 
-- Timeout do `fetch` para o n8n: `AbortController` com 110s (abaixo do limite de 150s do edge).
-- Em caso de timeout/erro de rede: assistant gravado com `status='error'`, `error_detail='Tempo limite excedido. Tente novamente.'` e front exibe.
-- Idempotência leve: continuar aceitando `client_request_id` opcional no body para evitar duplo-envio em double click; se já existir user message com mesmo `client_request_id` na sessão, devolve o assistant existente.
-- Sem alterações no contrato JSON do n8n (mantém o mesmo payload e response definidos no Knowledge Base).
+```text
+front (ChatInput)
+   │ submit  →  optimistic insert (user + assistant pending com cronômetro)
+   ▼
+fetch POST /functions/v1/nlq-chat   (timeout cliente 70s, AbortController)
+   ▼
+edge nlq-chat
+   │ log "request_in"
+   │ insert user message (idempotente por client_request_id)
+   │ fetch n8n  (timeout 55s, AbortController)
+   │ log "n8n_done" ou "n8n_timeout"
+   │ insert assistant (status complete|error)
+   ▼
+HTTP 200 { assistant_id, reply, status, error_detail }
+```
+
+Caminhos cobertos:
+- **n8n inativo**: erro em <60s com mensagem clara.
+- **n8n lento mas responde**: até 55s, resposta normal.
+- **Reenvio**: mesma `client_request_id` retorna a resposta já gravada (sem criar dupla).
+- **Click duplo no botão**: bloqueado pelo `submitRef` + `sending`.
+- **Sessão suja com erros**: botão de limpar oculta erros anteriores no estado local.
 
 ## Critérios de aceite
 
-- Enviar mensagem → resposta aparece na tela em uma única atualização, sem estados intermediários longos.
-- Nenhuma mensagem nova fica em `processing` no banco.
-- Recarregar a página mostra o histórico completo, todas com `status='complete'` (ou `error`).
-- Funções `nlq-proxy` e `nlq-proxy-async` removidas; apenas `nlq-chat` e `create-user` permanecem.
+- Com workflow do n8n ativo: pergunta → resposta em uma única bolha, em <60s.
+- Com workflow inativo: card de erro explícito em ~55s ("Workflow do n8n parece inativo…"), nada de "Failed to fetch".
+- Cronômetro visível durante a espera (segundos contando).
+- Reenviar a mesma pergunta após erro não cria duplicata na lista.
+- Toast "Pergunta enviada ao agente" aparece ao submeter.
+

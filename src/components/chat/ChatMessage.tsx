@@ -7,34 +7,45 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 
-const THINKING_PHRASES = [
-  'Conectando ao agente…',
-  'Interpretando sua pergunta…',
-  'Buscando dados nas views…',
-  'Calculando indicadores…',
-  'Compondo a resposta…',
-];
+function thinkingPhrase(elapsed: number): string {
+  if (elapsed < 2) return 'Enviando para o agente…';
+  if (elapsed < 10) return 'Agente processando sua consulta…';
+  if (elapsed < 30) return 'Buscando dados nas views…';
+  return 'Consulta complexa, ainda processando…';
+}
 
-const AgentThinking = memo(function AgentThinking({ softTimeout }: { softTimeout?: boolean }) {
-  const [phraseIdx, setPhraseIdx] = useState(0);
+const AgentThinking = memo(function AgentThinking({
+  startedAt,
+  softTimeout,
+}: {
+  startedAt?: number;
+  softTimeout?: boolean;
+}) {
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setPhraseIdx((i) => (i + 1) % THINKING_PHRASES.length), 2200);
+    if (!startedAt) return;
+    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [startedAt]);
+
   return (
     <div className="agent-thinking-card" aria-live="polite">
       <div className="relative flex items-center gap-3">
         <span className="agent-dots" aria-hidden>
           <span /><span /><span />
         </span>
-        <span
-          key={phraseIdx}
-          className="agent-step-active-text text-xs font-medium animate-in fade-in duration-300"
-        >
-          {THINKING_PHRASES[phraseIdx]}
+        <span className="agent-step-active-text text-xs font-medium">
+          {thinkingPhrase(elapsed)}
         </span>
+        {startedAt && (
+          <span className="ml-auto text-[11px] font-mono tabular-nums text-muted-foreground/70">
+            {elapsed}s
+          </span>
+        )}
       </div>
-      {softTimeout && (
+      {(softTimeout || elapsed > 30) && (
         <p className="relative mt-2 inline-flex items-center gap-1.5 text-[11px] text-warning">
           <Clock className="w-3 h-3" />
           Esta consulta está demorando mais que o normal — aguarde mais alguns instantes.
@@ -235,7 +246,7 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
     if (showThinking) {
       return (
         <div className="py-1">
-          <AgentThinking softTimeout={message.softTimeout} />
+          <AgentThinking startedAt={startedAt} softTimeout={message.softTimeout} />
         </div>
       );
     }
