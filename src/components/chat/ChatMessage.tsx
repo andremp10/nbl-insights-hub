@@ -1,54 +1,108 @@
 import { memo, useMemo, useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
-import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info, Clock } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info, Clock, Check as CheckIcon } from 'lucide-react';
 import { AgentSteps } from './AgentSteps';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 
-function thinkingPhrase(elapsed: number): string {
-  if (elapsed < 2) return 'Enviando para o agente…';
-  if (elapsed < 10) return 'Agente processando sua consulta…';
-  if (elapsed < 30) return 'Buscando dados nas views…';
-  return 'Consulta complexa, ainda processando…';
+// Timeline of simulated reasoning steps. Each step has a min start time (s).
+// The "active" step is the last one whose start <= elapsed. Steps with start
+// in the future appear muted; past steps appear as completed.
+const THINKING_STEPS: Array<{ start: number; label: string }> = [
+  { start: 0,   label: 'Conectando ao agente' },
+  { start: 3,   label: 'Interpretando sua pergunta' },
+  { start: 10,  label: 'Identificando views e período' },
+  { start: 25,  label: 'Consultando base de dados' },
+  { start: 60,  label: 'Agregando indicadores' },
+  { start: 120, label: 'Cruzando dados e gerando insights' },
+  { start: 240, label: 'Finalizando análise' },
+];
+
+function formatElapsed(s: number): string {
+  const mm = Math.floor(s / 60).toString().padStart(2, '0');
+  const ss = (s % 60).toString().padStart(2, '0');
+  return `${mm}:${ss}`;
 }
 
 const AgentThinking = memo(function AgentThinking({
   startedAt,
-  softTimeout,
 }: {
   startedAt?: number;
   softTimeout?: boolean;
 }) {
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(() =>
+    startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : 0,
+  );
   useEffect(() => {
     if (!startedAt) return;
-    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [startedAt]);
 
+  // Determine current active step
+  let activeIdx = 0;
+  for (let i = 0; i < THINKING_STEPS.length; i++) {
+    if (elapsed >= THINKING_STEPS[i].start) activeIdx = i;
+  }
+
   return (
     <div className="agent-thinking-card" aria-live="polite">
-      <div className="relative flex items-center gap-3">
+      <div className="relative flex items-center gap-3 mb-2">
         <span className="agent-dots" aria-hidden>
           <span /><span /><span />
         </span>
         <span className="agent-step-active-text text-xs font-medium">
-          {thinkingPhrase(elapsed)}
+          {THINKING_STEPS[activeIdx].label}…
         </span>
-        {startedAt && (
-          <span className="ml-auto text-[11px] font-mono tabular-nums text-muted-foreground/70">
-            {elapsed}s
-          </span>
-        )}
+        <span className="ml-auto text-[11px] font-mono tabular-nums text-muted-foreground/70">
+          {formatElapsed(elapsed)}
+        </span>
       </div>
-      {(softTimeout || elapsed > 30) && (
-        <p className="relative mt-2 inline-flex items-center gap-1.5 text-[11px] text-warning">
+
+      <ol className="relative space-y-1.5 pl-1">
+        {THINKING_STEPS.map((step, i) => {
+          const isDone = i < activeIdx;
+          const isActive = i === activeIdx;
+          const isFuture = i > activeIdx;
+          return (
+            <li
+              key={step.start}
+              className={cn(
+                'flex items-center gap-2 text-[11px] transition-colors duration-300',
+                isFuture && 'text-muted-foreground/30',
+                isDone && 'text-muted-foreground/60',
+                isActive && 'text-foreground/90 font-medium',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-all duration-300',
+                  isDone && 'bg-success/15 border-success/40 text-success',
+                  isActive && 'bg-primary/20 border-primary/60 text-primary animate-pulse',
+                  isFuture && 'bg-transparent border-border/40 text-transparent',
+                )}
+                aria-hidden
+              >
+                {isDone ? (
+                  <CheckIcon className="h-2.5 w-2.5" strokeWidth={3} />
+                ) : isActive ? (
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                ) : null}
+              </span>
+              <span className="truncate">{step.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {elapsed >= 240 && (
+        <p className="relative mt-2.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
           <Clock className="w-3 h-3" />
-          Esta consulta está demorando mais que o normal — aguarde mais alguns instantes.
+          Consultas longas podem levar até ~5 min. Você pode continuar usando o app — a resposta aparecerá aqui automaticamente.
         </p>
       )}
     </div>
