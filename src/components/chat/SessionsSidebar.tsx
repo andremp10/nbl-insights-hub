@@ -356,13 +356,15 @@ function RailButton({
         <button
           onClick={onClick}
           className={cn(
-            'mx-auto w-9 h-9 rounded-lg flex items-center justify-center transition-colors',
+            'group/rail mx-auto w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-150',
             variant === 'primary'
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm shadow-primary/20'
-              : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
+              ? 'bg-gradient-to-b from-primary to-[hsl(var(--primary)/0.92)] text-primary-foreground border border-primary/40 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.18),0_1px_2px_hsl(var(--primary)/0.35)] hover:shadow-[inset_0_1px_0_hsl(0_0%_100%/0.22),0_4px_12px_-2px_hsl(var(--primary)/0.5)] active:scale-[0.95]'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/60 active:scale-[0.95]',
           )}
         >
-          {children}
+          <span className={cn(variant === 'primary' && 'transition-transform duration-200 group-hover/rail:rotate-90')}>
+            {children}
+          </span>
         </button>
       </TooltipTrigger>
       <TooltipContent side="right">
