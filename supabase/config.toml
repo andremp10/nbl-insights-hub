@@ -1,12 +1,8 @@
 project_id = "bcypejzqbcwibvtbbfor"
 
-[functions.nlq-proxy]
+[functions.nlq-chat]
 verify_jwt = false
-wall_clock_timeout = 400
-
-[functions.nlq-proxy-async]
-verify_jwt = false
-wall_clock_timeout = 30
+wall_clock_timeout = 150
 
 [functions.create-user]
 verify_jwt = false
