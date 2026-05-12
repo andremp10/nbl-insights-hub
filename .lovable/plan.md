@@ -1,66 +1,86 @@
-# Correção do timeout no chat ("A consulta excedeu o tempo limite")
+## Objetivo
 
-## Diagnóstico (passo a passo)
+Eliminar toda a complexidade atual de streaming SSE e fila assíncrona (status `processing`, polling, watchdog, soft/hard timeout) que está causando mensagens travadas no Supabase. Voltar ao padrão simples: o front chama o edge function → o edge function chama o webhook do n8n (`respondToWebhook`) e aguarda a resposta final → grava `assistant` com `status='complete'` e devolve o texto. Sem SSE, sem polling, sem `nlq-proxy-async`.
 
-A mensagem exata exibida no chat é:
-> "A consulta excedeu o tempo limite. Tente reformular ou reduzir o período."
+## Causa do problema atual
 
-Essa string está **apenas** em um lugar do projeto: a função SQL `public.expire_stuck_processing_messages` (migration `20260429193647…`), executada por `pg_cron` a cada 1 minuto.
+O fluxo async grava `assistant` em `status='processing'` esperando que o n8n confirme depois via outro canal. Quando algo falha no meio (timeout do edge runtime, n8n não confirma, perda de conexão), a mensagem fica presa em `processing` e o usuário nunca vê a resposta. Há ainda dois proxies (`nlq-proxy` SSE + `nlq-proxy-async`) e múltiplos timers no front que se sobrepõem.
 
-```sql
-WHERE status = 'processing'
-  AND processing_started_at < now() - interval '12 minutes';
+## Arquitetura nova (simples)
+
+```text
+Front (ChatInput)
+   │  supabase.functions.invoke('nlq-chat', { message, session_id, context })
+   ▼
+Edge Function nlq-chat (síncrono)
+   │  valida JWT + ownership da sessão
+   │  insere user message (status='complete')
+   │  POST n8n webhook (await fetch)  ← respondToWebhook devolve JSON final
+   │  insere assistant message (status='complete', content=reply.text)
+   ▼
+Retorna { reply, assistant_id } pro front
+   │
+   ▼
+Front exibe imediatamente (Realtime já replica em outras abas)
 ```
 
-Ou seja: o watchdog matou a `assistant_message` por ficar **mais de 12 min em `processing`**, sem nunca observar se o agente continuava ativo.
+Sem `processing`, sem `streaming`, sem `request_id`, sem polling.
 
-Por que disparou na pergunta "prossiga":
-- A pergunta original ("faturamento atual + comparar com 10 primeiros dias dos últimos 3 meses + projeção de maio") explodiu em N iterações no n8n (vários `agente_consulta` + `agente_financeiro` + `agente_negocio`).
-- Cada chamada de tool/Supabase/LLM custa segundos. A soma estourou 12 min.
-- O cliente (`ASYNC_HARD_TIMEOUT_MS = 12min`) e o servidor (watchdog 12min) coincidem → não há margem nem heartbeat.
-- Resultado: o n8n ainda estava trabalhando quando o watchdog marcou `error` e o usuário viu a mensagem.
+## Mudanças
 
-Ponto crítico de design: o watchdog hoje **ignora** `updated_at`. Mesmo se o n8n estivesse fazendo progresso (escrevendo steps/conteúdo parcial), seria morto.
+### Backend (Supabase)
 
-## Correções
+1. Criar edge function `nlq-chat` (síncrona):
+   - Valida JWT via `getClaims`.
+   - Valida que a sessão pertence ao usuário.
+   - Insere mensagem do usuário (`role='user'`, `status='complete'`).
+   - Faz `await fetch(N8N_WEBHOOK_URL, { method:'POST', body: { app, session_id, timezone, message, context } })` com timeout de ~120s.
+   - Lê JSON `{ ok, reply: { text, highlights?, suggested_actions?, chart_payloads? }, error? }`.
+   - Insere mensagem do assistente (`role='assistant'`, `status='complete'` ou `status='error'` se `ok=false`), `content = reply.text`.
+   - Atualiza `last_message_at` da sessão (já existe trigger `sync_session_on_message`).
+   - Retorna `{ assistant_id, reply }`.
+   - CORS padrão; `verify_jwt=false` (validação manual no código).
 
-### 1. Watchdog baseado em atividade (DB)
-Migration nova alterando duas funções:
+2. Remover edge functions: `nlq-proxy` e `nlq-proxy-async`.
 
-- `expire_stuck_processing_messages`: trocar a condição para
-  `GREATEST(processing_started_at, updated_at) < now() - interval '15 minutes'`.
-- `report_client_timeout`: mesma lógica + janela de 15 min.
+3. Migration de limpeza:
+   - `UPDATE chat_messages SET status='error', error_detail='Mensagem migrada para novo modelo síncrono' WHERE status IN ('processing','streaming','pending');` para destravar histórico.
+   - Manter as colunas `request_id`, `client_request_id`, `processing_started_at`, `reply_to_message_id` por enquanto (não quebra tipos), mas deixar de usar.
+   - Manter funções `expire_stuck_processing_messages` e `report_client_timeout` (sem uso ativo, mas não removemos para evitar quebra).
 
-Efeito: qualquer UPDATE feito pelo n8n (heartbeat, parcial, step) zera o relógio. Mensagens realmente travadas continuam sendo limpas.
+### Frontend
 
-### 2. Alinhar timeouts no cliente
-`src/hooks/useChatMessages.ts`:
-- `ASYNC_SOFT_TIMEOUT_MS`: 6min → 8min (aviso "demorando mais que o normal").
-- `ASYNC_HARD_TIMEOUT_MS`: 12min → 15min (bate com o watchdog).
+4. Reescrever `src/hooks/useChatMessages.ts` (versão enxuta, ~150 linhas):
+   - `loadMessages(sessionId)` — `select * from chat_messages` ordenado.
+   - `sendMessage(text)`:
+     - Optimistic insert no estado local de `user` + `assistant` placeholder com `status='pending'`.
+     - `supabase.functions.invoke('nlq-chat', { body })`.
+     - Substitui placeholder pelo retorno; em erro, marca o placeholder como `status='error'` com mensagem amigável.
+   - Realtime subscription mantida (apenas para sincronizar entre abas; insere se id ainda não existe).
+   - Remover: `ASYNC_MODE`, `STREAM_TIMEOUT_MS`, `RECOVERY_POLL_MS`, todos os timers/poll/SSE, `startAsyncTracking`, `recoveryTimer`, `EventSource`, etc.
 
-### 3. Mensagem de erro mais útil
-Atualizar o texto do watchdog e do `report_client_timeout` para:
-> "A consulta ficou sem resposta por muito tempo. Tente dividir em partes (ex.: peça um módulo ou um período por vez)."
+5. Simplificar `src/components/chat/ChatMessage.tsx` e `AgentSteps.tsx`:
+   - Remover estados `streaming`/`processing`/`steps`/cronômetro.
+   - Manter apenas `pending` (spinner curto enquanto `invoke` não retorna), `complete`, `error`.
 
-E em `ChatMessage.tsx`, o subtítulo do estado de erro continua sugerindo reformular — manter consistente.
+6. `src/pages/Chat.tsx`: remover qualquer referência a `VITE_CHAT_ASYNC_MODE`, banners de "processando…", recovery, etc.
 
-### 4. Recomendação para o n8n (fora do código, instrução ao agente)
-Ajustar o system prompt do `agente_negocio` para, em planos com 3+ etapas:
-- responder em **chunks** (atualizar a `chat_message` parcialmente via Supabase tool a cada etapa concluída) — isso ativa o heartbeat e impede o watchdog de matar.
-- Quando o plano for muito grande, devolver primeiro a Visão Geral + Análise do mês atual e perguntar se quer continuar com a comparação histórica.
+7. Variável `VITE_CHAT_ASYNC_MODE` deixa de ser usada (ignorada).
 
-Essa parte não exige código no front, mas eu deixo a instrução pronta para colar no n8n.
+### Secrets
 
-## Arquivos afetados
+- Confirmar `N8N_WEBHOOK_URL` como secret no Supabase. Se já existir em código fixo, mover para secret. (Vou pedir para você adicionar/confirmar antes de implementar.)
 
-- `supabase/migrations/<nova>.sql` — atualizar `expire_stuck_processing_messages` e `report_client_timeout`.
-- `src/hooks/useChatMessages.ts` — bump dos dois timeouts.
-- (opcional) Texto de erro centralizado.
+## Detalhes técnicos
 
-## Verificação após aplicar
+- Timeout do `fetch` para o n8n: `AbortController` com 110s (abaixo do limite de 150s do edge).
+- Em caso de timeout/erro de rede: assistant gravado com `status='error'`, `error_detail='Tempo limite excedido. Tente novamente.'` e front exibe.
+- Idempotência leve: continuar aceitando `client_request_id` opcional no body para evitar duplo-envio em double click; se já existir user message com mesmo `client_request_id` na sessão, devolve o assistant existente.
+- Sem alterações no contrato JSON do n8n (mantém o mesmo payload e response definidos no Knowledge Base).
 
-1. Conferir no SQL editor que as duas funções têm `GREATEST(...) < now() - interval '15 minutes'`.
-2. Rodar `select cron.job` e confirmar que o job continua agendado.
-3. Repetir o pedido "prossiga" no chat com a pergunta complexa; observar:
-   - barra de steps continua avançando além de 6 min sem virar erro;
-   - se chegar a 15 min sem qualquer UPDATE, o erro aparece com a nova mensagem.
+## Critérios de aceite
+
+- Enviar mensagem → resposta aparece na tela em uma única atualização, sem estados intermediários longos.
+- Nenhuma mensagem nova fica em `processing` no banco.
+- Recarregar a página mostra o histórico completo, todas com `status='complete'` (ou `error`).
+- Funções `nlq-proxy` e `nlq-proxy-async` removidas; apenas `nlq-chat` e `create-user` permanecem.
