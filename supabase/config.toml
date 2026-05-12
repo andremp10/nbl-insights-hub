@@ -6,3 +6,7 @@ wall_clock_timeout = 150
 
 [functions.create-user]
 verify_jwt = false
+
+[functions.nlq-callback]
+verify_jwt = false
+wall_clock_timeout = 30
