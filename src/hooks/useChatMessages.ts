@@ -194,7 +194,10 @@ export function useChatMessages(sessionId: string | null) {
         (payload) => {
           const m = payload.new as ChatMessage;
           setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...m, startedAt: x.startedAt } : x)));
-          if (m.status === 'complete' || m.status === 'error') clearSafetyTimer(m.id);
+          if (m.status === 'complete' || m.status === 'error') {
+            clearSafetyTimer(m.id);
+            clearPoller(m.id);
+          }
         },
       )
       .subscribe();
