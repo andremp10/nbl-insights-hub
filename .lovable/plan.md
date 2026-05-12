@@ -1,47 +1,52 @@
-# Refino visual da resposta do assistente NBL
+# Resposta do agente não aparece após callback
 
-Aplicar a direção **B2B Dense Professional** ao bloco de resposta do assistente no chat, mantendo o conteúdo markdown vindo do n8n intacto e elevando apenas a apresentação.
+## Diagnóstico
 
-## Mudanças
+Verifiquei o último callback (assistant `a47dd844-…`) e está tudo correto no backend:
+- Edge function `nlq-callback` retornou `ok status=complete len=2178`
+- A linha em `chat_messages` está com `status=complete`, `content` com 2178 chars e `completed_at` preenchido
 
-### 1. Headings (H2/H3) — `ChatMessage.tsx` markdownComponents
-Transformar `## Resumo`, `## Dados detalhados`, `## Insight` em **section labels** padronizados:
-- Barra vertical primary (`w-[2px] h-4 bg-primary`) à esquerda
-- Texto `text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground`
-- Espaçamento generoso acima (`mt-6`) para separar seções claramente
+Ou seja, o problema é **no client**: o evento Realtime de UPDATE não está atualizando a mensagem na tela. Encontrei duas causas prováveis:
 
-### 2. Números-chave em destaque — componente `<strong>`
-Quando um `<strong>` contém um número/valor (regex: dígitos + opcional unidade tipo "pedidos", "unidades", "R$", "%"), renderizar como **chip inline**:
-- `inline-flex items-baseline font-semibold text-primary bg-primary/5 px-1 rounded`
-- Demais `<strong>` (texto puro como nome de produto) mantêm `text-foreground font-semibold`
+### Causa 1 — `REPLICA IDENTITY` da tabela `chat_messages` está como DEFAULT
+```
+relreplident = 'd'  (default = só PK)
+```
+Com isso o Postgres só envia a PK no WAL para UPDATE. O Supabase Realtime entrega o evento, mas `payload.new` chega com campos faltando (sem `content`, `status`, `completed_at`). O handler em `useChatMessages.ts` faz `{ ...x, ...m }` — se `m.status` vier vazio/igual, nada muda visualmente, e `content` continua "" do estado `processing`.
 
-### 3. Tabelas — refino dos componentes `table/thead/tbody/tr/td`
-- Container: `border border-border rounded-sm overflow-hidden` (substitui `rounded-lg border-border/60`)
-- Header: `bg-muted/40 border-b border-border` + `text-[11px] font-semibold text-muted-foreground uppercase tracking-wider`
-- Linhas: remover zebra atual (`nth-child(even)`), usar `divide-y divide-border/50` + hover `bg-muted/20`
-- Células numéricas: já detectadas, manter `font-mono tabular-nums text-right`, cor `text-foreground` (mais brilhante)
-- Reduzir padding vertical (`py-2` em td) para densidade B2B
+Para Realtime entregar a linha completa em UPDATE é necessário `REPLICA IDENTITY FULL`.
 
-### 4. Insight (blockquote ou parágrafo final) — `<blockquote>` component
-Adicionar componente `blockquote` ao markdownComponents:
-- `bg-muted/30 border-l-2 border-primary p-4 italic text-foreground/90 leading-relaxed`
-- Como o agente nem sempre usa blockquote, detectar no MarkdownBody se a última seção é "Insight"/"Insights" e envolver o conteúdo seguinte automaticamente — alternativa mais simples: instruir o prompt do n8n a usar `>` para o insight (fora do escopo desta task; aplicar via styling do blockquote já cobre quando vier).
+### Causa 2 — Não há fallback se o evento Realtime se perder
+Se a conexão WebSocket cair entre o `bg_ack` e o callback do n8n (até ~2 min depois), a UI fica presa em "processing" para sempre (até o safety timer de 12 min marcar erro), mesmo com a resposta já salva no banco.
 
-### 5. Chips de metadata (Período/Escopo) — manter, refinar
-Já existem via `<em>` detection. Pequenos ajustes:
-- `bg-muted/40 border border-border` (mais sólido, menos transparente)
-- Chip de "Escopo" ganha variante com borda primary suave: `border-primary/20 text-primary` quando começar com "Escopo:"
+## Plano
 
-### 6. Container do bloco assistente — `pl-7` atual
-- Adicionar `space-y-4` no wrapper interno para respiro entre seções
-- Sem card/borda externa (manter flat, conforme memória "no glassmorphism, flat chat UI")
+### 1. Migração SQL — `REPLICA IDENTITY FULL`
+```sql
+ALTER TABLE public.chat_messages REPLICA IDENTITY FULL;
+```
+Garante que UPDATE via Realtime traga o registro inteiro (`content`, `status`, `error_detail`, `completed_at`).
 
-## Arquivo afetado
-- `src/components/chat/ChatMessage.tsx` (apenas o objeto `markdownComponents` e pequenos ajustes de wrapper)
+### 2. Fallback de polling no client — `src/hooks/useChatMessages.ts`
+Quando uma mensagem assistant entra em `processing` (após o `bg_ack` ou após reload), além do `armSafetyTimer` (12 min → erro), agendar um **poller leve**:
 
-Sem mudanças em CSS global, sem novos componentes, sem mudança de lógica/dados.
+- A cada 5s, fazer um SELECT pontual em `chat_messages` por `id = realAssistantId`
+- Se vier `status === 'complete'` ou `'error'`, atualizar o estado local e parar o poller
+- Parar também quando o Realtime UPDATE chegar antes (usar a mesma `clearSafetyTimer`/novo `clearPoller`)
+- Limite máximo: parar após `CLIENT_HARD_TIMEOUT_MS` (12 min) — o safety timer cuida do resto
+
+Isso cobre:
+- Perda de evento Realtime (rede instável, aba em background, suspensão do laptop)
+- Casos onde o INSERT Realtime chegou mas o UPDATE não
+
+### 3. Recuperação ao montar / trocar de sessão
+No `useEffect` que carrega histórico (já existe), além de `armSafetyTimer`, **iniciar o poller** para qualquer mensagem `processing` encontrada — assim, ao reabrir a aba, a UI converge mesmo sem evento Realtime.
+
+## Arquivos afetados
+- Nova migração SQL (REPLICA IDENTITY FULL em `chat_messages`)
+- `src/hooks/useChatMessages.ts` — adicionar `pollersRef`, funções `armPoller`/`clearPoller`, integrar nos 3 pontos (sendMessage após bg_ack, load history, realtime UPDATE handler limpa o poller)
 
 ## Fora de escopo
-- Footer "Exportar CSV / Copiar" do protótipo (já existe botão Copiar; manter)
-- Badges de "Status" coloridos (Estável/Alta/Neutro) — não vêm na resposta atual
-- Mudanças no prompt do agente n8n
+- Mudanças no agente n8n
+- Mudanças no `nlq-callback` (já está correto)
+- Refatoração visual do `ChatMessage.tsx` (separado)
