@@ -46,6 +46,35 @@ export function useChatMessages(sessionId: string | null) {
   const sendingRef = useRef(false);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const safetyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pollersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+  const clearPoller = useCallback((assistantId: string) => {
+    const p = pollersRef.current.get(assistantId);
+    if (p) {
+      clearInterval(p);
+      pollersRef.current.delete(assistantId);
+    }
+  }, []);
+
+  const armPoller = useCallback((assistantId: string) => {
+    if (pollersRef.current.has(assistantId)) return;
+    const interval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('id, content, status, error_detail, completed_at, processing_started_at')
+        .eq('id', assistantId)
+        .maybeSingle();
+      if (error) return;
+      if (!data) return;
+      if (data.status === 'complete' || data.status === 'error') {
+        setMessages((prev) =>
+          prev.map((x) => (x.id === assistantId ? { ...x, ...(data as Partial<ChatMessage>) } : x)),
+        );
+        clearPoller(assistantId);
+      }
+    }, 5000);
+    pollersRef.current.set(assistantId, interval);
+  }, [clearPoller]);
 
   const armSafetyTimer = useCallback((assistantId: string) => {
     const timers = safetyTimersRef.current;
@@ -101,9 +130,12 @@ export function useChatMessages(sessionId: string | null) {
         } else {
           const list = ((data ?? []) as ChatMessage[]).map(withStartedAt);
           setMessages(list);
-          // re-arm safety nets for any in-flight assistant messages
+          // re-arm safety nets and pollers for any in-flight assistant messages
           list.forEach((m) => {
-            if (m.role === 'assistant' && m.status === 'processing') armSafetyTimer(m.id);
+            if (m.role === 'assistant' && m.status === 'processing') {
+              armSafetyTimer(m.id);
+              armPoller(m.id);
+            }
           });
         }
         setLoading(false);
@@ -111,7 +143,7 @@ export function useChatMessages(sessionId: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, armSafetyTimer]);
+  }, [sessionId, armSafetyTimer, armPoller]);
 
   // ── Realtime sync ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -162,7 +194,10 @@ export function useChatMessages(sessionId: string | null) {
         (payload) => {
           const m = payload.new as ChatMessage;
           setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...m, startedAt: x.startedAt } : x)));
-          if (m.status === 'complete' || m.status === 'error') clearSafetyTimer(m.id);
+          if (m.status === 'complete' || m.status === 'error') {
+            clearSafetyTimer(m.id);
+            clearPoller(m.id);
+          }
         },
       )
       .subscribe();
@@ -171,13 +206,15 @@ export function useChatMessages(sessionId: string | null) {
       supabase.removeChannel(ch);
       channelRef.current = null;
     };
-  }, [sessionId, clearSafetyTimer]);
+  }, [sessionId, clearSafetyTimer, clearPoller]);
 
-  // Cleanup all safety timers on unmount
+  // Cleanup all safety timers and pollers on unmount
   useEffect(() => {
     return () => {
       safetyTimersRef.current.forEach((t) => clearTimeout(t));
       safetyTimersRef.current.clear();
+      pollersRef.current.forEach((p) => clearInterval(p));
+      pollersRef.current.clear();
     };
   }, []);
 
@@ -297,6 +334,7 @@ export function useChatMessages(sessionId: string | null) {
           }),
         );
         armSafetyTimer(realAssistantId);
+        armPoller(realAssistantId);
         return true;
       } catch (e: any) {
         const aborted = e?.name === 'AbortError';
@@ -320,7 +358,7 @@ export function useChatMessages(sessionId: string | null) {
         setSending(false);
       }
     },
-    [sessionId, armSafetyTimer],
+    [sessionId, armSafetyTimer, armPoller],
   );
 
   const retryMessage = useCallback(
