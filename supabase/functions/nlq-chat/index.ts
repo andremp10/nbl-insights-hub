@@ -13,8 +13,9 @@ const corsHeaders = {
 const N8N_WEBHOOK_URL =
   'https://webhook-nbl.golfine.com.br/webhook/4831bc34-510b-46f1-a3e5-96299a45fab6';
 
-// n8n agent can take up to ~5 min; allow generous headroom (9 min).
-const N8N_TIMEOUT_MS = 9 * 60_000;
+// n8n only needs to ACK that it received the request. The final answer
+// comes back asynchronously via the nlq-callback edge function.
+const N8N_TIMEOUT_MS = 30_000;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
