@@ -170,45 +170,16 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
 
           {/* Chat actions */}
           <div className="px-2 flex flex-col gap-1 shrink-0">
-            <RailButton tooltip="Expandir conversas (Ctrl+B)" onClick={() => onModeChange('expanded')}>
-              <PanelLeft className="w-4 h-4" />
-            </RailButton>
             <RailButton tooltip="Nova conversa (Ctrl+Shift+O)" onClick={onCreateSession} variant="primary">
               <Plus className="w-4 h-4" />
             </RailButton>
-            <RailButton tooltip="Buscar (Ctrl+K)" onClick={() => onModeChange('expanded')}>
-              <Search className="w-4 h-4" />
+            <RailButton tooltip="Ver conversas (Ctrl+B)" onClick={() => onModeChange('expanded')}>
+              <PanelLeft className="w-4 h-4" />
             </RailButton>
           </div>
 
-          <div className="my-1 mx-3 h-px bg-border/60 shrink-0" />
+          <div className="flex-1" />
 
-          {/* Recent sessions */}
-          <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col items-center gap-1 px-2 py-1">
-            {recent.map(s => {
-              const isActive = s.id === currentSessionId;
-              const isPinned = pinnedIds.has(s.id);
-              return (
-                <Tooltip key={s.id}>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => handleSelect(s.id)}
-                      className={cn(
-                        'w-9 h-9 rounded-lg flex items-center justify-center transition-colors relative',
-                        isActive ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-                      )}
-                    >
-                      {isActive && <span aria-hidden className="absolute left-0 top-2 bottom-2 w-[2px] rounded-r bg-primary" />}
-                      {isPinned ? '★' : <MessageSquare className="w-3.5 h-3.5" />}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-[240px]">
-                    <p className="text-xs font-medium truncate">{s.title || 'Nova conversa'}</p>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
 
           {/* Footer */}
           <div className="px-2 pb-2 pt-1 border-t border-border/70 flex flex-col gap-1 shrink-0">
