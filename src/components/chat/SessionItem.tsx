@@ -107,13 +107,8 @@ export const SessionItem = memo(function SessionItem({
               : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
           )}
         >
-          {isPinned ? (
+          {isPinned && (
             <Pin className="w-3 h-3 shrink-0 text-primary fill-primary/40" />
-          ) : (
-            <span className={cn(
-              'w-1.5 h-1.5 rounded-full shrink-0',
-              isActive ? 'bg-primary' : 'bg-muted-foreground/40'
-            )} />
           )}
 
           <span className={cn(
@@ -124,8 +119,9 @@ export const SessionItem = memo(function SessionItem({
           </span>
 
           <span className={cn(
-            'text-[10px] tabular-nums shrink-0 transition-opacity',
-            isActive ? 'text-muted-foreground/70' : 'text-muted-foreground/40 group-hover/item:opacity-0'
+            'text-[10px] tabular-nums shrink-0 text-muted-foreground/50',
+            'opacity-0 group-hover/item:opacity-100 transition-opacity',
+            isActive && 'opacity-100 text-muted-foreground/70'
           )}>
             {time}
           </span>
