@@ -289,7 +289,34 @@ interface ChatMessageProps {
   onFollowUp?: (text: string) => void;
 }
 
-export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatMessageProps) {
+const FOLLOWUPS: Array<{ label: string; suffix: string }> = [
+  { label: 'Detalhar por mês', suffix: ' — detalhe por mês com variação percentual' },
+  { label: 'Top 10 apenas', suffix: ' — mostre apenas os 10 maiores' },
+  { label: 'Comparar período anterior', suffix: ' — compare com o período anterior equivalente' },
+];
+
+/** Extrai a primeira tabela markdown do conteúdo e converte para CSV. */
+function extractTableAsCsv(content: string): string | null {
+  const lines = content.split('\n');
+  const tableLines: string[] = [];
+  let inTable = false;
+  for (const line of lines) {
+    const isPipe = /^\s*\|/.test(line);
+    if (isPipe) { inTable = true; tableLines.push(line); }
+    else if (inTable) break;
+  }
+  if (tableLines.length < 2) return null;
+  // Remove separator row (---)
+  const rows = tableLines.filter(l => !/^\s*\|?\s*:?-{2,}/.test(l.replace(/\|/g, '')));
+  if (rows.length < 1) return null;
+  const csv = rows.map(line => {
+    const cells = line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    return cells.map(c => /[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c).join(',');
+  }).join('\n');
+  return csv;
+}
+
+export const ChatMessage = memo(function ChatMessage({ message, onRetry, onFollowUp }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const isPending = message.status === 'pending';
   const isStreaming = message.status === 'streaming';
@@ -302,11 +329,15 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
 
   const hasSteps = !!(message.steps && message.steps.length > 0);
   const hasContent = !!message.content;
-  // Keep steps visible (collapsed) once content starts so the user sees what happened
   const showSteps = !isUser && hasSteps && !isError;
   const showThinking = !isUser && isInFlight && !hasSteps && !hasContent;
   const showSkeleton = !isUser && isInFlight && hasSteps && !hasContent;
   const startedAt = message.startedAt;
+
+  const csvAvailable = useMemo(
+    () => !isUser && isComplete && hasContent ? extractTableAsCsv(message.content) : null,
+    [isUser, isComplete, hasContent, message.content]
+  );
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content).then(() => {
@@ -315,6 +346,20 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
       setTimeout(() => setCopied(false), 2000);
     });
   }, [message.content]);
+
+  const handleExportCsv = useCallback(() => {
+    if (!csvAvailable) return;
+    const blob = new Blob([csvAvailable], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nbl-tabela-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success('Tabela exportada como CSV');
+  }, [csvAvailable]);
 
   if (isUser) {
     return (
@@ -409,16 +454,49 @@ export const ChatMessage = memo(function ChatMessage({ message, onRetry }: ChatM
         {renderContent()}
       </div>
 
-      {/* Actions */}
+      {/* Actions toolbar */}
       {isComplete && message.content && (
-        <div className={cn('pl-7 flex items-center gap-2 mt-1.5 transition-opacity duration-200', hovered ? 'opacity-100' : 'opacity-0')}>
+        <div className={cn('pl-7 flex items-center gap-3 mt-2 transition-opacity duration-200', hovered ? 'opacity-100' : 'opacity-60')}>
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+            className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
             aria-label="Copiar mensagem"
           >
             {copied ? <><Check className="w-3 h-3 text-success" /><span className="text-success">Copiado</span></> : <><Copy className="w-3 h-3" /><span>Copiar</span></>}
           </button>
+          {csvAvailable && (
+            <button
+              onClick={handleExportCsv}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+              aria-label="Exportar tabela como CSV"
+            >
+              <FileDown className="w-3 h-3" />
+              <span>Exportar CSV</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Follow-up suggestions */}
+      {isComplete && message.content && onFollowUp && (
+        <div className="pl-7 mt-2.5 flex flex-wrap gap-1.5">
+          <span className="inline-flex items-center gap-1 text-[9px] uppercase tracking-wider font-semibold text-muted-foreground/40 self-center pr-1">
+            <Sparkles className="w-2.5 h-2.5" />
+            Refinar
+          </span>
+          {FOLLOWUPS.map((f) => (
+            <button
+              key={f.label}
+              onClick={() => onFollowUp(message.content + f.suffix)}
+              className={cn(
+                'text-[10.5px] px-2 py-1 rounded-full border border-border/40',
+                'text-muted-foreground/70 hover:text-foreground',
+                'hover:border-primary/30 hover:bg-primary/5 transition-all duration-150'
+              )}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
