@@ -474,10 +474,9 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
                   onOpenChange={() => toggleGroup(groupLabel)}
                   className={cn('mb-3', groupIdx > 0 && 'pt-3 mt-1 border-t border-border/40')}
                 >
-                  <CollapsibleTrigger className="w-full px-3 pt-0.5 pb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 hover:text-foreground transition-colors">
+                  <CollapsibleTrigger className="w-full px-3 pt-0.5 pb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60 hover:text-foreground transition-colors">
                     <ChevronDown className={cn('w-3 h-3 transition-transform duration-150', !isOpen && '-rotate-90')} />
                     <span>{groupLabel}</span>
-                    <span className="font-mono text-muted-foreground/50">· {items.length}</span>
                   </CollapsibleTrigger>
                   <CollapsibleContent>{content}</CollapsibleContent>
                 </Collapsible>
