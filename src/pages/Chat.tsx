@@ -154,6 +154,14 @@ export default function Chat() {
     [groupedSessions]
   );
 
+  const recentForEmpty = useMemo(
+    () => sessions
+      .filter(s => s.id !== currentSessionId)
+      .slice(0, 3)
+      .map(s => ({ id: s.id, title: s.title || 'Nova conversa', last_message_at: s.last_message_at })),
+    [sessions, currentSessionId]
+  );
+
   const navigateRelative = useCallback((delta: number) => {
     if (visibleSessionIds.length === 0) return;
     const idx = currentSessionId ? visibleSessionIds.indexOf(currentSessionId) : -1;
