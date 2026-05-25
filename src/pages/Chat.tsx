@@ -8,7 +8,6 @@ import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useChatShortcuts } from '@/hooks/useChatShortcuts';
 import { Badge } from '@/components/ui/badge';
-import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 
 const SIDEBAR_MODE_KEY = 'nbl_sidebar_mode';
@@ -207,13 +206,11 @@ export default function Chat() {
         {/* ── Header ── */}
         <div className="flex items-center justify-between gap-2 px-3 sm:px-4 md:px-6 h-12 shrink-0 border-b border-border/60 bg-background/80 backdrop-blur-sm">
           <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
-            {/* Mobile: app navigation trigger */}
-            <SidebarTrigger className="md:hidden text-muted-foreground hover:text-foreground -ml-1 shrink-0" />
-            {/* Conversations trigger (when sidebar not expanded) */}
+            {/* Conversations trigger (when sidebar not expanded) — works on mobile + desktop */}
             {sidebarMode !== 'expanded' && (
               <button
                 onClick={toggleSidebar}
-                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 -ml-1"
                 title="Abrir conversas (Ctrl+B)"
                 aria-label="Abrir conversas"
               >

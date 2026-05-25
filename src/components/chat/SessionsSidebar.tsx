@@ -1,8 +1,12 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   PanelLeft, PanelLeftClose, Plus, Search, X, MessageSquarePlus, ChevronDown, MessageSquare,
+  Printer, LayoutDashboard, Bot, Wallet, PackageSearch, LogOut, UserPlus,
 } from 'lucide-react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useAuth } from '@/contexts/AuthContext';
+import { ThemeToggle } from '@/components/theme/ThemeToggle';
 import { cn } from '@/lib/utils';
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
@@ -13,6 +17,10 @@ import {
 import type { ChatSession } from '@/hooks/useChatSessions';
 import { SessionItem } from './SessionItem';
 import { DeleteSessionDialog } from './DeleteSessionDialog';
+
+const CreateUserModal = lazy(() =>
+  import('@/components/admin/CreateUserModal').then(m => ({ default: m.CreateUserModal }))
+);
 
 export type SidebarMode = 'expanded' | 'rail' | 'hidden';
 
@@ -37,6 +45,13 @@ interface Props {
 const ALWAYS_OPEN_GROUPS = new Set(['Fixadas', 'Hoje', 'Ontem']);
 const COLLAPSE_KEY = 'nbl_sidebar_collapsed_groups';
 
+const APP_NAV = [
+  { title: 'Home', url: '/', icon: LayoutDashboard, end: true },
+  { title: 'Assistente', url: '/chat', icon: Bot, end: false },
+  { title: 'Financeiro', url: '/financeiro', icon: Wallet, end: false },
+  { title: 'Pedidos', url: '/pedidos', icon: PackageSearch, end: false },
+];
+
 function loadCollapsed(): Set<string> {
   try {
     const raw = localStorage.getItem(COLLAPSE_KEY);
@@ -49,16 +64,22 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
   onDeleteSession, onRenameSession, onTogglePinSession, mode, onModeChange, loading,
 }, ref) {
   const isMobile = useIsMobile();
+  const { signOut, isMaster } = useAuth();
+  const { pathname } = useLocation();
   const [query, setQuery] = useState('');
   const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
   const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
+  const [showCreateUser, setShowCreateUser] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const handleSelect = (id: string) => {
     onSelectSession(id);
     if (isMobile) onModeChange('hidden');
   };
+
+  const isNavActive = (url: string, end: boolean) =>
+    end ? pathname === url : pathname.startsWith(url);
 
   useImperativeHandle(ref, () => ({
     focusSearch: () => {
@@ -104,7 +125,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
 
   // Recent flat list for rail
   const recent = useMemo(
-    () => groupedSessions.flatMap(([, items]) => items).slice(0, 10),
+    () => groupedSessions.flatMap(([, items]) => items).slice(0, 8),
     [groupedSessions]
   );
 
@@ -112,18 +133,58 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
   if (mode === 'rail') {
     return (
       <TooltipProvider delayDuration={150}>
-        <aside className="hidden md:flex flex-col w-[52px] h-full border-r border-border bg-sidebar-background py-2 gap-1 shrink-0">
-          <RailButton tooltip="Expandir (Ctrl+B)" onClick={() => onModeChange('expanded')}>
-            <PanelLeft className="w-4 h-4" />
-          </RailButton>
-          <RailButton tooltip="Nova conversa (Ctrl+Shift+O)" onClick={onCreateSession} variant="primary">
-            <Plus className="w-4 h-4" />
-          </RailButton>
-          <RailButton tooltip="Buscar (Ctrl+K)" onClick={() => onModeChange('expanded')}>
-            <Search className="w-4 h-4" />
-          </RailButton>
-          <div className="my-1 mx-3 h-px bg-border/60" />
-          <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col items-center gap-1 px-2">
+        <aside className="hidden md:flex flex-col w-[56px] h-full border-r border-border bg-sidebar-background shrink-0">
+          {/* Brand */}
+          <div className="h-12 flex items-center justify-center border-b border-border/70 shrink-0">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Printer className="h-4 w-4" />
+            </div>
+          </div>
+
+          {/* App nav */}
+          <nav className="px-2 pt-2 pb-1 flex flex-col gap-1 shrink-0">
+            {APP_NAV.map(item => {
+              const active = isNavActive(item.url, item.end);
+              return (
+                <Tooltip key={item.url}>
+                  <TooltipTrigger asChild>
+                    <NavLink
+                      to={item.url}
+                      end={item.end}
+                      className={cn(
+                        'relative w-full h-9 rounded-lg flex items-center justify-center transition-colors',
+                        active ? 'bg-primary/12 text-primary' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                      )}
+                    >
+                      {active && <span aria-hidden className="absolute left-0 top-2 bottom-2 w-[2px] rounded-r bg-primary" />}
+                      <item.icon className="h-[18px] w-[18px]" />
+                    </NavLink>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="text-xs">{item.title}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </nav>
+
+          <div className="my-1 mx-3 h-px bg-border/60 shrink-0" />
+
+          {/* Chat actions */}
+          <div className="px-2 flex flex-col gap-1 shrink-0">
+            <RailButton tooltip="Expandir conversas (Ctrl+B)" onClick={() => onModeChange('expanded')}>
+              <PanelLeft className="w-4 h-4" />
+            </RailButton>
+            <RailButton tooltip="Nova conversa (Ctrl+Shift+O)" onClick={onCreateSession} variant="primary">
+              <Plus className="w-4 h-4" />
+            </RailButton>
+            <RailButton tooltip="Buscar (Ctrl+K)" onClick={() => onModeChange('expanded')}>
+              <Search className="w-4 h-4" />
+            </RailButton>
+          </div>
+
+          <div className="my-1 mx-3 h-px bg-border/60 shrink-0" />
+
+          {/* Recent sessions */}
+          <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col items-center gap-1 px-2 py-1">
             {recent.map(s => {
               const isActive = s.id === currentSessionId;
               const isPinned = pinnedIds.has(s.id);
@@ -148,6 +209,40 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
               );
             })}
           </div>
+
+          {/* Footer */}
+          <div className="px-2 pb-2 pt-1 border-t border-border/70 flex flex-col gap-1 shrink-0">
+            {isMaster && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setShowCreateUser(true)}
+                    className="w-full h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+                  >
+                    <UserPlus className="w-[18px] h-[18px]" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">Novo usuário</TooltipContent>
+              </Tooltip>
+            )}
+            <div className="flex justify-center"><ThemeToggle /></div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => signOut()}
+                  className="w-full h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <LogOut className="w-[18px] h-[18px]" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="text-xs">Sair</TooltipContent>
+            </Tooltip>
+          </div>
+          {showCreateUser && (
+            <Suspense fallback={null}>
+              <CreateUserModal open={showCreateUser} onOpenChange={setShowCreateUser} />
+            </Suspense>
+          )}
         </aside>
       </TooltipProvider>
     );
@@ -170,7 +265,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
 
       <aside
         className={cn(
-          'fixed md:relative z-40 md:z-auto h-full w-[min(85vw,320px)] md:w-[280px] shrink-0',
+          'fixed md:relative z-40 md:z-auto h-full w-[min(85vw,300px)] md:w-[280px] shrink-0',
           'border-r border-border bg-sidebar-background flex flex-col',
           'transition-transform duration-200 ease-out will-change-transform',
           !isHidden ? 'translate-x-0' : '-translate-x-full md:hidden',
@@ -178,33 +273,73 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
         role="navigation"
         aria-label="Conversas"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 h-12 border-b border-border/70 shrink-0">
+        {/* Brand header */}
+        <div className="flex items-center justify-between gap-2 px-3 h-12 border-b border-border/70 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)]" />
-            <span className="text-[13px] font-semibold text-foreground tracking-tight">Conversas</span>
-            {totalSessions > 0 && (
-              <span className="text-[10px] tabular-nums font-mono px-1.5 py-px rounded-sm bg-muted/60 text-muted-foreground/80 border border-border/60">
-                {totalSessions}
-              </span>
-            )}
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground shrink-0">
+              <Printer className="h-3.5 w-3.5" />
+            </div>
+            <div className="flex flex-col min-w-0 leading-none">
+              <span className="text-[12.5px] font-semibold tracking-tight text-foreground truncate">NBL Gráfica</span>
+              <span className="text-[9.5px] text-muted-foreground/70 mt-0.5">Insights Hub</span>
+            </div>
           </div>
           <button
             onClick={() => onModeChange(isMobile ? 'hidden' : 'rail')}
-            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            aria-label={isMobile ? 'Fechar conversas' : 'Recolher sidebar'}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+            aria-label={isMobile ? 'Fechar' : 'Recolher sidebar'}
             title={isMobile ? 'Fechar' : 'Recolher (Ctrl+B)'}
           >
             {isMobile ? <X className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
 
+        {/* App navigation row */}
+        <TooltipProvider delayDuration={200}>
+          <nav className="px-2 pt-2 pb-2 grid grid-cols-4 gap-1 shrink-0 border-b border-border/40">
+            {APP_NAV.map(item => {
+              const active = isNavActive(item.url, item.end);
+              return (
+                <Tooltip key={item.url}>
+                  <TooltipTrigger asChild>
+                    <NavLink
+                      to={item.url}
+                      end={item.end}
+                      className={cn(
+                        'relative h-9 rounded-md flex items-center justify-center transition-colors',
+                        active
+                          ? 'bg-primary/12 text-primary'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      )}
+                      aria-label={item.title}
+                    >
+                      <item.icon className="h-[16px] w-[16px]" />
+                    </NavLink>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">{item.title}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </nav>
+        </TooltipProvider>
+
+        {/* Section label */}
+        <div className="px-3 pt-3 pb-1 flex items-center gap-2 shrink-0">
+          <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-primary shadow-[0_0_8px_hsl(var(--primary)/0.6)]" />
+          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/80">Conversas</span>
+          {totalSessions > 0 && (
+            <span className="text-[10px] tabular-nums font-mono px-1.5 py-px rounded-sm bg-muted/60 text-muted-foreground/80 border border-border/60 ml-auto">
+              {totalSessions}
+            </span>
+          )}
+        </div>
+
         {/* New conversation — primary CTA */}
-        <div className="px-3 pt-3 pb-2 shrink-0">
+        <div className="px-3 pt-1.5 pb-2 shrink-0">
           <button
             onClick={onCreateSession}
             className={cn(
-              'group/cta relative flex items-center gap-2 w-full h-10 px-3 rounded-lg text-[13px] font-semibold',
+              'group/cta relative flex items-center gap-2 w-full h-9 px-3 rounded-lg text-[12.5px] font-semibold',
               'bg-gradient-to-b from-primary to-[hsl(var(--primary)/0.92)] text-primary-foreground',
               'border border-primary/40 shadow-[inset_0_1px_0_hsl(0_0%_100%/0.18),0_1px_2px_hsl(var(--primary)/0.35)]',
               'hover:from-primary hover:to-primary hover:shadow-[inset_0_1px_0_hsl(0_0%_100%/0.22),0_4px_14px_-2px_hsl(var(--primary)/0.45)]',
@@ -352,6 +487,32 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
             })
           )}
         </div>
+
+        {/* Footer — app actions */}
+        <div className="border-t border-border/70 px-2 py-1.5 shrink-0 flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1">
+            {isMaster && (
+              <button
+                onClick={() => setShowCreateUser(true)}
+                className="h-8 px-2 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted inline-flex items-center gap-1.5 transition-colors"
+                title="Novo usuário"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Novo usuário</span>
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <button
+              onClick={() => signOut()}
+              className="h-8 px-2 rounded-md text-[11px] font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 inline-flex items-center gap-1.5 transition-colors"
+              title="Sair"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       </aside>
 
       <DeleteSessionDialog
@@ -363,6 +524,12 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
           setPendingDelete(null);
         }}
       />
+
+      {showCreateUser && (
+        <Suspense fallback={null}>
+          <CreateUserModal open={showCreateUser} onOpenChange={setShowCreateUser} />
+        </Suspense>
+      )}
     </>
   );
 });
