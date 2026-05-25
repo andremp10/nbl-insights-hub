@@ -1,52 +1,83 @@
-# Resposta do agente não aparece após callback
+## Objetivo
+Tornar o módulo Chat mais **fluido** (microinterações, latência percebida, foco) e melhor para **pesquisar/analisar** (achar consultas passadas, reutilizar, refinar período, exportar). Sem mexer em lógica de backend, contratos com n8n ou views.
 
-## Diagnóstico
+Restrições fixas (memória do projeto):
+- Paleta: Charcoal & Ember — `#0d0d0d / #1a1a1a / #2a2a2a / #E8501A` (primary já é `#E8501A`).
+- Tipografia: manter as fontes atuais do sistema em toda a aplicação.
+- Estética: dense B2B / terminal, dark+light, flat (sem glassmorphism).
+- Layout: sidebar clássica (sessões à esquerda, conversa central).
 
-Verifiquei o último callback (assistant `a47dd844-…`) e está tudo correto no backend:
-- Edge function `nlq-callback` retornou `ok status=complete len=2178`
-- A linha em `chat_messages` está com `status=complete`, `content` com 2178 chars e `completed_at` preenchido
+## Escopo (somente front)
 
-Ou seja, o problema é **no client**: o evento Realtime de UPDATE não está atualizando a mensagem na tela. Encontrei duas causas prováveis:
+### 1. Composer (caixa de mensagem) — mais fluido e poderoso
+Arquivo: `src/pages/Chat.tsx` (subcomponente `ChatComposer`).
 
-### Causa 1 — `REPLICA IDENTITY` da tabela `chat_messages` está como DEFAULT
-```
-relreplident = 'd'  (default = só PK)
-```
-Com isso o Postgres só envia a PK no WAL para UPDATE. O Supabase Realtime entrega o evento, mas `payload.new` chega com campos faltando (sem `content`, `status`, `completed_at`). O handler em `useChatMessages.ts` faz `{ ...x, ...m }` — se `m.status` vier vazio/igual, nada muda visualmente, e `content` continua "" do estado `processing`.
+- **Chips de contexto** acima do textarea: período ativo (Mês atual / 30d / custom) + módulo (Financeiro / Pedidos / Tudo). Clicar abre um popover compacto para alternar. O valor escolhido entra no `context.date_range` / `active_module` do payload n8n.
+- **Slash commands** (`/financeiro`, `/pedidos`, `/receita`, `/despesas`) já existem em `CommandPalette.tsx` mas não estão integrados — plugar no composer com navegação ↑↓/Tab/Esc.
+- **Stop generation**: quando `sending=true`, o botão de envio vira "Parar" (Square icon) e dispara `clearErrors`/abort do request em curso (apenas UI; abort real fica para outra iteração se exigir backend).
+- **Auto-resize suave** com transição CSS (já temos `useAutoResizeTextarea`, podemos reaproveitar) e altura máxima ampliada para 240px com scroll interno discreto.
+- **Atalhos visíveis** discretamente no rodapé do composer: `⏎ enviar · ⇧⏎ nova linha · / comandos · ⌘K busca`.
 
-Para Realtime entregar a linha completa em UPDATE é necessário `REPLICA IDENTITY FULL`.
+### 2. Sidebar de sessões — pesquisa e organização
+Arquivo: `src/components/chat/SessionsSidebar.tsx`.
 
-### Causa 2 — Não há fallback se o evento Realtime se perder
-Se a conexão WebSocket cair entre o `bg_ack` e o callback do n8n (até ~2 min depois), a UI fica presa em "processing" para sempre (até o safety timer de 12 min marcar erro), mesmo com a resposta já salva no banco.
+- **Busca sticky no topo** com contador "X de Y" e realce do termo (`<mark>`) nos títulos.
+- **Filtro por período** (Hoje / 7d / 30d / Tudo) em pill row abaixo da busca, opera client-side sobre `groupedSessions`.
+- **Hover preview**: ao passar 400ms sobre uma sessão, um popover lateral mostra as últimas 2 perguntas/respostas (pré-carregadas via cache do React Query).
+- **Reordenar pinos** por drag-and-drop (dnd-kit; só dentro do grupo "Fixadas"). Persistir ordem em localStorage.
+- **Densidade**: ajustar `py` e separadores para reduzir altura ~15%, mais sessões visíveis sem perder legibilidade.
 
-## Plano
+### 3. Empty state — começar a análise mais rápido
+Arquivo: `src/components/chat/ChatEmptyState.tsx`.
 
-### 1. Migração SQL — `REPLICA IDENTITY FULL`
-```sql
-ALTER TABLE public.chat_messages REPLICA IDENTITY FULL;
-```
-Garante que UPDATE via Realtime traga o registro inteiro (`content`, `status`, `error_detail`, `completed_at`).
+- Trocar grade estática por três blocos progressivos:
+  1. **Continuar de onde parei**: cards das 3 últimas sessões com snippet da última resposta (1 linha).
+  2. **Modelos rápidos** (atuais 3) — mantém, mas com chip de "Última atualização" usando o ETL diário.
+  3. **Catálogo de perguntas** — sugestões atuais agrupadas por módulo (Financeiro / Pedidos / Clientes) em accordion compacto.
+- Barra de busca-de-perguntas no topo do empty state ("Buscar exemplos…") filtra os cards/chips em tempo real.
 
-### 2. Fallback de polling no client — `src/hooks/useChatMessages.ts`
-Quando uma mensagem assistant entra em `processing` (após o `bg_ack` ou após reload), além do `armSafetyTimer` (12 min → erro), agendar um **poller leve**:
+### 4. Área de mensagens — análise e ação
+Arquivo: `src/components/chat/ChatMessage.tsx`.
 
-- A cada 5s, fazer um SELECT pontual em `chat_messages` por `id = realAssistantId`
-- Se vier `status === 'complete'` ou `'error'`, atualizar o estado local e parar o poller
-- Parar também quando o Realtime UPDATE chegar antes (usar a mesma `clearSafetyTimer`/novo `clearPoller`)
-- Limite máximo: parar após `CLIENT_HARD_TIMEOUT_MS` (12 min) — o safety timer cuida do resto
+- **Ações inline na resposta** (mostradas no hover, hoje só "Copiar"):
+  - Copiar Markdown · Copiar como texto · Exportar tabela (CSV) quando a resposta contiver `|...|` markdown table · "Refinar" (preenche o composer com a pergunta original + sufixo `…detalhe por mês`).
+- **Follow-ups sugeridos**: 3 chips após cada resposta `complete` (placeholders heurísticos a partir do conteúdo — ex.: "Compare com o mês anterior", "Mostrar por categoria", "Top 10 apenas").
+- **Pesquisa dentro da conversa** (`Ctrl/⌘+F` capturado dentro do scroll-area): destaca matches e adiciona contador no header.
+- **Botão flutuante "Ir para o fim"** quando o usuário rolou para cima durante streaming (substitui o scroll forçado).
+- **Cronômetro do thinking** já existe; adicionar shimmer leve no skeleton e fade-in de 120ms quando o conteúdo chega.
 
-Isso cobre:
-- Perda de evento Realtime (rede instável, aba em background, suspensão do laptop)
-- Casos onde o INSERT Realtime chegou mas o UPDATE não
+### 5. Header da conversa — contexto sempre visível
+Mesmo arquivo `Chat.tsx`.
 
-### 3. Recuperação ao montar / trocar de sessão
-No `useEffect` que carrega histórico (já existe), além de `armSafetyTimer`, **iniciar o poller** para qualquer mensagem `processing` encontrada — assim, ao reabrir a aba, a UI converge mesmo sem evento Realtime.
+- Mostrar chip de **período ativo** (vindo do `DateFilterContext` global ou do composer chips) ao lado do título.
+- Ação **Renomear** inline com duplo clique no título; ação **Exportar conversa** (Markdown .md) no menu kebab.
+- Status (`Consultando / Conectado / Erro`) ganha tooltip com latência média da sessão.
 
-## Arquivos afetados
-- Nova migração SQL (REPLICA IDENTITY FULL em `chat_messages`)
-- `src/hooks/useChatMessages.ts` — adicionar `pollersRef`, funções `armPoller`/`clearPoller`, integrar nos 3 pontos (sendMessage após bg_ack, load history, realtime UPDATE handler limpa o poller)
+### 6. Microinterações e performance percebida
+Arquivo global: `src/index.css` (manter tokens, não inventar cores).
+
+- Transições padronizadas em 150ms ease-out (já está na memória, garantir uso consistente).
+- `prefers-reduced-motion`: desativa shimmer/animate-pulse pesado.
+- Estados focusvisible com `ring-primary/40` em todos os elementos interativos do chat.
+- Skeleton inicial do chat quando `messagesLoading` em vez do loader genérico.
+
+## Detalhes técnicos
+
+- Sem novas dependências críticas; usar `@dnd-kit/core` (já está no projeto se presente — checar; senão, usar HTML5 DnD nativo para escopo pequeno).
+- Reaproveitar `CommandPalette.tsx` no composer (já implementado).
+- Filtros de período/módulo enviados ao n8n via campo `context` já existente no payload (sem mudança de contrato).
+- Exportar CSV: parsing local do markdown da última tabela com regex simples — sem chamadas extras.
+- Persistência local: `localStorage` para ordem dos pinos, último período/módulo escolhido no composer, modo da sidebar (já existe).
+
+## Arquivos previstos
+- `src/pages/Chat.tsx` — composer enriquecido, chips de contexto, header expandido.
+- `src/components/chat/SessionsSidebar.tsx` — busca sticky + filtro período + hover preview + DnD pinos.
+- `src/components/chat/ChatEmptyState.tsx` — três blocos progressivos com busca.
+- `src/components/chat/ChatMessage.tsx` — ações inline, follow-ups, find-in-conversation.
+- `src/components/chat/CommandPalette.tsx` — integração efetiva no composer.
+- `src/index.css` — refinos de transição e reduced-motion (sem novos tokens de cor).
 
 ## Fora de escopo
-- Mudanças no agente n8n
-- Mudanças no `nlq-callback` (já está correto)
-- Refatoração visual do `ChatMessage.tsx` (separado)
+- Backend, edge functions, contratos com n8n, views Supabase.
+- Mudança de tipografia (mantida em todo o sistema).
+- Glassmorphism, gradientes pesados, novas paletas.

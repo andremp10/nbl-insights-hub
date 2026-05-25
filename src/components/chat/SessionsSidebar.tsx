@@ -50,6 +50,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
 }, ref) {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
+  const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
   const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -67,12 +68,27 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
   }), [mode, onModeChange]);
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return groupedSessions;
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
+    const now = Date.now();
+    const cutoff =
+      periodFilter === 'today' ? now - 86400000 :
+      periodFilter === '7d' ? now - 7 * 86400000 :
+      periodFilter === '30d' ? now - 30 * 86400000 :
+      0;
     return groupedSessions
-      .map(([g, items]) => [g, items.filter(s => (s.title || 'Nova conversa').toLowerCase().includes(q))] as [string, ChatSession[]])
+      .map(([g, items]) => {
+        let list = items;
+        if (q) list = list.filter(s => (s.title || 'Nova conversa').toLowerCase().includes(q));
+        if (cutoff > 0 && g !== 'Fixadas') {
+          list = list.filter(s => {
+            const ts = Date.parse(s.last_message_at || s.created_at);
+            return Number.isFinite(ts) && ts >= cutoff;
+          });
+        }
+        return [g, list] as [string, ChatSession[]];
+      })
       .filter(([, items]) => items.length > 0);
-  }, [query, groupedSessions]);
+  }, [query, groupedSessions, periodFilter]);
 
   const totalSessions = groupedSessions.reduce((acc, [, items]) => acc + items.length, 0);
   const filteredCount = filtered.reduce((acc, [, items]) => acc + items.length, 0);
@@ -244,6 +260,30 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
             </p>
           )}
         </div>
+
+        {/* Period filter pills */}
+        <div className="px-3 pb-2 shrink-0 flex items-center gap-1">
+          {([
+            { v: 'all', l: 'Tudo' },
+            { v: 'today', l: 'Hoje' },
+            { v: '7d', l: '7d' },
+            { v: '30d', l: '30d' },
+          ] as const).map(opt => (
+            <button
+              key={opt.v}
+              onClick={() => setPeriodFilter(opt.v)}
+              className={cn(
+                'flex-1 h-6 px-2 text-[10.5px] font-medium rounded-md transition-all duration-100',
+                periodFilter === opt.v
+                  ? 'bg-primary/15 text-primary border border-primary/30'
+                  : 'text-muted-foreground/70 hover:text-foreground hover:bg-muted/50 border border-transparent'
+              )}
+            >
+              {opt.l}
+            </button>
+          ))}
+        </div>
+
 
         {/* List */}
         <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-3">

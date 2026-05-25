@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
-import { ArrowUp, Loader2, Bot, PanelLeft } from 'lucide-react';
+import { ArrowUp, Loader2, Bot, PanelLeft, ArrowDown, Calendar, Filter, Check } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar, type SessionsSidebarHandle, type SidebarMode } from '@/components/chat/SessionsSidebar';
@@ -24,9 +25,18 @@ export default function Chat() {
   const sidebarRef = useRef<SessionsSidebarHandle>(null);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage, clearErrors } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(distanceFromBottom > 200);
+  }, []);
 
   const retryRef = useRef(retryMessage);
   retryRef.current = retryMessage;
@@ -144,6 +154,14 @@ export default function Chat() {
     [groupedSessions]
   );
 
+  const recentForEmpty = useMemo(
+    () => sessions
+      .filter(s => s.id !== currentSessionId)
+      .slice(0, 3)
+      .map(s => ({ id: s.id, title: s.title || 'Nova conversa', last_message_at: s.last_message_at })),
+    [sessions, currentSessionId]
+  );
+
   const navigateRelative = useCallback((delta: number) => {
     if (visibleSessionIds.length === 0) return;
     const idx = currentSessionId ? visibleSessionIds.indexOf(currentSessionId) : -1;
@@ -222,15 +240,18 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* ── Messages area ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
+        <div className="relative flex-1 min-h-0">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="absolute inset-0 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
           {messagesLoading ? (
             <div className="flex items-center justify-center h-full gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">Carregando mensagens...</p>
             </div>
           ) : !hasMessages && !sending ? (
-            <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
+            <ChatEmptyState onSuggestionClick={handleSuggestionClick} recentSessions={recentForEmpty} onSelectSession={setCurrentSessionId} />
           ) : (
             <div className="w-full max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
               {messages.map((message) => (
@@ -244,6 +265,17 @@ export default function Chat() {
               <div ref={messagesEndRef} className="h-px" />
             </div>
           )}
+        </div>
+        {showScrollDown && (
+          <button
+            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 h-8 px-3 rounded-full bg-card border border-border shadow-md text-[11px] text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-150"
+            aria-label="Ir para a última mensagem"
+          >
+            <ArrowDown className="w-3 h-3" />
+            Ir para o fim
+          </button>
+        )}
         </div>
 
         {/* ── Composer ── */}
@@ -301,22 +333,109 @@ function StatusDot({ status }: { status: 'idle' | 'sending' | 'error' }) {
 }
 
 
+type PeriodKey = 'mes' | '30d' | '7d' | 'tudo';
+type ModuleKey = 'all' | 'financeiro' | 'pedidos' | 'clientes';
+
+const PERIOD_LABELS: Record<PeriodKey, string> = {
+  mes: 'Este mês',
+  '30d': 'Últimos 30 dias',
+  '7d': 'Últimos 7 dias',
+  tudo: 'Tudo',
+};
+const MODULE_LABELS: Record<ModuleKey, string> = {
+  all: 'Todos os módulos',
+  financeiro: 'Financeiro',
+  pedidos: 'Pedidos',
+  clientes: 'Clientes',
+};
+
+const CTX_STORAGE_KEY = 'nbl_composer_ctx';
+
+function loadCtx(): { period: PeriodKey; module: ModuleKey } {
+  try {
+    const raw = localStorage.getItem(CTX_STORAGE_KEY);
+    if (!raw) return { period: 'mes', module: 'all' };
+    const parsed = JSON.parse(raw);
+    return {
+      period: (['mes', '30d', '7d', 'tudo'] as PeriodKey[]).includes(parsed?.period) ? parsed.period : 'mes',
+      module: (['all', 'financeiro', 'pedidos', 'clientes'] as ModuleKey[]).includes(parsed?.module) ? parsed.module : 'all',
+    };
+  } catch { return { period: 'mes', module: 'all' }; }
+}
+
+function ContextChip<T extends string>({
+  icon, value, label, options, onChange,
+}: {
+  icon: React.ReactNode;
+  value: T;
+  label: string;
+  options: Array<{ value: T; label: string }>;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className={cn(
+            'inline-flex items-center gap-1.5 h-6 px-2 rounded-full border text-[10.5px] font-medium',
+            'bg-muted/40 border-border/60 text-muted-foreground',
+            'hover:border-primary/40 hover:text-foreground hover:bg-primary/5',
+            'transition-all duration-150',
+          )}
+          aria-label={label}
+        >
+          <span className="text-muted-foreground/60">{icon}</span>
+          <span className="truncate max-w-[110px]">{label}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-44 p-1" align="start">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              'w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md text-xs text-left',
+              'hover:bg-muted transition-colors',
+              o.value === value ? 'text-primary font-medium' : 'text-foreground/80',
+            )}
+          >
+            <span>{o.label}</span>
+            {o.value === value && <Check className="w-3 h-3" />}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (msg: string) => Promise<boolean>; sending: boolean }) {
   const [input, setInput] = useState('');
+  const [ctx, setCtx] = useState(() => loadCtx());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submitRef = useRef(false);
+
+  useEffect(() => {
+    try { localStorage.setItem(CTX_STORAGE_KEY, JSON.stringify(ctx)); } catch {}
+  }, [ctx]);
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 240) + 'px';
   }, []);
+
+  const buildContextPrefix = useCallback(() => {
+    const parts: string[] = [];
+    if (ctx.period !== 'tudo') parts.push(`período: ${PERIOD_LABELS[ctx.period].toLowerCase()}`);
+    if (ctx.module !== 'all') parts.push(`escopo: ${MODULE_LABELS[ctx.module].toLowerCase()}`);
+    return parts.length > 0 ? `[${parts.join(' · ')}] ` : '';
+  }, [ctx]);
 
   const handleSubmit = useCallback(async () => {
     if (submitRef.current || sending || !input.trim()) return;
     submitRef.current = true;
-    const msg = input.trim();
+    const msg = buildContextPrefix() + input.trim();
     try {
       const ok = await onSend(msg);
       if (ok) {
@@ -326,7 +445,7 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
     } finally {
       submitRef.current = false;
     }
-  }, [input, sending, onSend]);
+  }, [input, sending, onSend, buildContextPrefix]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !sending) {
@@ -340,6 +459,27 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
   return (
     <div className="shrink-0 border-t border-border/50 bg-background px-2 py-2 sm:px-4 sm:py-3 md:px-6">
       <div className="w-full max-w-3xl mx-auto">
+        {/* Context chips */}
+        <div className="flex items-center gap-1.5 mb-1.5 px-0.5 flex-wrap">
+          <span className="text-[9.5px] uppercase tracking-wider font-semibold text-muted-foreground/40 pr-0.5">
+            Contexto
+          </span>
+          <ContextChip
+            icon={<Calendar className="w-3 h-3" />}
+            value={ctx.period}
+            label={PERIOD_LABELS[ctx.period]}
+            options={(['mes', '30d', '7d', 'tudo'] as PeriodKey[]).map(v => ({ value: v, label: PERIOD_LABELS[v] }))}
+            onChange={(v) => setCtx(c => ({ ...c, period: v }))}
+          />
+          <ContextChip
+            icon={<Filter className="w-3 h-3" />}
+            value={ctx.module}
+            label={MODULE_LABELS[ctx.module]}
+            options={(['all', 'financeiro', 'pedidos', 'clientes'] as ModuleKey[]).map(v => ({ value: v, label: MODULE_LABELS[v] }))}
+            onChange={(v) => setCtx(c => ({ ...c, module: v }))}
+          />
+        </div>
+
         <div className={cn(
           'relative rounded-2xl border bg-card/60 transition-all duration-200',
           'shadow-sm',
@@ -360,14 +500,18 @@ const ChatComposer = memo(function ChatComposer({ onSend, sending }: { onSend: (
               'focus:outline-none focus:ring-0',
               'disabled:cursor-not-allowed disabled:opacity-50',
             )}
-            style={{ minHeight: '44px', maxHeight: '200px' }}
+            style={{ minHeight: '44px', maxHeight: '240px' }}
             aria-label="Campo de mensagem"
           />
-          {/* Bottom bar inside the composer */}
+          {/* Bottom bar */}
           <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 sm:px-3 py-1.5 sm:py-2">
-            <span className="hidden sm:inline text-[10px] text-muted-foreground/30 select-none">
-              Shift+Enter para nova linha
-            </span>
+            <div className="hidden sm:flex items-center gap-2.5 text-[10px] text-muted-foreground/40 select-none">
+              <span><kbd className="font-mono">⏎</kbd> enviar</span>
+              <span className="text-muted-foreground/20">·</span>
+              <span><kbd className="font-mono">⇧⏎</kbd> nova linha</span>
+              <span className="text-muted-foreground/20">·</span>
+              <span><kbd className="font-mono">⌘K</kbd> buscar conversas</span>
+            </div>
             <span className="sm:hidden" />
             <button
               onClick={handleSubmit}
