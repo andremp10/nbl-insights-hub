@@ -8,7 +8,6 @@ import { useChatSessions } from '@/hooks/useChatSessions';
 import { useChatMessages } from '@/hooks/useChatMessages';
 import { useChatShortcuts } from '@/hooks/useChatShortcuts';
 import { Badge } from '@/components/ui/badge';
-import { SidebarTrigger } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 
 const SIDEBAR_MODE_KEY = 'nbl_sidebar_mode';
