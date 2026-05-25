@@ -1,83 +1,52 @@
-## Objetivo
-Tornar o módulo Chat mais **fluido** (microinterações, latência percebida, foco) e melhor para **pesquisar/analisar** (achar consultas passadas, reutilizar, refinar período, exportar). Sem mexer em lógica de backend, contratos com n8n ou views.
+## Problema
 
-Restrições fixas (memória do projeto):
-- Paleta: Charcoal & Ember — `#0d0d0d / #1a1a1a / #2a2a2a / #E8501A` (primary já é `#E8501A`).
-- Tipografia: manter as fontes atuais do sistema em toda a aplicação.
-- Estética: dense B2B / terminal, dark+light, flat (sem glassmorphism).
-- Layout: sidebar clássica (sessões à esquerda, conversa central).
+1. **Sidebar dupla**: hoje a tela `/chat` mostra duas barras laterais em sequência — a `AppSidebar` (rail com hover do app inteiro) + a `SessionsSidebar` (conversas). Visualmente parece "duas bordas", consome largura e confunde.
+2. **Tabelas com scroll horizontal constante**: nas respostas do assistente, tabelas com 4+ colunas (ex.: "Análise comparativa por cliente") forçam o usuário a arrastar para os lados o tempo todo. Causa: células com `whitespace-nowrap` em todas as colunas numéricas + `max-w-[460px]` em texto + padding generoso, dentro de um container de ~720px.
 
-## Escopo (somente front)
+## Solução — Sidebar única no /chat
 
-### 1. Composer (caixa de mensagem) — mais fluido e poderoso
-Arquivo: `src/pages/Chat.tsx` (subcomponente `ChatComposer`).
+Na rota `/chat`, esconder a `AppSidebar` global e fazer da `SessionsSidebar` a **única** sidebar, incorporando dentro dela:
 
-- **Chips de contexto** acima do textarea: período ativo (Mês atual / 30d / custom) + módulo (Financeiro / Pedidos / Tudo). Clicar abre um popover compacto para alternar. O valor escolhido entra no `context.date_range` / `active_module` do payload n8n.
-- **Slash commands** (`/financeiro`, `/pedidos`, `/receita`, `/despesas`) já existem em `CommandPalette.tsx` mas não estão integrados — plugar no composer com navegação ↑↓/Tab/Esc.
-- **Stop generation**: quando `sending=true`, o botão de envio vira "Parar" (Square icon) e dispara `clearErrors`/abort do request em curso (apenas UI; abort real fica para outra iteração se exigir backend).
-- **Auto-resize suave** com transição CSS (já temos `useAutoResizeTextarea`, podemos reaproveitar) e altura máxima ampliada para 240px com scroll interno discreto.
-- **Atalhos visíveis** discretamente no rodapé do composer: `⏎ enviar · ⇧⏎ nova linha · / comandos · ⌘K busca`.
+- **Header da marca** (logo NBL + "Insights Hub") no topo
+- **Mini-nav de módulos** logo abaixo do header: 4 ícones horizontais (Home, Assistente, Financeiro, Pedidos) com tooltip e indicador do ativo. Compacto, uma linha só (~40px de altura).
+- **CTA Nova conversa** (como hoje)
+- **Busca + filtros de período** (como hoje)
+- **Lista de sessões agrupadas** (como hoje)
+- **Footer**: ThemeToggle + Sair + (Master) Novo usuário — pegando do `SidebarInner` atual
 
-### 2. Sidebar de sessões — pesquisa e organização
-Arquivo: `src/components/chat/SessionsSidebar.tsx`.
+No modo `rail` (recolhido) e no modo `expanded`, a barra continua sendo única. Largura: 280px expandida, 56px rail (igual hoje).
 
-- **Busca sticky no topo** com contador "X de Y" e realce do termo (`<mark>`) nos títulos.
-- **Filtro por período** (Hoje / 7d / 30d / Tudo) em pill row abaixo da busca, opera client-side sobre `groupedSessions`.
-- **Hover preview**: ao passar 400ms sobre uma sessão, um popover lateral mostra as últimas 2 perguntas/respostas (pré-carregadas via cache do React Query).
-- **Reordenar pinos** por drag-and-drop (dnd-kit; só dentro do grupo "Fixadas"). Persistir ordem em localStorage.
-- **Densidade**: ajustar `py` e separadores para reduzir altura ~15%, mais sessões visíveis sem perder legibilidade.
+Demais rotas (`/`, `/financeiro`, `/pedidos`) seguem usando a `AppSidebar` normal — só o `/chat` tem essa sidebar dedicada/unificada.
 
-### 3. Empty state — começar a análise mais rápido
-Arquivo: `src/components/chat/ChatEmptyState.tsx`.
+### Implementação técnica
+- `AppLayout.tsx`: detectar `pathname === '/chat'` via `useLocation` e, nesse caso, **não renderizar** `<AppSidebar />` (deixar a página de chat ser dona da barra). Manter `MobileTopBar`.
+- `SessionsSidebar.tsx`:
+  - Adicionar no topo: logo + título "NBL Gráfica / Conversas"
+  - Adicionar uma linha de 4 ícones de navegação (NavLink p/ `/`, `/chat`, `/financeiro`, `/pedidos`) com active state em primary
+  - Adicionar footer com ThemeToggle, Sair, Novo usuário (reaproveitar lógica do `SidebarInner`)
+  - No modo `rail`: continuar com a coluna vertical de ícones, mas incluir os 4 módulos no topo (antes dos atalhos de conversa)
+- `Chat.tsx`: remover o `SidebarTrigger` mobile que apontava para a `AppSidebar` (não existe mais nessa rota); mobile usará o próprio botão de abrir conversas que já temos. Adicionar trigger mobile que abre essa sidebar única.
+- Mobile (`< 768px`): a sidebar única vira sheet/drawer com tudo dentro (nav + conversas + footer).
 
-- Trocar grade estática por três blocos progressivos:
-  1. **Continuar de onde parei**: cards das 3 últimas sessões com snippet da última resposta (1 linha).
-  2. **Modelos rápidos** (atuais 3) — mantém, mas com chip de "Última atualização" usando o ETL diário.
-  3. **Catálogo de perguntas** — sugestões atuais agrupadas por módulo (Financeiro / Pedidos / Clientes) em accordion compacto.
-- Barra de busca-de-perguntas no topo do empty state ("Buscar exemplos…") filtra os cards/chips em tempo real.
+## Solução — Tabelas que cabem no container
 
-### 4. Área de mensagens — análise e ação
-Arquivo: `src/components/chat/ChatMessage.tsx`.
+Em `ChatMessage.tsx` (componentes `td`/`th`/`table`):
 
-- **Ações inline na resposta** (mostradas no hover, hoje só "Copiar"):
-  - Copiar Markdown · Copiar como texto · Exportar tabela (CSV) quando a resposta contiver `|...|` markdown table · "Refinar" (preenche o composer com a pergunta original + sufixo `…detalhe por mês`).
-- **Follow-ups sugeridos**: 3 chips após cada resposta `complete` (placeholders heurísticos a partir do conteúdo — ex.: "Compare com o mês anterior", "Mostrar por categoria", "Top 10 apenas").
-- **Pesquisa dentro da conversa** (`Ctrl/⌘+F` capturado dentro do scroll-area): destaca matches e adiciona contador no header.
-- **Botão flutuante "Ir para o fim"** quando o usuário rolou para cima durante streaming (substitui o scroll forçado).
-- **Cronômetro do thinking** já existe; adicionar shimmer leve no skeleton e fade-in de 120ms quando o conteúdo chega.
-
-### 5. Header da conversa — contexto sempre visível
-Mesmo arquivo `Chat.tsx`.
-
-- Mostrar chip de **período ativo** (vindo do `DateFilterContext` global ou do composer chips) ao lado do título.
-- Ação **Renomear** inline com duplo clique no título; ação **Exportar conversa** (Markdown .md) no menu kebab.
-- Status (`Consultando / Conectado / Erro`) ganha tooltip com latência média da sessão.
-
-### 6. Microinterações e performance percebida
-Arquivo global: `src/index.css` (manter tokens, não inventar cores).
-
-- Transições padronizadas em 150ms ease-out (já está na memória, garantir uso consistente).
-- `prefers-reduced-motion`: desativa shimmer/animate-pulse pesado.
-- Estados focusvisible com `ring-primary/40` em todos os elementos interativos do chat.
-- Skeleton inicial do chat quando `messagesLoading` em vez do loader genérico.
-
-## Detalhes técnicos
-
-- Sem novas dependências críticas; usar `@dnd-kit/core` (já está no projeto se presente — checar; senão, usar HTML5 DnD nativo para escopo pequeno).
-- Reaproveitar `CommandPalette.tsx` no composer (já implementado).
-- Filtros de período/módulo enviados ao n8n via campo `context` já existente no payload (sem mudança de contrato).
-- Exportar CSV: parsing local do markdown da última tabela com regex simples — sem chamadas extras.
-- Persistência local: `localStorage` para ordem dos pinos, último período/módulo escolhido no composer, modo da sidebar (já existe).
-
-## Arquivos previstos
-- `src/pages/Chat.tsx` — composer enriquecido, chips de contexto, header expandido.
-- `src/components/chat/SessionsSidebar.tsx` — busca sticky + filtro período + hover preview + DnD pinos.
-- `src/components/chat/ChatEmptyState.tsx` — três blocos progressivos com busca.
-- `src/components/chat/ChatMessage.tsx` — ações inline, follow-ups, find-in-conversation.
-- `src/components/chat/CommandPalette.tsx` — integração efetiva no composer.
-- `src/index.css` — refinos de transição e reduced-motion (sem novos tokens de cor).
+- **Reduzir densidade**: padding `px-2 py-1.5`, fonte `text-[12px]` no body, header `text-[10px]`
+- **Permitir quebra de linha em texto**: remover `max-w-[460px]` e usar `break-words` em todas as células de texto; manter `tabular-nums` apenas em células numéricas mas **sem** `whitespace-nowrap` quando o número for curto — para R$ longos manter `whitespace-nowrap`, e sim, só nelas.
+- **Detecção mais inteligente de "numeric short"**: nowrap só quando string ≤ 12 chars; senão deixa quebrar.
+- **Layout fixo opcional**: usar `table-fixed` quando houver >4 colunas para forçar distribuição equilibrada.
+- **Tabela full-bleed dentro da conversa**: hoje o container é `max-w-3xl`. Para tabelas, deixar a tabela ocupar todo o width disponível do painel de chat (até `max-w-5xl` ou `100%`) — usar `chat-table-wrapper` com `-mx-2 sm:-mx-4 md:-mx-6` para expandir além do padding e ganhar ~120px extras antes de precisar de scroll. Quando ainda assim transbordar, mostra scroll horizontal nativo mas sem ser o caso comum.
+- **Indicador visual de scroll** (sombras laterais com `mask-image`) só quando houver overflow real, para não dar a falsa impressão de "preciso arrastar".
 
 ## Fora de escopo
-- Backend, edge functions, contratos com n8n, views Supabase.
-- Mudança de tipografia (mantida em todo o sistema).
-- Glassmorphism, gradientes pesados, novas paletas.
+- Mudanças em backend, n8n ou views
+- Redesign de outras páginas
+- Mudança de paleta/tipografia
+
+## Arquivos afetados
+- `src/components/layout/AppLayout.tsx`
+- `src/components/chat/SessionsSidebar.tsx`
+- `src/pages/Chat.tsx`
+- `src/components/chat/ChatMessage.tsx`
+- `src/index.css` (utility de mask-shadow para tabelas, se necessário)
