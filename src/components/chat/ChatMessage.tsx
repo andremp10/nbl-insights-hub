@@ -163,8 +163,8 @@ function SectionLabel({ children }: { children: any }) {
 /* ── Markdown components ── */
 const markdownComponents = {
   table: ({ children, ...props }: any) => (
-    <div className="chat-table-wrapper my-3 w-full overflow-x-auto rounded-sm border border-border scrollbar-thin">
-      <table className="w-full text-sm border-collapse" {...props}>{children}</table>
+    <div className="chat-table-wrapper my-3 -mx-2 sm:-mx-4 md:-mx-6 w-[calc(100%+1rem)] sm:w-[calc(100%+2rem)] md:w-[calc(100%+3rem)] overflow-x-auto rounded-sm border border-border scrollbar-thin">
+      <table className="w-full text-[12px] border-collapse table-auto" {...props}>{children}</table>
     </div>
   ),
   thead: ({ children, ...props }: any) => (
@@ -177,21 +177,22 @@ const markdownComponents = {
     <tr className="hover:bg-muted/20 transition-colors" {...props}>{children}</tr>
   ),
   th: ({ children, ...props }: any) => (
-    <th className="h-8 px-3 text-left align-middle font-semibold text-muted-foreground text-[11px] uppercase tracking-wider whitespace-nowrap" {...props}>{children}</th>
+    <th className="h-7 px-2 text-left align-middle font-semibold text-muted-foreground text-[10px] uppercase tracking-wider" {...props}>{children}</th>
   ),
   td: ({ children, ...props }: any) => {
     const text = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : '';
     const textStr = String(text);
     const numeric = isNumericCell(textStr);
+    // Só impede quebra em números curtos (R$ longos cabem ok com quebra opcional)
+    const shouldNowrap = numeric && textStr.trim().length <= 14;
     return (
       <td
         className={cn(
-          "px-3 py-2 align-middle text-sm",
+          "px-2 py-1.5 align-middle text-[12px] leading-snug",
           numeric
-            ? "text-right font-mono tabular-nums whitespace-nowrap text-foreground"
-            : "max-w-[460px] whitespace-normal break-words text-foreground/90"
+            ? cn("text-right font-mono tabular-nums text-foreground", shouldNowrap && "whitespace-nowrap")
+            : "whitespace-normal break-words text-foreground/90"
         )}
-        title={!numeric && textStr ? textStr : undefined}
         {...props}
       >
         {children}
