@@ -50,6 +50,7 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
 }, ref) {
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
+  const [periodFilter, setPeriodFilter] = useState<'all' | 'today' | '7d' | '30d'>('all');
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
   const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
