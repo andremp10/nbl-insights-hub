@@ -459,10 +459,8 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
               if (!isCollapsible) {
                 return (
                   <div key={groupLabel} className={cn('mb-3', groupIdx > 0 && 'pt-3 mt-1 border-t border-border/40')}>
-                    <div className="px-3 pt-0.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70 flex items-center gap-1.5">
-                      {groupLabel === 'Fixadas' && <span className="text-primary">★</span>}
-                      <span>{groupLabel}</span>
-                      <span className="font-mono text-muted-foreground/50">· {items.length}</span>
+                    <div className="px-3 pt-0.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60">
+                      {groupLabel}
                     </div>
                     {content}
                   </div>
