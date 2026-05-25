@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import type { ChatMessage as ChatMessageType } from '@/hooks/useChatMessages';
-import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info, Clock, Check as CheckIcon } from 'lucide-react';
+import { AlertTriangle, RotateCcw, Copy, Check, Calendar, Info, Clock, Check as CheckIcon, FileDown, Sparkles } from 'lucide-react';
 import { AgentSteps } from './AgentSteps';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
