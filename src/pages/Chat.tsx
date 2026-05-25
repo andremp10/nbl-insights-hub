@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
-import { ArrowUp, Loader2, Bot, PanelLeft } from 'lucide-react';
+import { ArrowUp, Loader2, Bot, PanelLeft, ArrowDown, Calendar, Filter, Check } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { SessionsSidebar, type SessionsSidebarHandle, type SidebarMode } from '@/components/chat/SessionsSidebar';
