@@ -25,9 +25,18 @@ export default function Chat() {
   const sidebarRef = useRef<SessionsSidebarHandle>(null);
   const { messages, loading: messagesLoading, sending, sendMessage, retryMessage, clearErrors } = useChatMessages(currentSessionId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const pendingHandled = useRef(false);
   const pendingToSendRef = useRef<string | null>(null);
   const pendingAutoTitleRef = useRef<string | null>(null);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollDown(distanceFromBottom > 200);
+  }, []);
 
   const retryRef = useRef(retryMessage);
   retryRef.current = retryMessage;
