@@ -261,6 +261,30 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
           )}
         </div>
 
+        {/* Period filter pills */}
+        <div className="px-3 pb-2 shrink-0 flex items-center gap-1">
+          {([
+            { v: 'all', l: 'Tudo' },
+            { v: 'today', l: 'Hoje' },
+            { v: '7d', l: '7d' },
+            { v: '30d', l: '30d' },
+          ] as const).map(opt => (
+            <button
+              key={opt.v}
+              onClick={() => setPeriodFilter(opt.v)}
+              className={cn(
+                'flex-1 h-6 px-2 text-[10.5px] font-medium rounded-md transition-all duration-100',
+                periodFilter === opt.v
+                  ? 'bg-primary/15 text-primary border border-primary/30'
+                  : 'text-muted-foreground/70 hover:text-foreground hover:bg-muted/50 border border-transparent'
+              )}
+            >
+              {opt.l}
+            </button>
+          ))}
+        </div>
+
+
         {/* List */}
         <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-3">
           {loading ? (
