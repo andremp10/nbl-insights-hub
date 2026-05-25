@@ -1,52 +1,41 @@
 ## Problema
 
-1. **Sidebar dupla**: hoje a tela `/chat` mostra duas barras laterais em sequência — a `AppSidebar` (rail com hover do app inteiro) + a `SessionsSidebar` (conversas). Visualmente parece "duas bordas", consome largura e confunde.
-2. **Tabelas com scroll horizontal constante**: nas respostas do assistente, tabelas com 4+ colunas (ex.: "Análise comparativa por cliente") forçam o usuário a arrastar para os lados o tempo todo. Causa: células com `whitespace-nowrap` em todas as colunas numéricas + `max-w-[460px]` em texto + padding generoso, dentro de um container de ~720px.
+No modo **rail** (sidebar recolhida) da tela `/chat`, hoje aparecem, de cima pra baixo:
 
-## Solução — Sidebar única no /chat
+1. Logo NBL
+2. 4 ícones de navegação (Home / Assistente / Financeiro / Pedidos)
+3. Botão expandir
+4. Botão "+" laranja (nova conversa)
+5. Botão buscar
+6. **Lista vertical de até 8 ícones de balão** representando conversas recentes ← causa principal da poluição
+7. Footer (novo usuário, tema, sair)
 
-Na rota `/chat`, esconder a `AppSidebar` global e fazer da `SessionsSidebar` a **única** sidebar, incorporando dentro dela:
+A coluna de 8 balõezinhos enfileirados (mais o ativo destacado) cria uma "fileira de cartas" sem nome, todos iguais, que polui visualmente sem agregar informação — o usuário não consegue distinguir uma conversa da outra só pelo ícone.
 
-- **Header da marca** (logo NBL + "Insights Hub") no topo
-- **Mini-nav de módulos** logo abaixo do header: 4 ícones horizontais (Home, Assistente, Financeiro, Pedidos) com tooltip e indicador do ativo. Compacto, uma linha só (~40px de altura).
-- **CTA Nova conversa** (como hoje)
-- **Busca + filtros de período** (como hoje)
-- **Lista de sessões agrupadas** (como hoje)
-- **Footer**: ThemeToggle + Sair + (Master) Novo usuário — pegando do `SidebarInner` atual
+## Solução — Rail enxuto
 
-No modo `rail` (recolhido) e no modo `expanded`, a barra continua sendo única. Largura: 280px expandida, 56px rail (igual hoje).
+Remover **completamente** a lista de conversas recentes do modo rail. Quem precisa ver conversas expande a sidebar (Ctrl+B ou clica no botão expandir, que já existe no topo e também no header do chat).
 
-Demais rotas (`/`, `/financeiro`, `/pedidos`) seguem usando a `AppSidebar` normal — só o `/chat` tem essa sidebar dedicada/unificada.
+Rail novo (de cima pra baixo):
 
-### Implementação técnica
-- `AppLayout.tsx`: detectar `pathname === '/chat'` via `useLocation` e, nesse caso, **não renderizar** `<AppSidebar />` (deixar a página de chat ser dona da barra). Manter `MobileTopBar`.
-- `SessionsSidebar.tsx`:
-  - Adicionar no topo: logo + título "NBL Gráfica / Conversas"
-  - Adicionar uma linha de 4 ícones de navegação (NavLink p/ `/`, `/chat`, `/financeiro`, `/pedidos`) com active state em primary
-  - Adicionar footer com ThemeToggle, Sair, Novo usuário (reaproveitar lógica do `SidebarInner`)
-  - No modo `rail`: continuar com a coluna vertical de ícones, mas incluir os 4 módulos no topo (antes dos atalhos de conversa)
-- `Chat.tsx`: remover o `SidebarTrigger` mobile que apontava para a `AppSidebar` (não existe mais nessa rota); mobile usará o próprio botão de abrir conversas que já temos. Adicionar trigger mobile que abre essa sidebar única.
-- Mobile (`< 768px`): a sidebar única vira sheet/drawer com tudo dentro (nav + conversas + footer).
+1. Logo NBL
+2. 4 ícones de navegação do app
+3. Separador
+4. Botão "+" nova conversa (CTA primário)
+5. Botão expandir conversas (com tooltip "Ver conversas · Ctrl+B")
+6. (sem busca separada — a busca está dentro do painel expandido; o atalho Ctrl+K já abre)
+7. `flex-1` vazio empurra footer pra baixo
+8. Footer: tema + sair (e novo usuário se master) — **apenas ícones**, sem texto
 
-## Solução — Tabelas que cabem no container
-
-Em `ChatMessage.tsx` (componentes `td`/`th`/`table`):
-
-- **Reduzir densidade**: padding `px-2 py-1.5`, fonte `text-[12px]` no body, header `text-[10px]`
-- **Permitir quebra de linha em texto**: remover `max-w-[460px]` e usar `break-words` em todas as células de texto; manter `tabular-nums` apenas em células numéricas mas **sem** `whitespace-nowrap` quando o número for curto — para R$ longos manter `whitespace-nowrap`, e sim, só nelas.
-- **Detecção mais inteligente de "numeric short"**: nowrap só quando string ≤ 12 chars; senão deixa quebrar.
-- **Layout fixo opcional**: usar `table-fixed` quando houver >4 colunas para forçar distribuição equilibrada.
-- **Tabela full-bleed dentro da conversa**: hoje o container é `max-w-3xl`. Para tabelas, deixar a tabela ocupar todo o width disponível do painel de chat (até `max-w-5xl` ou `100%`) — usar `chat-table-wrapper` com `-mx-2 sm:-mx-4 md:-mx-6` para expandir além do padding e ganhar ~120px extras antes de precisar de scroll. Quando ainda assim transbordar, mostra scroll horizontal nativo mas sem ser o caso comum.
-- **Indicador visual de scroll** (sombras laterais com `mask-image`) só quando houver overflow real, para não dar a falsa impressão de "preciso arrastar".
+Ganhos:
+- ~60% menos elementos na coluna
+- Hierarquia clara: marca → navegar → criar/expandir → conta
+- Sem repetição visual de balões idênticos
 
 ## Fora de escopo
-- Mudanças em backend, n8n ou views
-- Redesign de outras páginas
-- Mudança de paleta/tipografia
+- Modo expandido (já está limpo após o último ajuste)
+- Modo mobile
+- Sidebar de outras páginas
 
 ## Arquivos afetados
-- `src/components/layout/AppLayout.tsx`
-- `src/components/chat/SessionsSidebar.tsx`
-- `src/pages/Chat.tsx`
-- `src/components/chat/ChatMessage.tsx`
-- `src/index.css` (utility de mask-shadow para tabelas, se necessário)
+- `src/components/chat/SessionsSidebar.tsx` — bloco do `if (mode === 'rail')`: remover loop de `recent.map(...)` e o botão de busca redundante; manter brand, nav, "+" e expandir, footer
