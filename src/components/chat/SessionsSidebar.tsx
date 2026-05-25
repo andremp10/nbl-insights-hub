@@ -68,12 +68,27 @@ export const SessionsSidebar = forwardRef<SessionsSidebarHandle, Props>(function
   }), [mode, onModeChange]);
 
   const filtered = useMemo(() => {
-    if (!query.trim()) return groupedSessions;
-    const q = query.toLowerCase();
+    const q = query.trim().toLowerCase();
+    const now = Date.now();
+    const cutoff =
+      periodFilter === 'today' ? now - 86400000 :
+      periodFilter === '7d' ? now - 7 * 86400000 :
+      periodFilter === '30d' ? now - 30 * 86400000 :
+      0;
     return groupedSessions
-      .map(([g, items]) => [g, items.filter(s => (s.title || 'Nova conversa').toLowerCase().includes(q))] as [string, ChatSession[]])
+      .map(([g, items]) => {
+        let list = items;
+        if (q) list = list.filter(s => (s.title || 'Nova conversa').toLowerCase().includes(q));
+        if (cutoff > 0 && g !== 'Fixadas') {
+          list = list.filter(s => {
+            const ts = Date.parse(s.last_message_at || s.created_at);
+            return Number.isFinite(ts) && ts >= cutoff;
+          });
+        }
+        return [g, list] as [string, ChatSession[]];
+      })
       .filter(([, items]) => items.length > 0);
-  }, [query, groupedSessions]);
+  }, [query, groupedSessions, periodFilter]);
 
   const totalSessions = groupedSessions.reduce((acc, [, items]) => acc + items.length, 0);
   const filteredCount = filtered.reduce((acc, [, items]) => acc + items.length, 0);
