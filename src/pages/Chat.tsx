@@ -223,15 +223,18 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* ── Messages area ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
+        <div className="relative flex-1 min-h-0">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="absolute inset-0 overflow-y-auto scrollbar-thin scroll-smooth" role="log" aria-live="polite">
           {messagesLoading ? (
             <div className="flex items-center justify-center h-full gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">Carregando mensagens...</p>
             </div>
           ) : !hasMessages && !sending ? (
-            <ChatEmptyState onSuggestionClick={handleSuggestionClick} />
+            <ChatEmptyState onSuggestionClick={handleSuggestionClick} recentSessions={recentForEmpty} onSelectSession={setCurrentSessionId} />
           ) : (
             <div className="w-full max-w-3xl mx-auto px-4 md:px-6 py-6 space-y-6">
               {messages.map((message) => (
@@ -245,6 +248,17 @@ export default function Chat() {
               <div ref={messagesEndRef} className="h-px" />
             </div>
           )}
+        </div>
+        {showScrollDown && (
+          <button
+            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 h-8 px-3 rounded-full bg-card border border-border shadow-md text-[11px] text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-150"
+            aria-label="Ir para a última mensagem"
+          >
+            <ArrowDown className="w-3 h-3" />
+            Ir para o fim
+          </button>
+        )}
         </div>
 
         {/* ── Composer ── */}
